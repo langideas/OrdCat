@@ -1,2 +1,0 @@
-ALTER TABLE model_providers ADD COLUMN temperature REAL NOT NULL DEFAULT 0.2;
-ALTER TABLE model_providers ADD COLUMN context_window INTEGER NOT NULL DEFAULT 32768;

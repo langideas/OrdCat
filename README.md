@@ -1,42 +1,33 @@
-# OrdiBot
+# OrdCat 🐈‍⬛
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+**A cozy cat in your island & desktop. Less burden, low power, always with you.**
+窝在灵动岛与桌面角落的小黑猫：低能耗、零负担，安静陪你每一天。
 
-**Your Desktop AI Companion** — a compact desktop context assistant and an expandable workspace for hosted computer Agents. This is the original OrdinConn repository, renamed without replacing its Git history.
+## v0.1（macOS 桌面端 · Phase 1 子集）
 
-OrdiBot uses Tauri v2, Rust, React and TypeScript. The app starts as a small edge-docked character. Click it to expand Chat; collapse Chat to return to the remembered left/right edge. Hidden remains a separate tray action. The dark floating Chat window has a narrow navigation rail, a small original 2D character, and one runtime shared with the larger Agent workspace. Financial dashboards, collectors, trading and Android automation are retired from the active desktop application; their historical assets remain recoverable.
+- 从屏幕**右侧边探头**的小黑猫，一只爪子扒在屏幕边缘，可上下拖动位置
+- **眼睛跟着鼠标转**（仅在鼠标移动时刷新，静止时零重绘）
+- **复制文字 → 竖起耳朵 + “!”** 并弹出气泡，可一键让小猫帮你看看（报错 / 代码 / 普通文字）
+- 气泡窗口**不抢焦点**（non-activating），点击小猫即可聊天，Esc 收起
+- **BYOM**：本地 Ollama、DeepSeek、OpenAI、Gemini、Claude 或任意 OpenAI 兼容接口；API Key 存在系统钥匙串
+- 系统语音播报（可关）、连续用屏 2 小时 / 凌晨熬夜温柔提醒、陪伴天数记录
+- 隐私：不截屏、不录音；忽略密码管理器写入剪贴板的内容
 
-- **Chat:** owner-configured OpenAI-compatible endpoint through Model Gateway; multi-turn text, streaming, cancellation, bounded responses and explicit errors. No credential-free demo answers.
-- **Context:** optional lightweight app/window-title reminders (20-second throttle, deduplication and browser/editor filter). Clicking a reminder attaches only that metadata. Attach copied text on demand, actively acquire metadata, or capture and confirm a screenshot. No background screen, keyboard or clipboard monitoring. Vision must be enabled for screenshot requests.
-- **Agent:** an OpenAI hosted Agents API adapter with provider-driven task history, records, results, origin approvals and cancellation. Meta Muse and Grok Bot are clearly marked external entries, with no verified native task API integration.
-- **Local controls:** floating window, pin preference, mode/geometry restore, tray/menu entry and Command/Ctrl + Shift + Space when registration succeeds.
+## 安装
 
-G6.1 implements immediate Simplified Chinese / English UI switching, five font scales and selectable dark appearance. Native acceptance is tracked separately in the current status. The owner has deferred production API acceptance until credentials are configured locally. Adapter implementation and local tests do **not** establish live service availability. macOS is the first local delivery target; Windows requires independent native build and interactive acceptance. See [current status](docs/CURRENT_STATUS.md).
+到 [Releases](../../releases/latest) 下载 `OrdCat-macOS.zip`，安装说明见发布页。
 
-## Run locally
+## 自己编译
 
-Requirements: Node.js 22+, Rust stable, and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for the target platform. macOS requires Xcode command line tools; Windows requires MSVC and WebView2.
-
-```sh
-npm ci
-npm run desktop:dev
+```bash
+./build.sh   # 需要 macOS + Xcode Command Line Tools
+open build/OrdCat.app
 ```
 
-Open **Models**, configure Provider, Base URL, Model ID and vision support, and enter the key locally. Keys use the operating system credential store and are never saved in React storage or the JSON history file. Ordinary responses default to Concise; Normal and Detailed are selectable. Remote Agents use a separate OpenAI key and require compatible account permissions and quota.
+## Roadmap
 
-```sh
-npm test
-npm run typecheck
-cargo test --locked
-npm run desktop:build
-```
+- v0.2：单窗口陪看（ScreenCaptureKit + 1~2fps 差分抽帧）、语音输入与 150ms 打断（Silero-VAD + AEC）
+- v0.3：iOS 灵动岛（Live Activities）
+- Phase 2：社交广场、助手串门、装扮家园、陪伴等级、Pro 徽章
 
-The supported build wrapper creates a local macOS ad-hoc signed `OrdiBot.app` and records source/executable fingerprints. No Apple Developer account, notarization or commercial signing is required. On Windows it builds an NSIS installer. [Build details](docs/MACOS_BUILD.md).
-
-The new `ai.ordibot.desktop` data/credential namespaces are separate from the preserved `ai.ordinconn.desktop` legacy store. Old financial history and provider keys are not automatically imported. Screenshot pixels are transient; copied text deliberately sent in Chat is part of the local conversation history. [Migration audit](docs/ordibot/MIGRATION.md).
-
-## Project records
-
-[Product baseline](docs/PRODUCT_BASELINE.md) · [Architecture](docs/ARCHITECTURE.md) · [Roadmap](docs/open-source/ROADMAP.md) · [Provider verification](docs/ordibot/PROVIDERS.md) · [Security](docs/open-source/SECURITY_AND_PRIVACY.md) · [Build in Public](docs/open-source/BUILD_IN_PUBLIC.md) · [Issue #17](https://github.com/Btkkgo/OrdiBot/issues/17)
-
-Historical OrdinConn documentation is preserved under `docs/legacy/ordinconn-20261012/` and Git history. It does not describe the active OrdiBot product.
+产品需求见 `docs/OrdCat_PRD_v4.0.pdf`。

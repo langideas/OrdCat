@@ -1,5 +1,0 @@
-blank_issues_enabled: false
-contact_links:
-  - name: Private security report
-    url: https://github.com/Btkkgo/OrdinConn/security/advisories/new
-    about: Report sensitive vulnerabilities privately. Never include secrets in a public Issue.

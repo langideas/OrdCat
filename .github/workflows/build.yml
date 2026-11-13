@@ -1,0 +1,30 @@
+name: Build OrdCat for macOS
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build universal app
+        env:
+          VERSION: 0.1.${{ github.run_number }}
+          BUILD: ${{ github.run_number }}
+        run: ./build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OrdCat-macOS
+          path: build/OrdCat-macOS.zip
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=v0.1.${{ github.run_number }}
+          gh release create "$TAG" build/OrdCat-macOS.zip \
+            --title "OrdCat $TAG" \
+            --notes-file RELEASE_NOTES.md \
+            --latest

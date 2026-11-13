@@ -1,9 +1,0 @@
-[package]
-name = "market-core"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-chrono.workspace = true
-serde.workspace = true
-uuid.workspace = true
