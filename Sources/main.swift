@@ -1873,8 +1873,8 @@ final class SettingsController: NSObject {
         ttsVoiceBox.frame = NSRect(x: 270, y: 58, width: 174, height: 26)
         ttsVoiceBox.completes = false
         v5.addSubview(ttsVoiceBox)
-        let test = NSButton(title: "▶︎ 试听", target: self, action: #selector(testVoice))
-        test.frame = NSRect(x: 16, y: 14, width: 90, height: 30); v5.addSubview(test)
+        let testV = NSButton(title: "▶︎ 试听", target: self, action: #selector(testVoice))
+        testV.frame = NSRect(x: 16, y: 14, width: 90, height: 30); v5.addSubview(testV)
         let saveV = NSButton(title: "保存", target: self, action: #selector(saveVoice))
         saveV.keyEquivalent = ""
         saveV.frame = NSRect(x: 104, y: 14, width: 80, height: 30); v5.addSubview(saveV)
