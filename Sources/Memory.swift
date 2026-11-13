@@ -391,6 +391,54 @@ final class ContextHub {
         memory.add(kind: "screen", app: card.app, bundle: card.bundleID, title: card.windowTitle, content: card.plainText)
     }
 
+    // MARK: Page sharing (the "正在分享「…」" chip in the bubble)
+
+    /// Cheap read of the front app's focused window title, for the share chip. nil when nothing can be shared.
+    func shareableWindow() -> (app: NSRunningApplication, title: String)? {
+        guard AXIsProcessTrusted(), let app = lastExternalApp, !app.isTerminated else { return nil }
+        let bid = app.bundleIdentifier ?? ""
+        if reader.isExcluded(bid) || bid == Bundle.main.bundleIdentifier { return nil }
+        let el = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(el, 0.15)
+        var title = ""
+        var w: CFTypeRef?
+        if AXUIElementCopyAttributeValue(el, kAXFocusedWindowAttribute as CFString, &w) == .success,
+           let win = w, CFGetTypeID(win) == AXUIElementGetTypeID() {
+            var t: CFTypeRef?
+            AXUIElementCopyAttributeValue(win as! AXUIElement, kAXTitleAttribute as CFString, &t)
+            title = (t as? String) ?? ""
+        }
+        title = Redactor.clean(title.trimmingCharacters(in: .whitespacesAndNewlines))
+        if title.isEmpty { title = app.localizedName ?? "当前窗口" }
+        return (app, title)
+    }
+
+    /// One-shot read of the page the user chose to share. Nothing is read until they actually ask.
+    func pageContext(budgetChars: Int = 9000) async -> String? {
+        guard let app = lastExternalApp, !app.isTerminated else { return nil }
+        var card = await reader.capture(app: app, deep: true, wantScreenshot: false, maxNodes: 4000, axBudget: 0.6)
+        if let c = card, c.plainText.count < 200, ScreenReader.chromiumBrowsers.contains(c.bundleID) {
+            // Chromium builds its accessibility tree lazily the first time we ask: give it a moment.
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            card = await reader.capture(app: app, deep: true, wantScreenshot: false, maxNodes: 4000, axBudget: 0.6)
+        }
+        guard let c = card else { return nil }
+        await MainActor.run { self.ingestIfEnabled(c) }
+        var body = c.plainText
+        if body.count > budgetChars { body = String(body.prefix(budgetChars)) + "\n…（页面后面的内容省略）" }
+        if body.isEmpty { body = "（这个窗口读不到文字，可能是图片或画布类内容）" }
+        return """
+        ## 用户正在分享的页面
+        用户主动把当前页面分享给你。用户说「这个」「这页」「这里」时，指的就是它；请结合页面内容回答，不要编造页面上没有的信息。
+        应用：\(c.app)
+        窗口标题：\(c.windowTitle)
+        页面文字（按从上到下顺序）：
+        \(body)
+        """
+    }
+
+    private func ingestIfEnabled(_ c: ContextCard) { if Prefs.perception { ingest(c) } }
+
     func recordSelection(_ text: String) {
         let app = lastExternalApp
         memory.add(kind: "select", app: app?.localizedName ?? "", bundle: app?.bundleIdentifier ?? "",

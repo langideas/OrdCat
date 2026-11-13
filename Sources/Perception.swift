@@ -84,6 +84,9 @@ final class ScreenReader {
     ]
 
     private var manualAXEnabled = Set<pid_t>()
+    static let chromiumBrowsers: Set<String> = ["com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.canary",
+        "com.microsoft.edgemac", "com.brave.Browser", "company.thebrowser.Browser", "com.vivaldi.Vivaldi",
+        "com.operasoftware.Opera", "org.chromium.Chromium"]
 
     static func screenRecordingAllowed() -> Bool { CGPreflightScreenCaptureAccess() }
     static func requestScreenRecording() { _ = CGRequestScreenCaptureAccess() }
@@ -138,9 +141,14 @@ final class ScreenReader {
     func readAX(pid: pid_t, maxNodes: Int = 1600, budget: TimeInterval = 0.25) -> (title: String, frame: CGRect, elements: [ScreenElement]) {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.3)   // a frozen app must never freeze the cat
-        if Prefs.perception && !manualAXEnabled.contains(pid) {
+        if (Prefs.perception || Prefs.pageShare) && !manualAXEnabled.contains(pid) {
             // Electron apps (VS Code, Slack, Notion…) only expose their tree when asked.
             AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            // Chromium browsers build the web-page tree only for assistive clients.
+            let bid = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""
+            if ScreenReader.chromiumBrowsers.contains(bid) {
+                AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            }
             manualAXEnabled.insert(pid)
         }
         guard let wv = attr(app, kAXFocusedWindowAttribute as String), CFGetTypeID(wv) == AXUIElementGetTypeID() else {
@@ -221,11 +229,12 @@ final class ScreenReader {
     }
 
     /// Build one context card for the given app. `deep` = on-demand (accurate OCR, keep screenshot).
-    func capture(app: NSRunningApplication, deep: Bool, wantScreenshot: Bool) async -> ContextCard? {
+    func capture(app: NSRunningApplication, deep: Bool, wantScreenshot: Bool,
+                 maxNodes: Int = 1600, axBudget: TimeInterval = 0.25) async -> ContextCard? {
         let bid = app.bundleIdentifier ?? ""
         if isExcluded(bid) || bid == Bundle.main.bundleIdentifier { return nil }
         let pid = app.processIdentifier
-        let ax = await MainActor.run { self.readAX(pid: pid) }
+        let ax = await MainActor.run { self.readAX(pid: pid, maxNodes: maxNodes, budget: axBudget) }
         var elements = ax.elements
         var source = "AX"
         var shot: CGImage?

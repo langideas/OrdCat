@@ -46,7 +46,8 @@ let kPerceptionHotKeys: [HotKeyOption] = [
 
 enum Keychain {
     static let service = "app.ordcat.apikey"
-    static func set(_ value: String) {
+    static let ttsService = "app.ordcat.ttskey"
+    static func set(_ value: String, service: String = Keychain.service) {
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                    kSecAttrService as String: service]
         SecItemDelete(base as CFDictionary)
@@ -55,7 +56,7 @@ enum Keychain {
         add[kSecValueData as String] = data
         SecItemAdd(add as CFDictionary, nil)
     }
-    static func get() -> String {
+    static func get(service: String = Keychain.service) -> String {
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                 kSecAttrService as String: service,
                                 kSecReturnData as String: true,
@@ -113,6 +114,16 @@ enum Prefs {
         get { d.string(forKey: "excludedApps") ?? "" }
         set { d.set(newValue, forKey: "excludedApps") }
     }
+    static var pageShare: Bool { get { bool("pageShare", true) } set { d.set(newValue, forKey: "pageShare") } }
+    // Voice output
+    static var ttsEngine: Int { get { d.object(forKey: "ttsEngine") as? Int ?? 0 } set { d.set(newValue, forKey: "ttsEngine") } }
+    static var sysVoiceID: String { get { d.string(forKey: "sysVoiceID") ?? "" } set { d.set(newValue, forKey: "sysVoiceID") } }
+    static var ttsRate: Double { get { d.object(forKey: "ttsRate") as? Double ?? 0.5 } set { d.set(newValue, forKey: "ttsRate") } }
+    static var ttsPitch: Double { get { d.object(forKey: "ttsPitch") as? Double ?? 1.0 } set { d.set(newValue, forKey: "ttsPitch") } }
+    static var ttsPreset: Int { get { d.object(forKey: "ttsPreset") as? Int ?? 0 } set { d.set(newValue, forKey: "ttsPreset") } }
+    static var ttsBase: String { get { d.string(forKey: "ttsBase") ?? kTTSPresets[0].base } set { d.set(newValue, forKey: "ttsBase") } }
+    static var ttsModel: String { get { d.string(forKey: "ttsModel") ?? kTTSPresets[0].model } set { d.set(newValue, forKey: "ttsModel") } }
+    static var ttsVoice: String { get { d.string(forKey: "ttsVoice") ?? kTTSPresets[0].voices[0].id } set { d.set(newValue, forKey: "ttsVoice") } }
     static var autoUpdate: Bool { get { bool("autoUpdate", true) } set { d.set(newValue, forKey: "autoUpdate") } }
     static var catY: Double? {
         get { d.object(forKey: "catY") as? Double }
@@ -261,28 +272,174 @@ final class LLM {
     }
 }
 
-// MARK: - Voice out (system TTS)
+// MARK: - Voice out (natural system voices, or a cloud voice through an OpenAI-compatible /audio/speech)
+
+struct TTSVoiceOption { let id: String; let label: String }
+struct TTSPreset { let name: String; let base: String; let model: String; let voices: [TTSVoiceOption] }
+
+let kTTSPresets: [TTSPreset] = [
+    TTSPreset(name: "硅基流动 CosyVoice2（中文最自然）", base: "https://api.siliconflow.cn/v1", model: "FunAudioLLM/CosyVoice2-0.5B",
+              voices: [("claire", "温柔女声 Claire"), ("anna", "沉稳女声 Anna"), ("diana", "欢快女声 Diana"), ("bella", "激情女声 Bella"),
+                       ("alex", "沉稳男声 Alex"), ("benjamin", "低沉男声 Benjamin"), ("charles", "磁性男声 Charles"), ("david", "欢快男声 David")]
+                .map { TTSVoiceOption(id: "FunAudioLLM/CosyVoice2-0.5B:" + $0.0, label: $0.1) }),
+    TTSPreset(name: "OpenAI gpt-4o-mini-tts", base: "https://api.openai.com/v1", model: "gpt-4o-mini-tts",
+              voices: [("coral", "Coral 温暖女声"), ("nova", "Nova 明亮女声"), ("shimmer", "Shimmer 柔和女声"), ("sage", "Sage 平静女声"),
+                       ("alloy", "Alloy 中性"), ("ash", "Ash 男声"), ("echo", "Echo 男声"), ("onyx", "Onyx 低沉男声")]
+                .map { TTSVoiceOption(id: $0.0, label: $0.1) }),
+    TTSPreset(name: "自定义（OpenAI 兼容 /audio/speech）", base: "", model: "", voices: [])
+]
 
 final class Voice {
     private let synth = AVSpeechSynthesizer()
-    func speak(_ text: String) {
-        synth.stopSpeaking(at: .immediate)
-        var scalars = String.UnicodeScalarView()
-        for s in text.unicodeScalars {
-            let p = s.properties
-            if p.isEmojiPresentation || (p.isEmoji && s.value > 0x2000) { continue }
-            if s == "*" || s == "#" || s == "`" { continue }
-            scalars.append(s)
+    private var player: AVAudioPlayer?
+    private var cloudTask: URLSessionDataTask?
+    private var gen = 0
+    /// Reports cloud problems (shown in settings when testing).
+    var onStatus: ((String) -> Void)?
+
+    /// Chinese system voices, best quality first, novelty voices removed.
+    static func systemVoices() -> [AVSpeechSynthesisVoice] {
+        var vs = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("zh") }
+        if #available(macOS 14.0, *) { vs = vs.filter { !$0.voiceTraits.contains(.isNoveltyVoice) } }
+        func langRank(_ v: AVSpeechSynthesisVoice) -> Int { v.language == "zh-CN" ? 0 : (v.language == "zh-TW" ? 1 : 2) }
+        return vs.sorted {
+            if $0.quality.rawValue != $1.quality.rawValue { return $0.quality.rawValue > $1.quality.rawValue }
+            if langRank($0) != langRank($1) { return langRank($0) < langRank($1) }
+            return $0.name < $1.name
         }
-        let clean = String(scalars).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return }
-        let u = AVSpeechUtterance(string: clean)
-        u.voice = AVSpeechSynthesisVoice(language: "zh-CN")
-        u.rate = 0.5
-        u.pitchMultiplier = 1.15
-        synth.speak(u)
     }
-    func stop() { synth.stopSpeaking(at: .immediate) }
+
+    static func describe(_ v: AVSpeechSynthesisVoice) -> String {
+        let q: String
+        switch v.quality {
+        case .premium: q = "高级 ✨"
+        case .enhanced: q = "增强"
+        default: q = "标准"
+        }
+        let lang = ["zh-CN": "普通话", "zh-TW": "台湾国语", "zh-HK": "粤语"][v.language] ?? v.language
+        return "\(v.name) · \(lang) · \(q)"
+    }
+
+    static func chosenSystemVoice() -> AVSpeechSynthesisVoice? {
+        if !Prefs.sysVoiceID.isEmpty, let v = AVSpeechSynthesisVoice(identifier: Prefs.sysVoiceID) { return v }
+        let vs = systemVoices()
+        let best = vs.first
+        // Prefer Mandarin unless a much better voice exists in another Chinese variant.
+        if let cn = vs.first(where: { $0.language == "zh-CN" }), let b = best, cn.quality.rawValue >= b.quality.rawValue { return cn }
+        return best ?? AVSpeechSynthesisVoice(language: "zh-CN")
+    }
+
+    /// Turn chat text into something that sounds natural when read aloud.
+    static func speakable(_ text: String) -> String {
+        var t = text
+        t = t.replacingOccurrences(of: #"https?://\S+"#, with: "这个链接", options: .regularExpression)
+        t = t.replacingOccurrences(of: #"\[\[[^\]]*\]\]"#, with: "", options: .regularExpression)
+        var scalars = String.UnicodeScalarView()
+        for sc in t.unicodeScalars {
+            let p = sc.properties
+            if p.isEmojiPresentation || (p.isEmoji && sc.value > 0x2000) { continue }
+            if "*#`_>|•~～".unicodeScalars.contains(sc) { continue }
+            scalars.append(sc)
+        }
+        t = String(scalars)
+        t = t.replacingOccurrences(of: #"(?m)^\s*[-–—]\s+"#, with: "", options: .regularExpression)
+        t = t.replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
+        t = t.replacingOccurrences(of: #"\n{2,}"#, with: "\n", options: .regularExpression)
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Split into sentences so the system voice breathes between them instead of one flat run.
+    static func sentences(_ t: String) -> [String] {
+        var out: [String] = []
+        var cur = ""
+        for ch in t {
+            if ch == "\n" {
+                if !cur.trimmingCharacters(in: .whitespaces).isEmpty { out.append(cur) }
+                cur = ""; continue
+            }
+            cur.append(ch)
+            if "。！？!?；;…".contains(ch) {
+                if !cur.trimmingCharacters(in: .whitespaces).isEmpty { out.append(cur) }
+                cur = ""
+            }
+        }
+        if !cur.trimmingCharacters(in: .whitespaces).isEmpty { out.append(cur) }
+        return out
+    }
+
+    func speak(_ text: String) {
+        stop()
+        let clean = Voice.speakable(text)
+        guard !clean.isEmpty else { return }
+        if Prefs.ttsEngine == 1 { speakCloud(clean) } else { speakSystem(clean) }
+    }
+
+    private func speakSystem(_ clean: String) {
+        let v = Voice.chosenSystemVoice()
+        for sentence in Voice.sentences(clean) {
+            let u = AVSpeechUtterance(string: sentence)
+            u.voice = v
+            u.rate = Float(Prefs.ttsRate)
+            u.pitchMultiplier = Float(Prefs.ttsPitch)
+            u.postUtteranceDelay = 0.08
+            synth.speak(u)
+        }
+    }
+
+    private func speakCloud(_ clean: String) {
+        var base = Prefs.ttsBase.trimmingCharacters(in: .whitespacesAndNewlines)
+        while base.hasSuffix("/") { base.removeLast() }
+        guard !base.isEmpty, let url = URL(string: base + "/audio/speech") else {
+            onStatus?("⚠️ 云端声音还没填接口地址，先用系统声音读")
+            speakSystem(clean); return
+        }
+        var input = String(clean.prefix(1800))
+        if base.contains("siliconflow") {
+            // CosyVoice reads spaces as pauses: drop the ones next to Chinese characters.
+            input = input.replacingOccurrences(of: #"(?<=[\p{Han}，。！？、：；])\s+|\s+(?=[\p{Han}，。！？、：；])"#,
+                                               with: "", options: .regularExpression)
+        }
+        var body: [String: Any] = ["model": Prefs.ttsModel, "input": input, "voice": Prefs.ttsVoice,
+                                   "response_format": "mp3", "speed": max(0.6, min(1.6, Prefs.ttsRate * 2))]
+        if Prefs.ttsModel.contains("gpt-4o") {
+            body["instructions"] = "用温柔、自然、放松的语气说中文，像坐在旁边陪伴的朋友，语速适中，句子之间自然停顿。"
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 30
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let key = Keychain.get(service: Keychain.ttsService)
+        if !key.isEmpty { req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        gen += 1
+        let g = gen
+        cloudTask = URLSession.shared.dataTask(with: req) { [weak self] data, resp, err in
+            DispatchQueue.main.async {
+                guard let self = self, g == self.gen else { return }
+                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                if let d = data, code == 200, d.count > 512, let p = try? AVAudioPlayer(data: d) {
+                    self.player = p
+                    p.prepareToPlay()
+                    p.play()
+                    self.onStatus?("✅ 云端声音播放中")
+                } else {
+                    let why = err?.localizedDescription
+                        ?? String(data: data ?? Data(), encoding: .utf8).map { "（\(code)）" + String($0.prefix(160)) } ?? "未知错误"
+                    NSLog("OrdCat TTS cloud failed: \(why)")
+                    self.onStatus?("⚠️ 云端声音失败：\(why)。先用系统声音读")
+                    self.speakSystem(clean)
+                }
+            }
+        }
+        cloudTask?.resume()
+    }
+
+    func stop() {
+        gen += 1
+        cloudTask?.cancel(); cloudTask = nil
+        player?.stop(); player = nil
+        synth.stopSpeaking(at: .immediate)
+    }
 }
 
 // MARK: - Voice in (Apple speech recognition, on-device when available)
@@ -870,6 +1027,12 @@ final class Bubble: NSObject {
     private let input = NSTextField()
     private var micButton: NSButton!
     private var sendButton: NSButton!
+    private let shareChip = NSButton(title: "", target: nil, action: nil)
+    private let shareClose = NSButton(title: "✕", target: nil, action: nil)
+    /// Title of the page the user can share (nil = nothing shareable, chip hidden).
+    private(set) var shareTitle: String?
+    private(set) var sharing = false
+    var onShareChanged: ((Bool) -> Void)?
     private var hideTimer: Timer?
     private(set) var chatMode = false
     var onSend: ((String) -> Void)?
@@ -944,6 +1107,41 @@ final class Bubble: NSObject {
         card.addSubview(micButton)
         sendButton = iconButton("发送", self, #selector(doSend), tip: "发送")
         card.addSubview(sendButton)
+
+        shareChip.isBordered = false
+        shareChip.wantsLayer = true
+        shareChip.layer?.cornerRadius = 11
+        shareChip.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+        shareChip.font = .systemFont(ofSize: 11)
+        shareChip.contentTintColor = .white
+        shareChip.alignment = .left
+        shareChip.lineBreakMode = .byTruncatingTail
+        shareChip.target = self
+        shareChip.action = #selector(chipClicked)
+        shareChip.toolTip = "小猫会读这个页面上的文字来回答你（密码框不会读，隐私信息会先打码）"
+        card.addSubview(shareChip)
+        shareClose.isBordered = false
+        shareClose.font = .systemFont(ofSize: 11)
+        shareClose.contentTintColor = .secondaryLabelColor
+        shareClose.target = self
+        shareClose.action = #selector(closeShare)
+        shareClose.toolTip = "这次对话不分享这个页面"
+        card.addSubview(shareClose)
+    }
+
+    @objc private func chipClicked() { if !sharing { setShare(title: shareTitle, on: true); onShareChanged?(true) } }
+    @objc private func closeShare() { setShare(title: shareTitle, on: false); onShareChanged?(false) }
+
+    /// Show or update the "正在分享「…」" chip above the input box.
+    func setShare(title: String?, on: Bool) {
+        let changed = title != shareTitle || on != sharing
+        shareTitle = title
+        sharing = on && title != nil
+        if let t = title {
+            let short = t.count > 30 ? String(t.prefix(30)) + "…" : t
+            shareChip.title = sharing ? "  🟢 正在分享「\(short)」" : "  ⚪️ 未分享当前页面 · 点这里分享"
+        }
+        if changed && isShown { layout() }
     }
 
     @objc private func doExpand() { onExpand?() }
@@ -961,7 +1159,7 @@ final class Bubble: NSObject {
         onSend?(t)
     }
 
-    private func setActions(_ list: [(String, () -> Void)]) {
+    func setActions(_ list: [(String, () -> Void)]) {
         for b in actionButtons { b.removeFromSuperview() }
         actionButtons = []
         actions = list.map { $0.1 }
@@ -1052,7 +1250,9 @@ final class Bubble: NSObject {
         let textH = min(max(used, 18), 300)
         let actionH: CGFloat = actionButtons.isEmpty ? 0 : 36
         let chatH: CGFloat = chatMode ? 40 : 0
-        let h = pad + 18 + 6 + textH + actionH + chatH + pad
+        let showChip = chatMode && shareTitle != nil
+        let chipH: CGFloat = showChip ? 30 : 0
+        let h = pad + 18 + 6 + textH + actionH + chipH + chatH + pad
 
         var y = h - pad - 16
         title.frame = NSRect(x: pad, y: y, width: 120, height: 16)
@@ -1070,6 +1270,15 @@ final class Bubble: NSObject {
                 b.frame = NSRect(x: x, y: y + 3, width: w, height: 30)
                 x += w + 6
             }
+        }
+        shareChip.isHidden = !showChip
+        shareClose.isHidden = !showChip || !sharing
+        if showChip {
+            y -= chipH
+            shareChip.sizeToFit()
+            let cw = min(inner - 26, shareChip.frame.width + 14)
+            shareChip.frame = NSRect(x: pad, y: y + 4, width: cw, height: 22)
+            shareClose.frame = NSRect(x: pad + cw + 2, y: y + 4, width: 22, height: 22)
         }
         input.isHidden = !chatMode
         sendButton.isHidden = !chatMode
@@ -1413,6 +1622,18 @@ final class SettingsController: NSObject {
     private var updateButton: NSButton!
     private let retentionOptions = [1, 3, 7, 30]
     var hub: ContextHub?
+    var voice: Voice?
+    private let enginePopup = NSPopUpButton()
+    private let sysVoicePopup = NSPopUpButton()
+    private let rateSlider = NSSlider(value: 0.5, minValue: 0.35, maxValue: 0.65, target: nil, action: nil)
+    private let pitchSlider = NSSlider(value: 1.0, minValue: 0.8, maxValue: 1.25, target: nil, action: nil)
+    private let ttsPresetPopup = NSPopUpButton()
+    private let ttsBase = NSTextField()
+    private let ttsKey = NSSecureTextField()
+    private let ttsModel = NSTextField()
+    private let ttsVoiceBox = NSComboBox()
+    private let ttsStatus = NSTextField(wrappingLabelWithString: "")
+    private var sysVoiceIDs: [String] = []
     var onHotKeyChanged: (() -> Void)?
     var onClearHistory: (() -> Void)?
     var onPerceptionChanged: (() -> Void)?
@@ -1426,6 +1647,8 @@ final class SettingsController: NSObject {
         preset.selectItem(at: min(Prefs.presetIndex, kPresets.count - 1))
         hotkeyPopup.selectItem(at: Prefs.hotKeyIndex)
         checks["voice"]?.state = Prefs.voice ? .on : .off
+        checks["pageShare"]?.state = Prefs.pageShare ? .on : .off
+        refreshVoiceTab()
         checks["voiceChat"]?.state = Prefs.voiceChat ? .on : .off
         checks["selectWatch"]?.state = Prefs.selectWatch ? .on : .off
         checks["selectFallback"]?.state = Prefs.selectFallback ? .on : .off
@@ -1552,7 +1775,7 @@ final class SettingsController: NSObject {
         hotkeyPopup.action = #selector(hotkeyChanged)
         hotkeyPopup.frame = NSRect(x: 96, y: 282, width: 300, height: 26)
         v2.addSubview(hotkeyPopup)
-        check("voice", "用语音读出小猫的回复", y: 250, in: v2)
+        check("pageShare", "打开对话时分享当前页面（气泡里点 ✕ 就不分享）", y: 250, in: v2)
         check("selectWatch", "选中文字时竖起耳朵提示", y: 214, in: v2)
         check("selectFallback", "兼容模式：读不到选中内容时，自动复制再还原剪贴板", y: 190, in: v2)
         check("clipWatch", "复制文字时提示", y: 166, in: v2)
@@ -1615,6 +1838,52 @@ final class SettingsController: NSObject {
         t3.view = v3
         tabs.addTabViewItem(t3)
 
+        // Tab: voice
+        let t5 = NSTabViewItem(identifier: "voice")
+        t5.label = "声音"
+        let v5 = NSView(frame: NSRect(x: 0, y: 0, width: 470, height: 360))
+        check("voice", "用语音读出小猫的回复", y: 322, in: v5)
+        enginePopup.addItems(withTitles: ["系统声音（离线、免费）", "云端自然声音（更像真人）"])
+        enginePopup.target = self; enginePopup.action = #selector(voiceChanged)
+        row("声音来源", enginePopup, y: 290, in: v5)
+        sysVoicePopup.target = self; sysVoicePopup.action = #selector(voiceChanged)
+        row("系统声音", sysVoicePopup, y: 258, in: v5)
+        label("语速", NSRect(x: 10, y: 229, width: 96, height: 20), in: v5)
+        rateSlider.frame = NSRect(x: 114, y: 226, width: 130, height: 24)
+        rateSlider.target = self; rateSlider.action = #selector(voiceChanged)
+        v5.addSubview(rateSlider)
+        label("音调", NSRect(x: 244, y: 229, width: 50, height: 20), in: v5)
+        pitchSlider.frame = NSRect(x: 300, y: 226, width: 144, height: 24)
+        pitchSlider.target = self; pitchSlider.action = #selector(voiceChanged)
+        v5.addSubview(pitchSlider)
+        let sysHint = NSTextField(wrappingLabelWithString: "想更自然：系统设置 → 辅助功能 → 朗读内容 → 系统声音 → 管理声音，下载带「高级」或「增强」的中文声音（如 Lilian、Tingting 增强版），装好后在上面选。")
+        sysHint.font = .systemFont(ofSize: 11); sysHint.textColor = .secondaryLabelColor
+        sysHint.frame = NSRect(x: 24, y: 184, width: 420, height: 34)
+        v5.addSubview(sysHint)
+        for p in kTTSPresets { ttsPresetPopup.addItem(withTitle: p.name) }
+        ttsPresetPopup.target = self; ttsPresetPopup.action = #selector(ttsPresetChanged)
+        row("云端服务", ttsPresetPopup, y: 150, in: v5)
+        ttsBase.placeholderString = "https://…/v1"
+        row("接口地址", ttsBase, y: 120, in: v5)
+        ttsKey.placeholderString = "云端声音的 API Key（只存在本机钥匙串）"
+        row("API Key", ttsKey, y: 90, in: v5)
+        label("模型 / 声音", NSRect(x: 10, y: 63, width: 96, height: 20), in: v5)
+        ttsModel.placeholderString = "模型"
+        ttsModel.frame = NSRect(x: 114, y: 60, width: 150, height: 24); v5.addSubview(ttsModel)
+        ttsVoiceBox.frame = NSRect(x: 270, y: 58, width: 174, height: 26)
+        ttsVoiceBox.completes = false
+        v5.addSubview(ttsVoiceBox)
+        let test = NSButton(title: "▶︎ 试听", target: self, action: #selector(testVoice))
+        test.frame = NSRect(x: 16, y: 14, width: 90, height: 30); v5.addSubview(test)
+        let saveV = NSButton(title: "保存", target: self, action: #selector(saveVoice))
+        saveV.keyEquivalent = ""
+        saveV.frame = NSRect(x: 104, y: 14, width: 80, height: 30); v5.addSubview(saveV)
+        ttsStatus.font = .systemFont(ofSize: 11); ttsStatus.textColor = .secondaryLabelColor
+        ttsStatus.frame = NSRect(x: 190, y: 8, width: 260, height: 40)
+        v5.addSubview(ttsStatus)
+        t5.view = v5
+        tabs.addTabViewItem(t5)
+
         // Tab 4: about & updates
         let t4 = NSTabViewItem(identifier: "about")
         t4.label = "关于"
@@ -1650,6 +1919,7 @@ final class SettingsController: NSObject {
         let on = b.state == .on
         switch b.identifier?.rawValue ?? "" {
         case "voice": Prefs.voice = on
+        case "pageShare": Prefs.pageShare = on; if on { _ = SelectionWatcher.trusted(prompt: true) }
         case "voiceChat": Prefs.voiceChat = on; onHotKeyChanged?()
         case "selectWatch": Prefs.selectWatch = on; if on { _ = SelectionWatcher.trusted(prompt: true) }
         case "selectFallback": Prefs.selectFallback = on
@@ -1669,6 +1939,61 @@ final class SettingsController: NSObject {
         case "autoUpdate": Prefs.autoUpdate = on
         default: break
         }
+    }
+
+    // MARK: voice tab
+    private func refreshVoiceTab() {
+        enginePopup.selectItem(at: Prefs.ttsEngine)
+        sysVoicePopup.removeAllItems()
+        sysVoiceIDs = [""]
+        sysVoicePopup.addItem(withTitle: "自动（选最自然的中文声音）")
+        for v in Voice.systemVoices() {
+            sysVoicePopup.addItem(withTitle: Voice.describe(v))
+            sysVoiceIDs.append(v.identifier)
+        }
+        sysVoicePopup.selectItem(at: sysVoiceIDs.firstIndex(of: Prefs.sysVoiceID) ?? 0)
+        rateSlider.doubleValue = Prefs.ttsRate
+        pitchSlider.doubleValue = Prefs.ttsPitch
+        ttsPresetPopup.selectItem(at: min(Prefs.ttsPreset, kTTSPresets.count - 1))
+        ttsBase.stringValue = Prefs.ttsBase
+        ttsModel.stringValue = Prefs.ttsModel
+        ttsKey.stringValue = Keychain.get(service: Keychain.ttsService)
+        fillVoiceBox(kTTSPresets[min(Prefs.ttsPreset, kTTSPresets.count - 1)])
+        ttsVoiceBox.stringValue = Prefs.ttsVoice
+        ttsStatus.stringValue = Prefs.ttsEngine == 1 ? "云端声音需要对应服务的 API Key；失败时会自动改用系统声音。" : ""
+    }
+    private func fillVoiceBox(_ p: TTSPreset) {
+        ttsVoiceBox.removeAllItems()
+        ttsVoiceBox.addItems(withObjectValues: p.voices.map { $0.id })
+        ttsVoiceBox.toolTip = p.voices.map { "\($0.id)  \($0.label)" }.joined(separator: "\n")
+    }
+    @objc private func voiceChanged() {
+        Prefs.ttsEngine = enginePopup.indexOfSelectedItem
+        let i = sysVoicePopup.indexOfSelectedItem
+        if i >= 0 && i < sysVoiceIDs.count { Prefs.sysVoiceID = sysVoiceIDs[i] }
+        Prefs.ttsRate = rateSlider.doubleValue
+        Prefs.ttsPitch = pitchSlider.doubleValue
+    }
+    @objc private func ttsPresetChanged() {
+        let p = kTTSPresets[ttsPresetPopup.indexOfSelectedItem]
+        Prefs.ttsPreset = ttsPresetPopup.indexOfSelectedItem
+        if !p.base.isEmpty { ttsBase.stringValue = p.base; ttsModel.stringValue = p.model }
+        fillVoiceBox(p)
+        if let first = p.voices.first { ttsVoiceBox.stringValue = first.id }
+    }
+    @objc private func saveVoice() {
+        voiceChanged()
+        Prefs.ttsBase = ttsBase.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        Prefs.ttsModel = ttsModel.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        Prefs.ttsVoice = ttsVoiceBox.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        Keychain.set(ttsKey.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), service: Keychain.ttsService)
+        ttsStatus.stringValue = "✅ 已保存"
+    }
+    @objc private func testVoice() {
+        saveVoice()
+        ttsStatus.stringValue = Prefs.ttsEngine == 1 ? "正在请求云端声音…" : "▶︎ 系统声音试听中"
+        voice?.onStatus = { [weak self] m in self?.ttsStatus.stringValue = m }
+        voice?.speak("喵～我是 OrdCat。今天辛苦啦，要不要先喝口水，休息一下眼睛？我一直在这儿陪着你。")
     }
 
     @objc private func perceptionHotkeyChanged() {
@@ -1824,6 +2149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.onHotKeyChanged = { [weak self] in self?.registerHotKey() }
         settings.onClearHistory = { [weak self] in self?.store.clear() }
         settings.hub = hub
+        settings.voice = voice
         settings.onPerceptionChanged = { [weak self] in self?.applyPerception(announce: true) }
         settings.onPreviewContext = { [weak self] in self?.previewContext() }
         hub.idleSeconds = { [weak self] in self?.idleSeconds() ?? 0 }
@@ -2022,7 +2348,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func openChat() {
         catView.perk(false)
         let last = store.messages.last(where: { $0.role == "assistant" && !$0.text.isEmpty })?.text
-        bubble.openChat(greeting: last ?? "喵～想聊点什么？")
+        let page = Prefs.pageShare ? hub.shareableWindow() : nil
+        bubble.setShare(title: page?.title, on: page != nil)
+        bubble.openChat(greeting: page != nil ? "喵～我能看到你正在看的页面，想问点什么？" : (last ?? "喵～想聊点什么？"))
+        if page != nil { bubble.setActions(pageQuickActions()); bubble.layout() }
+        startShareWatch()
+    }
+
+    private func pageQuickActions() -> [(String, () -> Void)] {
+        [("总结这页", { [weak self] in self?.ask("帮我用几句话总结一下这个页面。") }),
+         ("重点是什么", { [weak self] in self?.ask("这个页面里最值得注意的重点是什么？") }),
+         ("帮我解释", { [weak self] in self?.ask("用简单的话帮我解释一下这个页面在讲什么。") })]
+    }
+
+    /// While the chat bubble is open, keep the share chip pointed at whatever page is in front.
+    private var shareWatch: Timer?
+    private func startShareWatch() {
+        shareWatch?.invalidate()
+        shareWatch = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] t in
+            guard let self = self else { t.invalidate(); return }
+            guard self.bubble.isShown && self.bubble.chatMode else { t.invalidate(); return }
+            guard Prefs.pageShare else { return }
+            let page = self.hub.shareableWindow()
+            if page?.title != self.bubble.shareTitle {
+                // A new page: share it again unless the user switched sharing off for this chat.
+                let on = self.bubble.shareTitle == nil ? true : self.bubble.sharing
+                self.bubble.setShare(title: page?.title, on: on)
+            }
+        }
+        shareWatch?.tolerance = 0.5
     }
 
     /// Build the request history: recent turns as text; images only for the newest message.
@@ -2053,14 +2407,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.append(ChatMessage(role: "user", text: text, imageNames: names, date: Date()))
         var history = apiHistory(newImages: images)
         store.append(ChatMessage(role: "assistant", text: "", imageNames: [], date: Date()))
-        let usePerception = Prefs.perception
+        // The user can switch off the page chip for this chat: then nothing on screen is read.
+        let chipOff = inBubble && bubble.chatMode && bubble.shareTitle != nil && !bubble.sharing
+        let usePerception = Prefs.perception && !chipOff
+        let sharePage = !usePerception && inBubble && bubble.chatMode && bubble.sharing && Prefs.pageShare
         if inBubble {
-            let wait = usePerception ? "👀 我先看一眼你的屏幕…" : "……"
-            if bubble.chatMode { bubble.setText(wait) } else { bubble.openChat(greeting: wait) }
+            bubble.setActions([])
+            let wait = usePerception ? "👀 我先看一眼你的屏幕…"
+                : (sharePage ? "👀 正在读「\(bubble.shareTitle ?? "当前页面")」…" : "……")
+            if bubble.chatMode { bubble.setText(wait) } else {
+                let page = Prefs.pageShare ? hub.shareableWindow() : nil
+                bubble.setShare(title: page?.title, on: page != nil)
+                bubble.openChat(greeting: wait)
+                startShareWatch()
+            }
         }
         let gen = bubbleGen
         Task { @MainActor in
             var context: String?
+            if sharePage {
+                context = await self.hub.pageContext()
+            }
             if usePerception {
                 let ctx = await self.hub.assemble(query: text, wantScreenshot: Prefs.sendScreenshot && images.isEmpty)
                 context = ctx.text
