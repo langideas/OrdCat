@@ -6,7 +6,7 @@ VERSION="${VERSION:-0.1.0}"
 BUILD="${BUILD:-1}"
 rm -rf build && mkdir -p build
 for ARCH in arm64 x86_64; do
-  swiftc -O -swift-version 5 -target ${ARCH}-apple-macos13.0 Sources/main.swift -o build/OrdCat-${ARCH}
+  swiftc -O -swift-version 5 -target ${ARCH}-apple-macos13.0 Sources/*.swift -o build/OrdCat-${ARCH}
 done
 APP=build/OrdCat.app
 mkdir -p $APP/Contents/MacOS $APP/Contents/Resources

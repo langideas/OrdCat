@@ -36,6 +36,12 @@ let kHotKeys: [HotKeyOption] = [
     HotKeyOption(title: "⌃ Control + ⌥ Option + V", code: 9, mods: UInt32(controlKey | optionKey))
 ]
 
+let kPerceptionHotKeys: [HotKeyOption] = [
+    HotKeyOption(title: "⌃ Control + ⌥ Option + D", code: 2, mods: UInt32(controlKey | optionKey)),
+    HotKeyOption(title: "⌃ Control + ⌥ Option + P", code: 35, mods: UInt32(controlKey | optionKey)),
+    HotKeyOption(title: "⌘ Command + ⇧ Shift + D", code: 2, mods: UInt32(cmdKey | shiftKey))
+]
+
 // MARK: - Storage
 
 enum Keychain {
@@ -86,6 +92,28 @@ enum Prefs {
     static var selectWatch: Bool { get { bool("selectWatch", true) } set { d.set(newValue, forKey: "selectWatch") } }
     static var selectFallback: Bool { get { bool("selectFallback", true) } set { d.set(newValue, forKey: "selectFallback") } }
     static var care: Bool { get { bool("care", true) } set { d.set(newValue, forKey: "care") } }
+    // Desktop perception & memory hub
+    static var perception: Bool { get { bool("perception", false) } set { d.set(newValue, forKey: "perception") } }
+    static var perceptionHotKeyIndex: Int {
+        get { min(d.object(forKey: "perceptionHotKey") as? Int ?? 0, kPerceptionHotKeys.count - 1) }
+        set { d.set(newValue, forKey: "perceptionHotKey") }
+    }
+    static var sendScreenshot: Bool { get { bool("sendScreenshot", false) } set { d.set(newValue, forKey: "sendScreenshot") } }
+    static var ocrFallback: Bool { get { bool("ocrFallback", true) } set { d.set(newValue, forKey: "ocrFallback") } }
+    static var highlight: Bool { get { bool("highlight", true) } set { d.set(newValue, forKey: "highlight") } }
+    static var retentionDays: Int {
+        get { d.object(forKey: "retentionDays") as? Int ?? 7 }
+        set { d.set(newValue, forKey: "retentionDays") }
+    }
+    static var contextBudget: Int {
+        get { d.object(forKey: "contextBudget") as? Int ?? 3500 }
+        set { d.set(newValue, forKey: "contextBudget") }
+    }
+    static var excludedApps: String {
+        get { d.string(forKey: "excludedApps") ?? "" }
+        set { d.set(newValue, forKey: "excludedApps") }
+    }
+    static var autoUpdate: Bool { get { bool("autoUpdate", true) } set { d.set(newValue, forKey: "autoUpdate") } }
     static var catY: Double? {
         get { d.object(forKey: "catY") as? Double }
         set { d.set(newValue, forKey: "catY") }
@@ -164,7 +192,7 @@ final class LLM {
     private var task: Task<Void, Never>?
     func cancel() { task?.cancel(); task = nil }
 
-    func stream(_ history: [[String: Any]],
+    func stream(_ history: [[String: Any]], context: String? = nil,
                 onDelta: @escaping (String) -> Void,
                 onDone: @escaping (String?, String?) -> Void) {
         cancel()
@@ -180,7 +208,9 @@ final class LLM {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let key = Keychain.get()
         if !key.isEmpty { req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
-        let messages: [[String: Any]] = [["role": "system", "content": kSystemPrompt]] + history
+        var system = RemoteConfig.shared.systemPrompt ?? kSystemPrompt
+        if let c = context, !c.isEmpty { system += "\n\n" + c }
+        let messages: [[String: Any]] = [["role": "system", "content": system]] + history
         var body: [String: Any] = ["model": Prefs.model, "messages": messages, "stream": true, "max_tokens": 1500]
         // Reasoning models (e.g. gpt-oss on Groq) would otherwise spend the budget thinking.
         if base.contains("groq.com") && Prefs.model.contains("gpt-oss") { body["reasoning_effort"] = "low" }
@@ -357,22 +387,30 @@ final class Listener {
 // MARK: - Global hotkey (Carbon, no accessibility permission needed)
 
 final class HotKey {
-    static var action: (() -> Void)?
+    static var actions: [UInt32: () -> Void] = [:]
     private static var installed = false
     private var ref: EventHotKeyRef?
+    let id: UInt32
 
-    func register(_ opt: HotKeyOption) {
+    init(id: UInt32) { self.id = id }
+
+    func register(_ opt: HotKeyOption, action: @escaping () -> Void) {
         unregister()
+        HotKey.actions[id] = action
         if !HotKey.installed {
             var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-            InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
-                DispatchQueue.main.async { HotKey.action?() }
+            InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+                var hk = EventHotKeyID()
+                GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                                  nil, MemoryLayout<EventHotKeyID>.size, nil, &hk)
+                let which = hk.id
+                DispatchQueue.main.async { HotKey.actions[which]?() }
                 return OSStatus(noErr)
             }, 1, &spec, nil, nil)
             HotKey.installed = true
         }
-        let id = EventHotKeyID(signature: OSType(0x4F524443), id: 1)
-        RegisterEventHotKey(opt.code, opt.mods, id, GetApplicationEventTarget(), 0, &ref)
+        let hid = EventHotKeyID(signature: OSType(0x4F524443), id: id)
+        RegisterEventHotKey(opt.code, opt.mods, hid, GetApplicationEventTarget(), 0, &ref)
     }
     func unregister() {
         if let r = ref { UnregisterEventHotKey(r); ref = nil }
@@ -1321,6 +1359,10 @@ func jpegData(from url: URL) -> Data? {
     guard let img = NSImage(contentsOf: url) else { return nil }
     var rect = CGRect(origin: .zero, size: img.size)
     guard let cg = img.cgImage(forProposedRect: &rect, context: nil, hints: nil) else { return nil }
+    return jpegData(cgImage: cg)
+}
+
+func jpegData(cgImage cg: CGImage) -> Data? {
     let w = CGFloat(cg.width), h = CGFloat(cg.height)
     let scale = min(1, 1568 / max(w, h))
     let nw = max(1, Int(w * scale)), nh = max(1, Int(h * scale))
@@ -1348,8 +1390,20 @@ final class SettingsController: NSObject {
     private var checks: [String: NSButton] = [:]
     private let axStatus = NSTextField(labelWithString: "")
     private let llm = LLM()
+    private let perceptionPopup = NSPopUpButton()
+    private let retentionPopup = NSPopUpButton()
+    private let excluded = NSTextField()
+    private let memStats = NSTextField(wrappingLabelWithString: "")
+    private let versionLabel = NSTextField(labelWithString: "")
+    private let updateStatus = NSTextField(wrappingLabelWithString: "")
+    private let notesLabel = NSTextField(wrappingLabelWithString: "")
+    private var updateButton: NSButton!
+    private let retentionOptions = [1, 3, 7, 30]
+    var hub: ContextHub?
     var onHotKeyChanged: (() -> Void)?
     var onClearHistory: (() -> Void)?
+    var onPerceptionChanged: (() -> Void)?
+    var onPreviewContext: (() -> Void)?
 
     func show(tab: Int = 0) {
         if window == nil { build() }
@@ -1364,12 +1418,44 @@ final class SettingsController: NSObject {
         checks["selectFallback"]?.state = Prefs.selectFallback ? .on : .off
         checks["clipWatch"]?.state = Prefs.clipWatch ? .on : .off
         checks["care"]?.state = Prefs.care ? .on : .off
+        checks["perception"]?.state = Prefs.perception ? .on : .off
+        checks["ocrFallback"]?.state = Prefs.ocrFallback ? .on : .off
+        checks["sendScreenshot"]?.state = Prefs.sendScreenshot ? .on : .off
+        checks["highlight"]?.state = Prefs.highlight ? .on : .off
+        checks["autoUpdate"]?.state = Prefs.autoUpdate ? .on : .off
+        perceptionPopup.selectItem(at: Prefs.perceptionHotKeyIndex)
+        retentionPopup.selectItem(at: retentionOptions.firstIndex(of: Prefs.retentionDays) ?? 2)
+        excluded.stringValue = Prefs.excludedApps
+        refreshMemStats()
+        refreshUpdate()
         refreshAX()
         status.stringValue = ""
         if let tv = window?.contentView?.subviews.first as? NSTabView { tv.selectTabViewItem(at: tab) }
         NSApp.activate(ignoringOtherApps: true)
         window?.center()
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    func refreshMemStats() {
+        guard let hub = hub else { return }
+        let st = hub.memory.stats()
+        let mb = String(format: "%.1f", Double(st.bytes) / 1_048_576)
+        let rec = ScreenReader.screenRecordingAllowed() ? "已授权" : "未授权"
+        memStats.stringValue = "记忆 \(st.count) 条 · \(mb) MB · 本次保留 \(hub.keptFrames) 帧 / 丢弃重复 \(hub.droppedFrames) 帧\n向量引擎：\(hub.memory.vectorEngine) · 全文检索：\(hub.memory.ftsOK ? "FTS5" : "LIKE") · 屏幕录制：\(rec)"
+    }
+
+    func refreshUpdate() {
+        let u = Updater.shared
+        versionLabel.stringValue = "OrdCat 🐈‍⬛  v\(u.current)"
+        if u.hasUpdate, let v = u.latestVersion {
+            updateStatus.stringValue = "🎉 有新版本 v\(v)，点「立即更新」，小猫会自己换新并重启。"
+        } else if let v = u.latestVersion {
+            updateStatus.stringValue = "✅ 已经是最新版本（线上最新 v\(v)）"
+        } else {
+            updateStatus.stringValue = "还没检查过更新"
+        }
+        updateButton?.isEnabled = u.hasUpdate
+        notesLabel.stringValue = u.hasUpdate ? String(u.latestNotes.prefix(500)) : ""
     }
 
     private func refreshAX() {
@@ -1401,7 +1487,7 @@ final class SettingsController: NSObject {
     private func build() {
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 420),
                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        w.title = "OrdCat 设置"
+        w.title = "OrdCat 设置 · v\(Updater.shared.current)"
         w.isReleasedWhenClosed = false
         let root = NSView(frame: w.contentRect(forFrameRect: w.frame))
         w.contentView = root
@@ -1475,6 +1561,75 @@ final class SettingsController: NSObject {
         t2.view = v2
         tabs.addTabViewItem(t2)
 
+        // Tab 3: perception & memory
+        let t3 = NSTabViewItem(identifier: "memory")
+        t3.label = "感知与记忆"
+        let v3 = NSView(frame: NSRect(x: 0, y: 0, width: 470, height: 360))
+        check("perception", "开启桌面感知（回答时参考你屏幕上的内容）", y: 318, in: v3)
+        label("快捷键", NSRect(x: 30, y: 289, width: 60, height: 20), in: v3)
+        for h in kPerceptionHotKeys { perceptionPopup.addItem(withTitle: h.title) }
+        perceptionPopup.target = self
+        perceptionPopup.action = #selector(perceptionHotkeyChanged)
+        perceptionPopup.frame = NSRect(x: 96, y: 284, width: 300, height: 26)
+        v3.addSubview(perceptionPopup)
+        check("ocrFallback", "读不到文字时用 OCR 识别（需要「屏幕录制」权限）", y: 256, in: v3)
+        check("sendScreenshot", "提问时附带当前窗口截图（需要识图模型）", y: 232, in: v3)
+        check("highlight", "回答里指到的位置，在屏幕上高亮出来", y: 208, in: v3)
+        label("记忆保留", NSRect(x: 10, y: 177, width: 80, height: 20), in: v3)
+        for d in retentionOptions { retentionPopup.addItem(withTitle: "\(d) 天") }
+        retentionPopup.target = self
+        retentionPopup.action = #selector(retentionChanged)
+        retentionPopup.frame = NSRect(x: 96, y: 172, width: 110, height: 26)
+        v3.addSubview(retentionPopup)
+        label("排除应用", NSRect(x: 10, y: 143, width: 80, height: 20), in: v3)
+        excluded.placeholderString = "Bundle ID，用逗号分隔，例如 com.tencent.xinWeChat"
+        excluded.frame = NSRect(x: 96, y: 140, width: 350, height: 24)
+        excluded.target = self
+        excluded.action = #selector(excludedChanged)
+        v3.addSubview(excluded)
+        memStats.font = .systemFont(ofSize: 11)
+        memStats.textColor = .secondaryLabelColor
+        memStats.frame = NSRect(x: 20, y: 56, width: 430, height: 70)
+        v3.addSubview(memStats)
+        let b1 = NSButton(title: "授权屏幕录制", target: self, action: #selector(askScreen))
+        b1.frame = NSRect(x: 6, y: 14, width: 116, height: 30); v3.addSubview(b1)
+        let b2 = NSButton(title: "查看当前上下文", target: self, action: #selector(previewContext))
+        b2.frame = NSRect(x: 120, y: 14, width: 124, height: 30); v3.addSubview(b2)
+        let b3 = NSButton(title: "清空记忆", target: self, action: #selector(clearMemory))
+        b3.frame = NSRect(x: 242, y: 14, width: 96, height: 30); v3.addSubview(b3)
+        let b4 = NSButton(title: "数据文件夹", target: self, action: #selector(openData))
+        b4.frame = NSRect(x: 336, y: 14, width: 110, height: 30); v3.addSubview(b4)
+        t3.view = v3
+        tabs.addTabViewItem(t3)
+
+        // Tab 4: about & updates
+        let t4 = NSTabViewItem(identifier: "about")
+        t4.label = "关于"
+        let v4 = NSView(frame: NSRect(x: 0, y: 0, width: 470, height: 360))
+        versionLabel.font = .systemFont(ofSize: 20, weight: .bold)
+        versionLabel.frame = NSRect(x: 20, y: 300, width: 430, height: 28)
+        v4.addSubview(versionLabel)
+        let slogan = NSTextField(labelWithString: "A cozy cat in your island & desktop. Less burden, low power, always with you.")
+        slogan.font = .systemFont(ofSize: 11)
+        slogan.textColor = .secondaryLabelColor
+        slogan.frame = NSRect(x: 20, y: 278, width: 440, height: 18)
+        v4.addSubview(slogan)
+        updateStatus.frame = NSRect(x: 20, y: 228, width: 430, height: 40)
+        v4.addSubview(updateStatus)
+        check("autoUpdate", "自动检查更新（每 6 小时）", y: 198, in: v4)
+        let c = NSButton(title: "检查更新", target: self, action: #selector(checkUpdate))
+        c.frame = NSRect(x: 16, y: 156, width: 110, height: 30); v4.addSubview(c)
+        updateButton = NSButton(title: "立即更新", target: self, action: #selector(installUpdate))
+        updateButton.frame = NSRect(x: 126, y: 156, width: 110, height: 30); v4.addSubview(updateButton)
+        let rel = NSButton(title: "发布页", target: self, action: #selector(openReleases))
+        rel.frame = NSRect(x: 236, y: 156, width: 90, height: 30); v4.addSubview(rel)
+        notesLabel.font = .systemFont(ofSize: 11)
+        notesLabel.textColor = .secondaryLabelColor
+        notesLabel.frame = NSRect(x: 20, y: 10, width: 430, height: 140)
+        v4.addSubview(notesLabel)
+        t4.view = v4
+        tabs.addTabViewItem(t4)
+
         window = w
     }
 
@@ -1487,8 +1642,61 @@ final class SettingsController: NSObject {
         case "selectFallback": Prefs.selectFallback = on
         case "clipWatch": Prefs.clipWatch = on
         case "care": Prefs.care = on
+        case "perception":
+            Prefs.perception = on
+            if on { _ = SelectionWatcher.trusted(prompt: true) }
+            onPerceptionChanged?()
+        case "ocrFallback":
+            Prefs.ocrFallback = on
+            if on && !ScreenReader.screenRecordingAllowed() { ScreenReader.requestScreenRecording() }
+        case "sendScreenshot":
+            Prefs.sendScreenshot = on
+            if on && !ScreenReader.screenRecordingAllowed() { ScreenReader.requestScreenRecording() }
+        case "highlight": Prefs.highlight = on
+        case "autoUpdate": Prefs.autoUpdate = on
         default: break
         }
+    }
+
+    @objc private func perceptionHotkeyChanged() {
+        Prefs.perceptionHotKeyIndex = perceptionPopup.indexOfSelectedItem
+        onHotKeyChanged?()
+    }
+    @objc private func retentionChanged() {
+        Prefs.retentionDays = retentionOptions[retentionPopup.indexOfSelectedItem]
+        hub?.memory.prune(days: Prefs.retentionDays)
+    }
+    @objc private func excludedChanged() { Prefs.excludedApps = excluded.stringValue }
+    @objc private func askScreen() {
+        ScreenReader.requestScreenRecording()
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+    @objc private func previewContext() { onPreviewContext?() }
+    @objc private func clearMemory() {
+        let a = NSAlert()
+        a.messageText = "清空所有桌面记忆？"
+        a.informativeText = "本机保存的屏幕卡片、划选记录和实体都会删除，无法恢复。"
+        a.addButton(withTitle: "清空")
+        a.addButton(withTitle: "取消")
+        if a.runModal() == .alertFirstButtonReturn { hub?.memory.clear(); refreshMemStats() }
+    }
+    @objc private func openData() {
+        if let dir = hub?.memory.url.deletingLastPathComponent() { NSWorkspace.shared.open(dir) }
+    }
+    @objc private func checkUpdate() {
+        updateStatus.stringValue = "正在检查…"
+        Updater.shared.check { [weak self] err in
+            if let e = err { self?.updateStatus.stringValue = "⚠️ 检查失败：\(e)" } else { self?.refreshUpdate() }
+        }
+    }
+    @objc private func installUpdate() {
+        updateButton.isEnabled = false
+        Updater.shared.install { [weak self] msg in self?.updateStatus.stringValue = msg }
+    }
+    @objc private func openReleases() {
+        if let u = URL(string: "https://github.com/\(Updater.repo)/releases") { NSWorkspace.shared.open(u) }
     }
 
     @objc private func hotkeyChanged() {
@@ -1551,7 +1759,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let llm = LLM()
     private let voice = Voice()
     private let listener = Listener()
-    private let hotKey = HotKey()
+    private let hotKey = HotKey(id: 1)
+    private let perceptionKey = HotKey(id: 2)
+    private lazy var hub = ContextHub(dir: store.dir)
+    private let highlighter = Highlighter()
+    private var versionItem: NSMenuItem!
+    private var perceptionItem: NSMenuItem!
+    private var contextWindow: NSWindow?
     private let selection = SelectionWatcher()
     private let settings = SettingsController()
     private var chatWindow: ChatWindowController!
@@ -1584,6 +1798,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bubble.onMic = { [weak self] in self?.toggleVoice(fromWindow: false) }
         settings.onHotKeyChanged = { [weak self] in self?.registerHotKey() }
         settings.onClearHistory = { [weak self] in self?.store.clear() }
+        settings.hub = hub
+        settings.onPerceptionChanged = { [weak self] in self?.applyPerception(announce: true) }
+        settings.onPreviewContext = { [weak self] in self?.previewContext() }
+        hub.idleSeconds = { [weak self] in self?.idleSeconds() ?? 0 }
+        applyPerception(announce: false)
+        Updater.shared.onUpdateAvailable = { [weak self] v in self?.announceUpdate(v) }
+        if Prefs.autoUpdate { Updater.shared.startAutoCheck() }
+        RemoteConfig.shared.fetch { [weak self] text in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { self?.bubble.notify(text, hold: 12) }
+        }
         setupListener()
         setupSelection()
         registerHotKey()
@@ -1665,10 +1889,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "🐈‍⬛"
         let m = NSMenu()
+        versionItem = NSMenuItem(title: "OrdCat v\(Updater.shared.current)", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        m.addItem(versionItem)
+        m.addItem(.separator())
         m.addItem(withTitle: "和小猫聊天", action: #selector(menuChat), keyEquivalent: "").target = self
         m.addItem(withTitle: "打开聊天窗口", action: #selector(menuWindow), keyEquivalent: "").target = self
         m.addItem(withTitle: "语音对话", action: #selector(menuVoice), keyEquivalent: "").target = self
         m.addItem(withTitle: "显示 / 隐藏小猫", action: #selector(toggleCat), keyEquivalent: "").target = self
+        perceptionItem = NSMenuItem(title: "桌面感知", action: #selector(togglePerception), keyEquivalent: "")
+        perceptionItem.target = self
+        m.addItem(perceptionItem)
+        m.addItem(withTitle: "查看当前上下文", action: #selector(previewContextMenu), keyEquivalent: "").target = self
         m.addItem(.separator())
         m.addItem(withTitle: "设置…", action: #selector(openSettings), keyEquivalent: ",").target = self
         m.addItem(.separator())
@@ -1684,6 +1916,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         else { catPanel.orderFrontRegardless(); catView.peekIn() }
     }
     @objc private func openSettings() { settings.show() }
+    @objc private func previewContextMenu() { previewContext() }
+
+    // MARK: perception
+    @objc private func togglePerception() {
+        Prefs.perception.toggle()
+        if Prefs.perception { _ = SelectionWatcher.trusted(prompt: true) }
+        applyPerception(announce: true)
+    }
+
+    private func applyPerception(announce: Bool) {
+        let on = Prefs.perception
+        hub.setEnabled(on)
+        statusItem.button?.title = on ? "🐈‍⬛👀" : "🐈‍⬛"
+        perceptionItem?.state = on ? .on : .off
+        let k = kPerceptionHotKeys[Prefs.perceptionHotKeyIndex]
+        perceptionItem?.title = "桌面感知（\(k.title)）"
+        if announce {
+            say(on ? "👀 桌面感知打开啦，问我问题时我会先看看你的屏幕。" : "🙈 桌面感知已关闭，我不会再看你的屏幕。")
+        }
+    }
+
+    private func previewContext() {
+        Task { @MainActor in
+            let ctx = await hub.assemble(query: "（预览）", wantScreenshot: false)
+            showContextWindow("约 \(ctx.tokens) tokens · 预算 \(Prefs.contextBudget)\n\n" + ctx.text)
+            self.settings.refreshMemStats()
+        }
+    }
+
+    private func showContextWindow(_ text: String) {
+        if contextWindow == nil {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 560),
+                             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            w.title = "当前会发给模型的上下文"
+            w.isReleasedWhenClosed = false
+            let sv = NSScrollView(frame: w.contentView!.bounds)
+            sv.autoresizingMask = [.width, .height]
+            sv.hasVerticalScroller = true
+            let tv = NSTextView(frame: sv.bounds)
+            tv.autoresizingMask = [.width]
+            tv.isEditable = false
+            tv.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+            tv.textContainerInset = NSSize(width: 12, height: 12)
+            sv.documentView = tv
+            w.contentView = sv
+            w.center()
+            contextWindow = w
+        }
+        ((contextWindow?.contentView as? NSScrollView)?.documentView as? NSTextView)?.string = text
+        NSApp.activate(ignoringOtherApps: true)
+        contextWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    // MARK: updates
+    private func announceUpdate(_ v: String) {
+        versionItem?.title = "OrdCat v\(Updater.shared.current) · ⬆️ 可更新到 v\(v)"
+        versionItem?.isEnabled = true
+        versionItem?.target = self
+        versionItem?.action = #selector(installFromMenu)
+        settings.refreshUpdate()
+        bubble.notify("有新版本 v\(v) 啦～要我现在换新吗？", actions: [
+            ("立即更新", { [weak self] in self?.installFromMenu() }),
+            ("稍后", { [weak self] in self?.bubble.hide() })
+        ], hold: 15)
+    }
+
+    @objc private func installFromMenu() {
+        Updater.shared.install { [weak self] msg in self?.bubble.notify(msg, hold: 8) }
+    }
 
     // MARK: chat
     private func toggleChat() {
@@ -1722,32 +2023,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func ask(_ text: String, images: [Data] = [], spoken: Bool = false, inBubble: Bool = true) {
         voice.stop()
+        highlighter.clear()
         let names = images.compactMap { store.saveImage($0) }
         store.append(ChatMessage(role: "user", text: text, imageNames: names, date: Date()))
-        let history = apiHistory(newImages: images)
+        var history = apiHistory(newImages: images)
         store.append(ChatMessage(role: "assistant", text: "", imageNames: [], date: Date()))
+        let usePerception = Prefs.perception
         if inBubble {
-            if bubble.chatMode { bubble.setText("……") } else { bubble.openChat(greeting: "……") }
+            let wait = usePerception ? "👀 我先看一眼你的屏幕…" : "……"
+            if bubble.chatMode { bubble.setText(wait) } else { bubble.openChat(greeting: wait) }
         }
-        llm.stream(history, onDelta: { [weak self] t in
-            guard let self = self else { return }
-            self.store.updateLast(t)
-            if inBubble && self.bubble.isShown { self.bubble.setText(t) }
-        }, onDone: { [weak self] t, err in
-            guard let self = self else { return }
-            let final = err.map { "⚠️ " + $0 } ?? (t ?? "")
-            self.store.updateLast(final)
-            self.store.save()
-            self.catView.perk(false)
-            if inBubble && self.bubble.isShown { self.bubble.setText(final) }
-            if err == nil && (Prefs.voice || spoken) { self.voice.speak(final) }
-        })
+        Task { @MainActor in
+            var context: String?
+            if usePerception {
+                let ctx = await self.hub.assemble(query: text, wantScreenshot: Prefs.sendScreenshot && images.isEmpty)
+                context = ctx.text
+                if let img = ctx.image, let lastIndex = history.indices.last {
+                    let parts: [[String: Any]] = [
+                        ["type": "text", "text": text],
+                        ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64," + img.base64EncodedString()]]
+                    ]
+                    history[lastIndex] = ["role": "user", "content": parts]
+                }
+            }
+            self.llm.stream(history, context: context, onDelta: { [weak self] t in
+                guard let self = self else { return }
+                let shown = ContextHub.stripTags(t)
+                self.store.updateLast(shown)
+                if inBubble && self.bubble.isShown { self.bubble.setText(shown) }
+            }, onDone: { [weak self] t, err in
+                guard let self = self else { return }
+                let raw = t ?? ""
+                let final = err.map { "⚠️ " + $0 } ?? ContextHub.stripTags(raw)
+                self.store.updateLast(final)
+                self.store.save()
+                self.catView.perk(false)
+                if inBubble && self.bubble.isShown { self.bubble.setText(final) }
+                guard err == nil else { return }
+                self.hub.recordChat(user: text, reply: final)
+                if usePerception && Prefs.highlight {
+                    let rects = self.hub.resolveTargets(in: raw)
+                    if !rects.isEmpty { self.highlighter.show(rects, label: "在这里") }
+                }
+                if Prefs.voice || spoken { self.voice.speak(final.replacingOccurrences(of: "👉", with: "")) }
+            })
+        }
     }
 
     // MARK: voice chat
     private func registerHotKey() {
-        HotKey.action = { [weak self] in self?.toggleVoice(fromWindow: false) }
-        if Prefs.voiceChat { hotKey.register(kHotKeys[Prefs.hotKeyIndex]) } else { hotKey.unregister() }
+        if Prefs.voiceChat {
+            hotKey.register(kHotKeys[Prefs.hotKeyIndex]) { [weak self] in self?.toggleVoice(fromWindow: false) }
+        } else {
+            hotKey.unregister()
+        }
+        perceptionKey.register(kPerceptionHotKeys[Prefs.perceptionHotKeyIndex]) { [weak self] in self?.togglePerception() }
+        if perceptionItem != nil { applyPerception(announce: false) }
     }
 
     private func setupListener() {
@@ -1805,7 +2136,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for w in NSApp.windows where w.isVisible && w.frame.contains(p) { return true }
             return false
         }
-        selection.onSelect = { [weak self] s in self?.offerHelp(with: s, verb: "选中") }
+        selection.onSelect = { [weak self] s in
+            guard let self = self else { return }
+            if Prefs.perception { self.hub.recordSelection(s) }
+            self.offerHelp(with: s, verb: "选中")
+        }
         selection.onNeedsPermission = { [weak self] in
             self?.bubble.notify("想在你选中文字时竖起耳朵，需要先授权「辅助功能」哦～",
                                 actions: [("去授权", { _ = SelectionWatcher.trusted(prompt: true) })], hold: 10)

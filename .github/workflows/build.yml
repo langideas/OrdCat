@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build universal app
         env:
-          VERSION: 0.1.${{ github.run_number }}
+          VERSION: 0.2.${{ github.run_number }}
           BUILD: ${{ github.run_number }}
         run: ./build.sh
       - uses: actions/upload-artifact@v4
@@ -23,7 +23,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=v0.1.${{ github.run_number }}
+          TAG=v0.2.${{ github.run_number }}
           gh release create "$TAG" build/OrdCat-macOS.zip \
             --title "OrdCat $TAG" \
             --notes-file RELEASE_NOTES.md \
