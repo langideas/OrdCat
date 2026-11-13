@@ -444,26 +444,38 @@ final class SelectionWatcher {
         if e.type == .leftMouseDown { downPoint = p; return }
         guard Prefs.selectWatch else { return }
         let dragged = hypot(p.x - downPoint.x, p.y - downPoint.y) > 8
-        guard dragged || e.clickCount >= 2 else { return }
+        let shiftClick = e.modifierFlags.contains(.shift)
+        guard dragged || e.clickCount >= 2 || shiftClick else { return }
         if isOwnPoint?(p) == true { return }
         guard SelectionWatcher.trusted(prompt: false) else {
             if !asked { asked = true; onNeedsPermission?() }
             return
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in self?.grab() }
+        generation += 1
+        let gen = generation
+        // Read almost immediately; retry once in case the app updates its selection a beat later.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in self?.grab(gen, retry: true) }
     }
 
-    private func grab() {
+    private var generation = 0
+
+    private func grab(_ gen: Int, retry: Bool) {
+        guard gen == generation else { return }   // a newer selection superseded this one
         if let s = axSelectedText(), !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             onSelect?(s)
+            return
+        }
+        if retry {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in self?.grab(gen, retry: false) }
             return
         }
         guard Prefs.selectFallback else { return }
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
         if front == "com.apple.finder" || front == Bundle.main.bundleIdentifier { return }
         copyFallback { [weak self] s in
-            guard let s = s, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            self?.onSelect?(s)
+            guard let self = self, gen == self.generation,
+                  let s = s, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            self.onSelect?(s)
         }
     }
 
@@ -495,8 +507,16 @@ final class SelectionWatcher {
         up?.flags = .maskCommand
         down?.post(tap: .cghidEventTap)
         up?.post(tap: .cghidEventTap)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
-            guard pb.changeCount != before else { done(nil); return }
+        var tries = 0
+        func poll() {
+            tries += 1
+            if pb.changeCount == before {
+                if tries < 10 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) { poll() } } else { done(nil) }
+                return
+            }
+            finish()
+        }
+        func finish() {
             let s = pb.string(forType: .string)
             pb.clearContents()
             let items: [NSPasteboardItem] = saved.map { dict in
@@ -505,9 +525,10 @@ final class SelectionWatcher {
                 return it
             }
             if !items.isEmpty { pb.writeObjects(items) }
-            self?.ignoreChangeCount = pb.changeCount
+            self.ignoreChangeCount = pb.changeCount
             done(s)
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { poll() }
     }
 }
 
@@ -520,20 +541,18 @@ final class CatView: NSView {
 
     private let rig = CALayer()
     private let cat = CALayer()
-    private let body = CAShapeLayer()
     private let head = CAShapeLayer()
     private let earL = CAShapeLayer()
     private let earR = CAShapeLayer()
     private let eyeL = CAShapeLayer()
     private let eyeR = CAShapeLayer()
     private let paw = CAShapeLayer()
-    private let paw2 = CAShapeLayer()
     private let excl = CAShapeLayer()
 
     private let tilt: CGFloat = 18 * .pi / 180
-    private let restOffset: CGFloat = 18      // tucked in a bit
-    private let hoverOffset: CGFloat = -78    // leans out, more body
-    private(set) var peek: CGFloat = 18
+    private let restOffset: CGFloat = 0       // classic v0.1.3 peek
+    private let hoverOffset: CGFloat = -22    // a small, curious lean on hover
+    private(set) var peek: CGFloat = 0
     private(set) var hovering = false
     private var lookOffset = CGPoint.zero
     private var eyeScale: CGFloat = 1
@@ -543,7 +562,7 @@ final class CatView: NSView {
     private var lastLook: TimeInterval = 0
 
     /// Head centre in view coordinates when not shifted.
-    var baseHead: CGPoint { CGPoint(x: bounds.maxX - 46, y: bounds.midY + 20) }
+    var baseHead: CGPoint { CGPoint(x: bounds.maxX - 46, y: bounds.midY + 6) }
     var currentHead: CGPoint { CGPoint(x: baseHead.x + peek, y: baseHead.y) }
 
     func headScreenPoint() -> NSPoint {
@@ -611,18 +630,6 @@ final class CatView: NSView {
         root.addSublayer(rig)
         let h = baseHead
 
-        // Body: a soft loaf sloping down and off the screen edge, revealed when it leans out.
-        let bodyPath = CGMutablePath()
-        bodyPath.addEllipse(in: CGRect(x: h.x - 70, y: h.y - 175, width: 250, height: 150))
-        body.path = bodyPath
-        body.fillColor = kFur.cgColor
-        body.strokeColor = kRim.cgColor
-        body.lineWidth = 2
-        rig.addSublayer(body)
-
-        makePaw(paw2, CGRect(x: h.x - 20, y: h.y - 160, width: 56, height: 30))
-        rig.addSublayer(paw2)
-
         cat.bounds = CGRect(x: -130, y: -130, width: 260, height: 260)
         cat.position = h
         cat.transform = CATransform3DMakeRotation(tilt, 0, 0, 1)
@@ -650,11 +657,11 @@ final class CatView: NSView {
         cat.addSublayer(eyeL)
         cat.addSublayer(eyeR)
 
-        makePaw(paw, CGRect(x: h.x - 62, y: h.y - 100, width: 70, height: 36))
+        makePaw(paw, CGRect(x: h.x - 12, y: h.y - 98, width: 70, height: 36))
         rig.addSublayer(paw)
 
         excl.bounds = CGRect(x: 0, y: 0, width: 34, height: 34)
-        excl.position = CGPoint(x: h.x - 108, y: h.y + 100)
+        excl.position = CGPoint(x: h.x - 112, y: h.y + 100)
         excl.path = CGPath(ellipseIn: excl.bounds, transform: nil)
         excl.fillColor = kAmber.cgColor
         let t = CATextLayer()
@@ -796,9 +803,7 @@ final class CatView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         let p = convert(point, from: superview)
         let h = currentHead
-        if hypot(p.x - h.x, p.y - h.y) < 100 { return self }
-        if hovering && p.y < h.y - 40 && p.y > h.y - 190 && p.x > h.x - 80 { return self }   // body
-        return nil
+        return hypot(p.x - h.x, p.y - h.y) < 110 ? self : nil
     }
     override func mouseDown(with event: NSEvent) {
         dragStart = NSEvent.mouseLocation
@@ -874,6 +879,7 @@ final class Bubble: NSObject {
     let width: CGFloat = 340
 
     var isShown: Bool { panel.isVisible && panel.alphaValue > 0.01 }
+    var hasDraft: Bool { !input.stringValue.trimmingCharacters(in: .whitespaces).isEmpty }
 
     override init() {
         panel = KeyPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 120),
@@ -973,7 +979,14 @@ final class Bubble: NSObject {
         chatMode = false
         setActions(list)
         textView.string = text
-        present(makeKey: false)
+        if isShown {
+            // Already on screen: swap content instantly, no fade.
+            panel.animator().alphaValue = 1
+            layout()
+            panel.orderFrontRegardless()
+        } else {
+            present(makeKey: false)
+        }
         scheduleHide(after: hold ?? min(15, 4 + Double(text.count) * 0.08 + (list.isEmpty ? 0 : 4)))
     }
 
@@ -1069,8 +1082,8 @@ final class Bubble: NSObject {
         }
 
         let head = anchor()
-        var x = head.x - width - 70
-        var yy = head.y - h / 2 + 40
+        var x = head.x - width - 130
+        var yy = head.y - h / 2 + 30
         let scr = NSScreen.screens.first(where: { $0.frame.contains(head) }) ?? NSScreen.main
         if let vis = scr?.visibleFrame {
             x = max(vis.minX + 8, x)
@@ -1781,6 +1794,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var nudgedNight: String?
     private var lastPrompted = ""
     private var voiceFromWindow = false
+    private var bubbleGen = 0
 
     let catSize = NSSize(width: 300, height: 330)
 
@@ -2033,6 +2047,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let wait = usePerception ? "👀 我先看一眼你的屏幕…" : "……"
             if bubble.chatMode { bubble.setText(wait) } else { bubble.openChat(greeting: wait) }
         }
+        let gen = bubbleGen
         Task { @MainActor in
             var context: String?
             if usePerception {
@@ -2050,7 +2065,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self = self else { return }
                 let shown = ContextHub.stripTags(t)
                 self.store.updateLast(shown)
-                if inBubble && self.bubble.isShown { self.bubble.setText(shown) }
+                if inBubble && self.bubble.isShown && gen == self.bubbleGen { self.bubble.setText(shown) }
             }, onDone: { [weak self] t, err in
                 guard let self = self else { return }
                 let raw = t ?? ""
@@ -2058,7 +2073,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.store.updateLast(final)
                 self.store.save()
                 self.catView.perk(false)
-                if inBubble && self.bubble.isShown { self.bubble.setText(final) }
+                if inBubble && self.bubble.isShown && gen == self.bubbleGen { self.bubble.setText(final) }
                 guard err == nil else { return }
                 self.hub.recordChat(user: text, reply: final)
                 if usePerception && Prefs.highlight {
@@ -2150,9 +2165,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func offerHelp(with raw: String, verb: String) {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard s.count >= 2, s.count <= 8000, s != lastPrompted else { return }
-        guard catPanel.isVisible, !bubble.chatMode, !listener.isListening else { return }
+        guard s.count >= 2, s.count <= 8000 else { return }
+        if s == lastPrompted && bubble.isShown && !bubble.chatMode { return }
+        guard catPanel.isVisible, !listener.isListening else { return }
+        if bubble.chatMode && bubble.hasDraft { return }   // don't interrupt typing
         lastPrompted = s
+        bubbleGen += 1   // older streaming answers stop writing into the bubble
         catView.perk(true)
         let preview = s.count > 36 ? String(s.prefix(36)) + "…" : s
         bubble.notify("你\(verb)了「\(preview)」～要我帮忙吗？", actions: [
