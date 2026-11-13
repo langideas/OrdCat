@@ -129,6 +129,23 @@ final class Updater {
         return Updater.swapAndRelaunch(target: target, newApp: copy)
     }
 
+    /// "修复授权": re-sign the running copy with this Mac's identity and relaunch.
+    func repairSigning() -> (ok: Bool, message: String) {
+        let fm = FileManager.default
+        let cur = Bundle.main.bundleURL
+        guard fm.isWritableFile(atPath: cur.deletingLastPathComponent().path) else {
+            return (false, "没有权限写入「应用程序」文件夹，请用管理员账户登录后再试。")
+        }
+        let work = fm.temporaryDirectory.appendingPathComponent("OrdCatRepair-\(UUID().uuidString)")
+        try? fm.createDirectory(at: work, withIntermediateDirectories: true)
+        let copy = work.appendingPathComponent("OrdCat.app")
+        let (dc, _) = LocalSigner.run("/usr/bin/ditto", [cur.path, copy.path])
+        guard dc == 0 else { return (false, "复制失败") }
+        guard LocalSigner.sign(copy) else { return (false, "签名失败：\(LocalSigner.lastError)") }
+        guard Updater.swapAndRelaunch(target: cur, newApp: copy) else { return (false, "替换失败") }
+        return (true, "签好了，小猫马上重启，然后到「辅助功能」里把 OrdCat 打开一次就行")
+    }
+
     /// Download, unpack, and swap the bundle after we quit. `status` receives Chinese progress lines.
     func install(status: @escaping (String) -> Void) {
         guard let zip = zipURL else { status("还没有可用的更新"); return }
@@ -215,14 +232,19 @@ enum LocalSigner {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: exe)
         p.arguments = args
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = pipe
-        guard (try? p.run()) != nil else { return (-1, "") }
+        // Output goes to a temp file: a pipe that nobody drains can block a chatty child forever.
+        let log = FileManager.default.temporaryDirectory.appendingPathComponent("ordcat-run-\(UUID().uuidString).txt")
+        FileManager.default.createFile(atPath: log.path, contents: nil)
+        guard let fh = try? FileHandle(forWritingTo: log) else { return (-1, "") }
+        p.standardOutput = fh
+        p.standardError = fh
+        guard (try? p.run()) != nil else { try? fh.close(); return (-1, "") }
         let deadline = Date().addingTimeInterval(timeout)
         while p.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
-        if p.isRunning { p.terminate(); return (-1, "timeout") }
-        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        try? fh.close()
+        let out = (try? String(contentsOf: log, encoding: .utf8)) ?? ""
+        try? FileManager.default.removeItem(at: log)
+        if p.isRunning { p.terminate(); return (-1, out + "\ntimeout") }
         return (p.terminationStatus, out)
     }
 
@@ -231,13 +253,33 @@ enum LocalSigner {
         return out.contains("Signature=adhoc") || out.contains("not signed")
     }
 
+    /// Human-readable signing state of the running copy, for the 关于 tab and launch check.
+    static func state() -> (stable: Bool, text: String) {
+        let (_, out) = run("/usr/bin/codesign", ["-dv", Bundle.main.bundleURL.path], timeout: 10)
+        if out.contains("Authority=OrdCat Local Signing") { return (true, "✅ 本机固定签名：授权一次，以后更新不用再授权") }
+        var why = lastError
+        if why.isEmpty { why = "还没签过" }
+        return (false, "⚠️ 临时签名（每次更新都要重新授权）。原因：\(why)")
+    }
+
+    static var lastError: String {
+        let f = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/OrdCatSigning/last-error.txt")
+        let s = (try? String(contentsOf: f, encoding: .utf8)) ?? ""
+        return String(s.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160))
+    }
+
     static func sign(_ app: URL) -> Bool {
         let mine = Bundle.main.path(forResource: "localsign", ofType: "sh")
         let theirs = app.appendingPathComponent("Contents/Resources/localsign.sh").path
         guard let script = [mine, theirs].compactMap({ $0 }).first(where: { FileManager.default.fileExists(atPath: $0) })
         else { return false }
-        let (code, out) = run("/bin/sh", [script, app.path])
+        let (code, out) = run("/bin/sh", [script, app.path], timeout: 90)
         NSLog("OrdCat localsign: \(code) \(out)")
+        if code != 0 {
+            let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/OrdCatSigning")
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? (out.isEmpty ? "签名脚本退出码 \(code)" : out).write(to: dir.appendingPathComponent("last-error.txt"), atomically: true, encoding: .utf8)
+        }
         return code == 0
     }
 }

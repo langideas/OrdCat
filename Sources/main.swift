@@ -1037,6 +1037,8 @@ final class Bubble: NSObject {
     private(set) var chatMode = false
     var onSend: ((String) -> Void)?
     var onExpand: (() -> Void)?
+    var onTopics: ((NSView) -> Void)?
+    private var topicsButton: NSButton!
     var onMic: (() -> Void)?
     var anchor: () -> NSPoint = { .zero }   // cat head centre, screen coords
     let width: CGFloat = 340
@@ -1078,6 +1080,13 @@ final class Bubble: NSObject {
         expandButton.contentTintColor = .secondaryLabelColor
         expandButton.toolTip = "打开独立聊天窗口（聊天记录、发送图片和文件）"
         card.addSubview(expandButton)
+
+        topicsButton = NSButton(title: "🗂 之前的话题", target: self, action: #selector(doTopics))
+        topicsButton.isBordered = false
+        topicsButton.font = .systemFont(ofSize: 11)
+        topicsButton.contentTintColor = .secondaryLabelColor
+        topicsButton.toolTip = "默认只参考当前页面；想接着聊以前的内容，在这里选"
+        card.addSubview(topicsButton)
 
         textView.isEditable = false
         textView.isSelectable = true
@@ -1133,18 +1142,29 @@ final class Bubble: NSObject {
     @objc private func closeShare() { setShare(title: shareTitle, on: false); onShareChanged?(false) }
 
     /// Show or update the "正在分享「…」" chip above the input box.
-    func setShare(title: String?, on: Bool) {
-        let changed = title != shareTitle || on != sharing
+    /// Set when the user picked an earlier topic from 🗂: the chip then says what we are continuing.
+    var topicLabel: String? { didSet { setShare(title: shareTitle, on: sharing, force: true) } }
+
+    func setShare(title: String?, on: Bool, force: Bool = false) {
+        let changed = force || title != shareTitle || on != sharing
         shareTitle = title
         sharing = on && title != nil
         if let t = title {
-            let short = t.count > 30 ? String(t.prefix(30)) + "…" : t
-            shareChip.title = sharing ? "  🟢 正在分享「\(short)」" : "  ⚪️ 未分享当前页面 · 点这里分享"
+            let short = t.count > 28 ? String(t.prefix(28)) + "…" : t
+            if sharing {
+                shareChip.title = "  🟢 正在分享「\(short)」"
+            } else if let tl = topicLabel {
+                let ts = tl.count > 18 ? String(tl.prefix(18)) + "…" : tl
+                shareChip.title = "  💬 在聊之前的「\(ts)」· 点这里改回当前页面"
+            } else {
+                shareChip.title = "  ⚪️ 未分享当前页面 · 点这里分享"
+            }
         }
         if changed && isShown { layout() }
     }
 
     @objc private func doExpand() { onExpand?() }
+    @objc private func doTopics() { onTopics?(topicsButton) }
     @objc private func doMic() { onMic?() }
     @objc private func doAction(_ sender: NSButton) {
         let i = sender.tag
@@ -1258,6 +1278,8 @@ final class Bubble: NSObject {
         title.frame = NSRect(x: pad, y: y, width: 120, height: 16)
         expandButton.frame = NSRect(x: width - pad - 90, y: y - 2, width: 92, height: 20)
         expandButton.isHidden = !chatMode
+        topicsButton.frame = NSRect(x: width - pad - 90 - 92, y: y - 2, width: 90, height: 20)
+        topicsButton.isHidden = !chatMode
         y -= 6 + textH
         scroll.frame = NSRect(x: pad, y: y, width: inner, height: textH)
         textView.frame = NSRect(x: 0, y: 0, width: inner, height: max(used, textH))
@@ -1619,6 +1641,7 @@ final class SettingsController: NSObject {
     private let versionLabel = NSTextField(labelWithString: "")
     private let updateStatus = NSTextField(wrappingLabelWithString: "")
     private let notesLabel = NSTextField(wrappingLabelWithString: "")
+    private let signLabel = NSTextField(wrappingLabelWithString: "")
     private var updateButton: NSButton!
     private let retentionOptions = [1, 3, 7, 30]
     var hub: ContextHub?
@@ -1664,6 +1687,7 @@ final class SettingsController: NSObject {
         excluded.stringValue = Prefs.excludedApps
         refreshMemStats()
         refreshUpdate()
+        refreshSign()
         refreshAX()
         status.stringValue = ""
         if let tv = window?.contentView?.subviews.first as? NSTabView { tv.selectTabViewItem(at: tab) }
@@ -1905,9 +1929,14 @@ final class SettingsController: NSObject {
         updateButton.frame = NSRect(x: 126, y: 156, width: 110, height: 30); v4.addSubview(updateButton)
         let rel = NSButton(title: "发布页", target: self, action: #selector(openReleases))
         rel.frame = NSRect(x: 236, y: 156, width: 90, height: 30); v4.addSubview(rel)
+        let fix = NSButton(title: "修复授权", target: self, action: #selector(repairSigning))
+        fix.frame = NSRect(x: 326, y: 156, width: 110, height: 30); v4.addSubview(fix)
+        signLabel.font = .systemFont(ofSize: 11)
+        signLabel.frame = NSRect(x: 20, y: 118, width: 430, height: 32)
+        v4.addSubview(signLabel)
         notesLabel.font = .systemFont(ofSize: 11)
         notesLabel.textColor = .secondaryLabelColor
-        notesLabel.frame = NSRect(x: 20, y: 10, width: 430, height: 140)
+        notesLabel.frame = NSRect(x: 20, y: 10, width: 430, height: 104)
         v4.addSubview(notesLabel)
         t4.view = v4
         tabs.addTabViewItem(t4)
@@ -2033,6 +2062,24 @@ final class SettingsController: NSObject {
         updateButton.isEnabled = false
         Updater.shared.install { [weak self] msg in self?.updateStatus.stringValue = msg }
     }
+    @objc private func repairSigning() {
+        signLabel.stringValue = "正在用这台 Mac 的签名重新签…"
+        DispatchQueue.global(qos: .userInitiated).async {
+            let r = Updater.shared.repairSigning()
+            DispatchQueue.main.async {
+                self.signLabel.stringValue = r.message
+                if r.ok { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { NSApp.terminate(nil) } }
+            }
+        }
+    }
+    private func refreshSign() {
+        signLabel.stringValue = "正在检查签名…"
+        DispatchQueue.global(qos: .utility).async {
+            let st = LocalSigner.state()
+            DispatchQueue.main.async { self.signLabel.stringValue = st.text }
+        }
+    }
+
     @objc private func openReleases() {
         if let u = URL(string: "https://github.com/\(Updater.repo)/releases") { NSWorkspace.shared.open(u) }
     }
@@ -2146,6 +2193,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bubble.onSend = { [weak self] text in self?.ask(text) }
         bubble.onExpand = { [weak self] in self?.bubble.hide(); self?.chatWindow.show() }
         bubble.onMic = { [weak self] in self?.toggleVoice(fromWindow: false) }
+        bubble.onTopics = { [weak self] v in self?.showTopicsMenu(v) }
+        bubble.onShareChanged = { [weak self] on in
+            guard let self = self else { return }
+            if on { self.chosenTopic = nil; self.bubble.topicLabel = nil }
+        }
+        startTrustWatch()
+        checkSigningOnce()
         settings.onHotKeyChanged = { [weak self] in self?.registerHotKey() }
         settings.onClearHistory = { [weak self] in self?.store.clear() }
         settings.hub = hub
@@ -2349,10 +2403,127 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         catView.perk(false)
         let last = store.messages.last(where: { $0.role == "assistant" && !$0.text.isEmpty })?.text
         let page = Prefs.pageShare ? hub.shareableWindow() : nil
+        chosenTopic = nil
+        bubble.topicLabel = nil
         bubble.setShare(title: page?.title, on: page != nil)
         bubble.openChat(greeting: page != nil ? "喵～我能看到你正在看的页面，想问点什么？" : (last ?? "喵～想聊点什么？"))
         if page != nil { bubble.setActions(pageQuickActions()); bubble.layout() }
         startShareWatch()
+    }
+
+    // MARK: Accessibility grant → take effect without the user restarting
+    private var trustTimer: Timer?
+    private func startTrustWatch() {
+        guard !AXIsProcessTrusted() else { return }
+        let flip: () -> Void = { [weak self] in
+            guard let self = self, self.trustTimer != nil, AXIsProcessTrusted() else { return }
+            self.trustTimer?.invalidate(); self.trustTimer = nil
+            self.bubble.notify("授权成功啦～小猫重启一下马上生效 🐾", hold: 3)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.relaunch() }
+        }
+        trustTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in flip() }
+        trustTimer?.tolerance = 0.5
+        DistributedNotificationCenter.default().addObserver(forName: NSNotification.Name("com.apple.accessibility.api"),
+                                                            object: nil, queue: .main) { _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { flip() }
+        }
+    }
+    private func relaunch() {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "sleep 1; /usr/bin/open \"$1\"", "ordcat-relaunch", Bundle.main.bundlePath]
+        try? p.run()
+        NSApp.terminate(nil)
+    }
+    /// If this copy still has a temporary signature, say why once per version (grants won't survive updates).
+    private func checkSigningOnce() {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 6) { [weak self] in
+            let st = LocalSigner.state()
+            let key = "signWarned-\(Updater.shared.current)"
+            guard !st.stable, !UserDefaults.standard.bool(forKey: key) else { return }
+            UserDefaults.standard.set(true, forKey: key)
+            DispatchQueue.main.async {
+                self?.bubble.notify("这一版没能用本机固定签名，所以每次更新都要重新授权。可以在 设置 → 关于 点「修复授权」再试一次。", 
+                                    actions: [("去修复", { [weak self] in self?.settings.show(tab: 4) })], hold: 12)
+            }
+        }
+    }
+
+    // MARK: topics (one per shared page; the user can go back to an earlier one)
+    struct Topic: Codable { var title: String; var start: Date; var last: Date }
+    private lazy var topics: [Topic] = {
+        guard let d = UserDefaults.standard.data(forKey: "topics"),
+              let t = try? JSONDecoder().decode([Topic].self, from: d) else { return [] }
+        return t
+    }()
+    private var chosenTopic: Topic?
+    private func saveTopics() {
+        if topics.count > 30 { topics.removeFirst(topics.count - 30) }
+        if let d = try? JSONEncoder().encode(topics) { UserDefaults.standard.set(d, forKey: "topics") }
+    }
+    /// Same page within 30 minutes continues its topic; anything else starts a fresh one.
+    private func beginTopic(title: String) -> Topic {
+        let now = Date()
+        if let last = topics.last, last.title == title, now.timeIntervalSince(last.last) < 1800 {
+            topics[topics.count - 1].last = now
+            saveTopics()
+            return topics[topics.count - 1]
+        }
+        let t = Topic(title: title, start: now.addingTimeInterval(-0.01), last: now)
+        topics.append(t)
+        saveTopics()
+        return t
+    }
+    private func showTopicsMenu(_ from: NSView) {
+        let menu = NSMenu()
+        let cur = NSMenuItem(title: "📄 当前页面（默认）", action: #selector(topicCurrent), keyEquivalent: "")
+        cur.target = self
+        menu.addItem(cur)
+        menu.addItem(.separator())
+        let df = DateFormatter(); df.dateFormat = "M月d日 HH:mm"
+        let list = Array(topics.reversed().prefix(12))
+        if list.isEmpty {
+            let none = NSMenuItem(title: "还没有之前的话题", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            menu.addItem(none)
+        }
+        for (i, t) in list.enumerated() {
+            let short = t.title.count > 32 ? String(t.title.prefix(32)) + "…" : t.title
+            let it = NSMenuItem(title: "💬 \(short)  ·  \(df.string(from: t.last))", action: #selector(topicPicked(_:)), keyEquivalent: "")
+            it.target = self
+            it.tag = topics.count - 1 - i
+            menu.addItem(it)
+        }
+        menu.addItem(.separator())
+        let fresh = NSMenuItem(title: "🆕 新话题（不带之前的聊天）", action: #selector(topicFresh), keyEquivalent: "")
+        fresh.target = self
+        menu.addItem(fresh)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: from.bounds.height + 2), in: from)
+    }
+    @objc private func topicCurrent() {
+        chosenTopic = nil
+        bubble.topicLabel = nil
+        let page = hub.shareableWindow()
+        bubble.setShare(title: page?.title, on: page != nil)
+        bubble.setText(page != nil ? "好～我们聊你现在看的这个页面。" : "现在没有可以分享的页面，直接聊也可以～")
+    }
+    @objc private func topicPicked(_ item: NSMenuItem) {
+        guard item.tag >= 0 && item.tag < topics.count else { return }
+        let t = topics[item.tag]
+        chosenTopic = t
+        bubble.setShare(title: bubble.shareTitle ?? t.title, on: false)
+        bubble.topicLabel = t.title
+        bubble.setActions([])
+        bubble.setText("好的，我们接着聊「\(t.title)」～这次不读当前页面。")
+    }
+    @objc private func topicFresh() {
+        chosenTopic = nil
+        bubble.topicLabel = nil
+        if let title = bubble.shareTitle {
+            topics.append(Topic(title: title, start: Date(), last: Date()))
+            saveTopics()
+        }
+        bubble.setText("新话题开始啦，之前的聊天这次不带上。")
     }
 
     private func pageQuickActions() -> [(String, () -> Void)] {
@@ -2380,8 +2551,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Build the request history: recent turns as text; images only for the newest message.
-    private func apiHistory(newImages: [Data]) -> [[String: Any]] {
-        let recent = store.messages.suffix(16).filter { !($0.role == "assistant" && ($0.text.isEmpty || $0.text.hasPrefix("⚠️"))) }
+    private func apiHistory(newImages: [Data], since: Date? = nil, until: Date? = nil) -> [[String: Any]] {
+        var pool = store.messages
+        if let s = since {
+            // Topic window: earlier topic turns, plus the message just added (always the last one).
+            let last = pool.last
+            pool = pool.dropLast().filter { $0.date >= s && (until == nil || $0.date < until!) }
+            if let l = last { pool.append(l) }
+        }
+        let recent = pool.suffix(16).filter { !($0.role == "assistant" && ($0.text.isEmpty || $0.text.hasPrefix("⚠️"))) }
         var out: [[String: Any]] = []
         for (i, m) in recent.enumerated() {
             let isLast = i == recent.count - 1
@@ -2403,9 +2581,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func ask(_ text: String, images: [Data] = [], spoken: Bool = false, inBubble: Bool = true) {
         voice.stop()
         highlighter.clear()
+        // Decide which earlier turns this question may see (default: only the current page's topic).
+        let chipOffPre = inBubble && bubble.chatMode && bubble.shareTitle != nil && !bubble.sharing
+        let pageTopic = inBubble && bubble.chatMode && bubble.sharing && Prefs.pageShare ? bubble.shareTitle : nil
+        var since: Date? = nil, until: Date? = nil
+        if let pickedTopic = chosenTopic, chipOffPre {
+            since = pickedTopic.start
+            until = topics.first(where: { $0.start > pickedTopic.start })?.start
+            if until != nil { since = pickedTopic.start }
+        } else if let t = pageTopic {
+            since = beginTopic(title: t).start
+        }
         let names = images.compactMap { store.saveImage($0) }
         store.append(ChatMessage(role: "user", text: text, imageNames: names, date: Date()))
-        var history = apiHistory(newImages: images)
+        var history = apiHistory(newImages: images, since: since, until: until)
         store.append(ChatMessage(role: "assistant", text: "", imageNames: [], date: Date()))
         // The user can switch off the page chip for this chat: then nothing on screen is read.
         let chipOff = inBubble && bubble.chatMode && bubble.shareTitle != nil && !bubble.sharing
@@ -2425,8 +2614,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let gen = bubbleGen
         Task { @MainActor in
             var context: String?
-            if sharePage {
-                context = await self.hub.pageContext()
+            if sharePage, let page = await self.hub.pageContext() {
+                // Put the page right next to the question, so it outweighs older chat turns.
+                if let i = history.indices.last, history[i]["content"] is String {
+                    history[i]["content"] = page + "\n\n---\n我的问题（请以上面这个页面为准来回答）：" + text
+                } else {
+                    context = page
+                }
             }
             if usePerception {
                 let ctx = await self.hub.assemble(query: text, wantScreenshot: Prefs.sendScreenshot && images.isEmpty)
