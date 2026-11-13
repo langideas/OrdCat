@@ -72,14 +72,17 @@ final class Updater {
     /// Download, unpack, and swap the bundle after we quit. `status` receives Chinese progress lines.
     func install(status: @escaping (String) -> Void) {
         guard let zip = zipURL else { status("还没有可用的更新"); return }
-        let bundle = Bundle.main.bundleURL
-        if bundle.path.contains("AppTranslocation") {
-            status("请先把 OrdCat 拖进「应用程序」文件夹，再打开它更新。")
-            return
+        // Where the new version goes: in place when we already live in a writable folder;
+        // otherwise (opened straight from Downloads, macOS "App Translocation", read-only folder)
+        // install into /Applications so future updates work in place.
+        var bundle = Bundle.main.bundleURL
+        let fm0 = FileManager.default
+        let translocated = bundle.path.contains("AppTranslocation")
+        if translocated || !fm0.isWritableFile(atPath: bundle.deletingLastPathComponent().path) {
+            bundle = URL(fileURLWithPath: "/Applications/OrdCat.app")
         }
-        let parent = bundle.deletingLastPathComponent()
-        guard FileManager.default.isWritableFile(atPath: parent.path) else {
-            status("没有权限写入 \(parent.path)，请把 OrdCat 放到「应用程序」文件夹。")
+        guard fm0.isWritableFile(atPath: bundle.deletingLastPathComponent().path) else {
+            status("没有权限写入「应用程序」文件夹，请用管理员账户登录后再试。")
             return
         }
         status("正在下载新版本…")
@@ -108,7 +111,11 @@ final class Updater {
             let script = """
             while kill -0 \(pid) 2>/dev/null; do sleep 0.2; done
             rm -rf "$1.old"
-            if mv "$1" "$1.old" && mv "$2" "$1"; then rm -rf "$1.old"; else mv "$1.old" "$1"; fi
+            if [ -e "$1" ]; then
+              if mv "$1" "$1.old" && mv "$2" "$1"; then rm -rf "$1.old"; else mv "$1.old" "$1"; fi
+            else
+              mv "$2" "$1"
+            fi
             xattr -cr "$1" 2>/dev/null
             open "$1"
             """
