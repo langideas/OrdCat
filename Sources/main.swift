@@ -452,6 +452,8 @@ final class Listener {
     private var silenceTimer: Timer?
     private var tapInstalled = false
     private var latest = ""
+    private var recFile: AVAudioFile?
+    private var recURL: URL?
     private(set) var isListening = false
     var onPartial: ((String) -> Void)?
     var onFinal: ((String) -> Void)?
@@ -487,8 +489,20 @@ final class Listener {
         request = req
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
+        // Cloud speech recognition: keep a copy of what we hear, send it when the user stops talking.
+        if Cap.stt != nil {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("ordcat-voice-\(UUID().uuidString).wav")
+            let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: format.sampleRate,
+                                           AVNumberOfChannelsKey: format.channelCount, AVLinearPCMBitDepthKey: 16,
+                                           AVLinearPCMIsFloatKey: false]
+            recFile = try? AVAudioFile(forWriting: url, settings: settings,
+                                       commonFormat: format.commonFormat, interleaved: format.isInterleaved)
+            recURL = recFile == nil ? nil : url
+        }
+        let file = recFile
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buf, _ in
             self?.request?.append(buf)
+            try? file?.write(from: buf)
         }
         tapInstalled = true
         engine.prepare()
@@ -524,13 +538,29 @@ final class Listener {
         isListening = false
         silenceTimer?.invalidate()
         teardown()
-        onFinal?(latest.trimmingCharacters(in: .whitespacesAndNewlines))
+        let apple = latest.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let url = recURL, let ep = Cap.stt {
+            recFile = nil
+            recURL = nil
+            onPartial?(apple.isEmpty ? "☁️ 正在识别…" : apple + " ☁️")
+            Task {
+                let (t, _) = await MediaHub.cloudTranscribe(url, ep: ep)
+                try? FileManager.default.removeItem(at: url)
+                let best = (t?.isEmpty ?? true) ? apple : t!
+                DispatchQueue.main.async { self.onFinal?(best) }
+            }
+            return
+        }
+        onFinal?(apple)
     }
 
     func cancel() {
         isListening = false
         silenceTimer?.invalidate()
         teardown()
+        recFile = nil
+        if let u = recURL { try? FileManager.default.removeItem(at: u) }
+        recURL = nil
     }
 
     private func teardown() {
@@ -1630,6 +1660,19 @@ final class SettingsController: NSObject {
     private let key = NSSecureTextField()
     private let model = NSTextField()
     private let status = NSTextField(labelWithString: "")
+    // 看图 / 听写 panes of the model tab
+    private var modelPanes: [NSView] = []
+    private let visionPreset = NSPopUpButton()
+    private let visionBase = NSTextField()
+    private let visionKey = NSSecureTextField()
+    private let visionModel = NSTextField()
+    private let visionStatus = NSTextField(wrappingLabelWithString: "")
+    private let sttPreset = NSPopUpButton()
+    private let sttBase = NSTextField()
+    private let sttKey = NSSecureTextField()
+    private let sttModel = NSTextField()
+    private let sttStatus = NSTextField(wrappingLabelWithString: "")
+    private var tabsView: NSTabView?
     private let hotkeyPopup = NSPopUpButton()
     private var checks: [String: NSButton] = [:]
     private let axStatus = NSTextField(labelWithString: "")
@@ -1668,6 +1711,19 @@ final class SettingsController: NSObject {
         model.stringValue = Prefs.model
         key.stringValue = Keychain.get()
         preset.selectItem(at: min(Prefs.presetIndex, kPresets.count - 1))
+        visionPreset.selectItem(at: min(Prefs.visionPreset, kVisionPresets.count - 1))
+        visionBase.stringValue = Prefs.visionBase
+        visionModel.stringValue = Prefs.visionModel
+        visionKey.stringValue = Keychain.get(service: Keychain.visionService)
+        sttPreset.selectItem(at: min(Prefs.sttPreset, kSTTPresets.count - 1))
+        sttBase.stringValue = Prefs.sttBase
+        sttModel.stringValue = Prefs.sttModel
+        sttKey.stringValue = Keychain.get(service: Keychain.sttService)
+        checks["visionOn"]?.state = Prefs.visionOn ? .on : .off
+        checks["videoAudio"]?.state = Prefs.videoAudio ? .on : .off
+        checks["chatLayout"]?.state = Prefs.chatLayout ? .on : .off
+        refreshVisionHint()
+        sttStatus.stringValue = ""
         hotkeyPopup.selectItem(at: Prefs.hotKeyIndex)
         checks["voice"]?.state = Prefs.voice ? .on : .off
         checks["pageShare"]?.state = Prefs.pageShare ? .on : .off
@@ -1752,6 +1808,7 @@ final class SettingsController: NSObject {
         let root = NSView(frame: w.contentRect(forFrameRect: w.frame))
         w.contentView = root
         let tabs = NSTabView(frame: root.bounds.insetBy(dx: 10, dy: 10))
+        tabsView = tabs
         tabs.autoresizingMask = [.width, .height]
         root.addSubview(tabs)
 
@@ -1765,26 +1822,99 @@ final class SettingsController: NSObject {
         base.placeholderString = "https://…/v1"
         key.placeholderString = "本地 Ollama 可留空"
         model.placeholderString = "模型名称"
-        row("服务商", preset, y: 300, in: v1)
-        row("接口地址", base, y: 262, in: v1)
-        row("API Key", key, y: 224, in: v1)
-        row("模型", model, y: 186, in: v1)
-        let hint = NSTextField(wrappingLabelWithString: "任何 OpenAI 兼容接口都能用。API Key 只保存在你 Mac 的钥匙串里。发送图片需要模型支持识图。")
+        let seg = NSSegmentedControl(labels: ["💬 聊天", "🖼️ 看图 / 视频", "🎙️ 听写", "🔊 朗读"],
+                                     trackingMode: .selectOne, target: self, action: #selector(modelPaneChanged(_:)))
+        seg.frame = NSRect(x: 20, y: 318, width: 430, height: 24)
+        seg.selectedSegment = 0
+        v1.addSubview(seg)
+        let chatPane = NSView(frame: NSRect(x: 0, y: 0, width: 470, height: 310))
+        let visionPane = NSView(frame: chatPane.frame)
+        let sttPane = NSView(frame: chatPane.frame)
+        let ttsPane = NSView(frame: chatPane.frame)
+        modelPanes = [chatPane, visionPane, sttPane, ttsPane]
+        for (i, p) in modelPanes.enumerated() { p.isHidden = i != 0; v1.addSubview(p) }
+
+        row("服务商", preset, y: 272, in: chatPane)
+        row("接口地址", base, y: 236, in: chatPane)
+        row("API Key", key, y: 200, in: chatPane)
+        row("模型", model, y: 164, in: chatPane)
+        let hint = NSTextField(wrappingLabelWithString: "任何 OpenAI 兼容接口都能用。API Key 只保存在你 Mac 的钥匙串里。聊天模型只懂文字也没关系：图片会交给「看图」模型，声音交给「听写」。")
         hint.textColor = .secondaryLabelColor
         hint.font = .systemFont(ofSize: 11)
-        hint.frame = NSRect(x: 114, y: 140, width: 330, height: 40)
-        v1.addSubview(hint)
-        status.frame = NSRect(x: 20, y: 100, width: 430, height: 34)
+        hint.frame = NSRect(x: 114, y: 112, width: 330, height: 46)
+        chatPane.addSubview(hint)
+        status.frame = NSRect(x: 20, y: 70, width: 430, height: 34)
         status.textColor = .secondaryLabelColor
         status.lineBreakMode = .byTruncatingTail
-        v1.addSubview(status)
+        chatPane.addSubview(status)
         let test = NSButton(title: "测试连接", target: self, action: #selector(testIt))
         test.frame = NSRect(x: 250, y: 20, width: 96, height: 30)
-        v1.addSubview(test)
+        chatPane.addSubview(test)
         let save = NSButton(title: "保存", target: self, action: #selector(saveIt))
         save.keyEquivalent = "\r"
         save.frame = NSRect(x: 350, y: 20, width: 96, height: 30)
-        v1.addSubview(save)
+        chatPane.addSubview(save)
+
+        // 看图 / 视频
+        check("visionOn", "需要时看图片和视频画面（只在你提问时截这个窗口）", y: 280, in: visionPane)
+        for p in kVisionPresets { visionPreset.addItem(withTitle: p.name) }
+        visionPreset.target = self
+        visionPreset.action = #selector(visionPresetChanged)
+        visionBase.placeholderString = "https://…/v1"
+        visionKey.placeholderString = "和聊天同一家可留空"
+        visionModel.placeholderString = "看图模型名称"
+        row("服务商", visionPreset, y: 244, in: visionPane)
+        row("接口地址", visionBase, y: 208, in: visionPane)
+        row("API Key", visionKey, y: 172, in: visionPane)
+        row("模型", visionModel, y: 136, in: visionPane)
+        check("videoAudio", "看视频时顺便听 6 秒声音（用「听写」转成文字）", y: 106, in: visionPane)
+        check("chatLayout", "聊天软件（微信、QQ…）按位置识别谁说了什么", y: 84, in: visionPane)
+        visionStatus.font = .systemFont(ofSize: 11)
+        visionStatus.textColor = .secondaryLabelColor
+        visionStatus.frame = NSRect(x: 20, y: 54, width: 430, height: 28)
+        visionPane.addSubview(visionStatus)
+        let vTest = NSButton(title: "测试看图", target: self, action: #selector(testVision))
+        vTest.frame = NSRect(x: 250, y: 20, width: 96, height: 30)
+        visionPane.addSubview(vTest)
+        let vSave = NSButton(title: "保存", target: self, action: #selector(saveIt))
+        vSave.frame = NSRect(x: 350, y: 20, width: 96, height: 30)
+        visionPane.addSubview(vSave)
+
+        // 听写
+        for p in kSTTPresets { sttPreset.addItem(withTitle: p.name) }
+        sttPreset.target = self
+        sttPreset.action = #selector(sttPresetChanged)
+        sttBase.placeholderString = "https://…/v1"
+        sttKey.placeholderString = "和聊天同一家可留空"
+        sttModel.placeholderString = "语音识别模型名称"
+        row("服务商", sttPreset, y: 272, in: sttPane)
+        row("接口地址", sttBase, y: 236, in: sttPane)
+        row("API Key", sttKey, y: 200, in: sttPane)
+        row("模型", sttModel, y: 164, in: sttPane)
+        let sHint = NSTextField(wrappingLabelWithString: "用在两个地方：你对小猫说话（⌃⌥空格 / 🎤），和看视频时听声音。本机识别完全离线；云端 Whisper 更准，会把录音发给你选的服务商。")
+        sHint.textColor = .secondaryLabelColor
+        sHint.font = .systemFont(ofSize: 11)
+        sHint.frame = NSRect(x: 114, y: 112, width: 330, height: 46)
+        sttPane.addSubview(sHint)
+        sttStatus.font = .systemFont(ofSize: 11)
+        sttStatus.textColor = .secondaryLabelColor
+        sttStatus.frame = NSRect(x: 20, y: 66, width: 430, height: 34)
+        sttPane.addSubview(sttStatus)
+        let sTest = NSButton(title: "测试听写", target: self, action: #selector(testSTT))
+        sTest.frame = NSRect(x: 250, y: 20, width: 96, height: 30)
+        sttPane.addSubview(sTest)
+        let sSave = NSButton(title: "保存", target: self, action: #selector(saveIt))
+        sSave.frame = NSRect(x: 350, y: 20, width: 96, height: 30)
+        sttPane.addSubview(sSave)
+
+        // 朗读
+        let tHint = NSTextField(wrappingLabelWithString: "小猫说话的声音（系统声音或云端自然声音、语速、音调）在「声音」标签里设置。")
+        tHint.font = .systemFont(ofSize: 13)
+        tHint.frame = NSRect(x: 24, y: 220, width: 420, height: 44)
+        ttsPane.addSubview(tHint)
+        let goVoice = NSButton(title: "去「声音」设置", target: self, action: #selector(goVoiceTab))
+        goVoice.frame = NSRect(x: 24, y: 176, width: 150, height: 30)
+        ttsPane.addSubview(goVoice)
         t1.view = v1
         tabs.addTabViewItem(t1)
 
@@ -1966,6 +2096,16 @@ final class SettingsController: NSObject {
             if on && !ScreenReader.screenRecordingAllowed() { ScreenReader.requestScreenRecording() }
         case "highlight": Prefs.highlight = on
         case "autoUpdate": Prefs.autoUpdate = on
+        case "visionOn":
+            Prefs.visionOn = on
+            if on && !ScreenReader.screenRecordingAllowed() { ScreenReader.requestScreenRecording() }
+            refreshVisionHint()
+        case "videoAudio":
+            Prefs.videoAudio = on
+            if on && !ScreenReader.screenRecordingAllowed() { ScreenReader.requestScreenRecording() }
+        case "chatLayout":
+            Prefs.chatLayout = on
+            if on && !ScreenReader.screenRecordingAllowed() { ScreenReader.requestScreenRecording() }
         default: break
         }
     }
@@ -2111,10 +2251,90 @@ final class SettingsController: NSObject {
     }
 
     private func store() {
+        let trim: (NSTextField) -> String = { $0.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) }
         Prefs.presetIndex = preset.indexOfSelectedItem
-        Prefs.base = base.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        Prefs.model = model.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        Keychain.set(key.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
+        Prefs.base = trim(base)
+        Prefs.model = trim(model)
+        Keychain.set(trim(key))
+        Prefs.visionPreset = max(0, visionPreset.indexOfSelectedItem)
+        Prefs.visionBase = trim(visionBase)
+        Prefs.visionModel = trim(visionModel)
+        Keychain.set(trim(visionKey), service: Keychain.visionService)
+        Prefs.sttPreset = max(0, sttPreset.indexOfSelectedItem)
+        Prefs.sttBase = trim(sttBase)
+        Prefs.sttModel = trim(sttModel)
+        Keychain.set(trim(sttKey), service: Keychain.sttService)
+        refreshVisionHint()
+    }
+
+    @objc private func modelPaneChanged(_ seg: NSSegmentedControl) {
+        for (i, p) in modelPanes.enumerated() { p.isHidden = i != seg.selectedSegment }
+    }
+    @objc private func goVoiceTab() { tabsView?.selectTabViewItem(at: 3) }
+
+    @objc private func visionPresetChanged() {
+        let p = kVisionPresets[visionPreset.indexOfSelectedItem]
+        visionBase.stringValue = p.base
+        visionModel.stringValue = p.model
+        let auto = visionPreset.indexOfSelectedItem == 0
+        visionBase.isEnabled = !auto; visionModel.isEnabled = !auto; visionKey.isEnabled = !auto
+    }
+    @objc private func sttPresetChanged() {
+        let p = kSTTPresets[sttPreset.indexOfSelectedItem]
+        sttBase.stringValue = p.base
+        sttModel.stringValue = p.model
+        let local = sttPreset.indexOfSelectedItem == 0
+        sttBase.isEnabled = !local; sttModel.isEnabled = !local; sttKey.isEnabled = !local
+    }
+
+    private func refreshVisionHint() {
+        let auto = Prefs.visionPreset == 0
+        visionBase.isEnabled = !auto; visionModel.isEnabled = !auto; visionKey.isEnabled = !auto
+        let local = Prefs.sttPreset == 0
+        sttBase.isEnabled = !local; sttModel.isEnabled = !local; sttKey.isEnabled = !local
+        var s: String
+        if !Prefs.visionOn { s = "看图已关闭。" }
+        else if let ep = Cap.vision {
+            s = Cap.visionUsesChat ? "现在用聊天模型「\(ep.model)」直接看图。" : "现在用「\(ep.model)」看图，再把描述交给聊天模型。"
+        } else { s = "⚠️ 聊天模型「\(Prefs.model)」只懂文字，请在上面选一个看图模型。" }
+        if Prefs.visionOn && !ScreenReader.screenRecordingAllowed() { s += " 还需要「屏幕录制」权限。" }
+        visionStatus.stringValue = s
+    }
+
+    /// Draw a tiny picture (an orange circle on blue) and ask the vision model what it sees.
+    @objc private func testVision() {
+        store()
+        visionStatus.stringValue = "正在测试…"
+        let img = NSImage(size: NSSize(width: 160, height: 120))
+        img.lockFocus()
+        NSColor.systemBlue.setFill(); NSRect(x: 0, y: 0, width: 160, height: 120).fill()
+        NSColor.orange.setFill(); NSBezierPath(ovalIn: NSRect(x: 50, y: 30, width: 60, height: 60)).fill()
+        img.unlockFocus()
+        guard let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+              let jpg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.8]) else { return }
+        Task {
+            let (d, e) = await MediaHub.describe([jpg], question: "图里是什么形状、什么颜色？一句话。", appName: "测试图片", video: false)
+            await MainActor.run {
+                self.visionStatus.stringValue = d.map { "✅ 看得到：" + $0 } ?? "⚠️ " + (e ?? "失败")
+            }
+        }
+    }
+
+    @objc private func testSTT() {
+        store()
+        guard let ep = Cap.stt else {
+            sttStatus.stringValue = SFSpeechRecognizer.authorizationStatus() == .authorized
+                ? "✅ 本机语音识别可用（离线）" : "本机识别需要「语音识别」权限，第一次和小猫说话时会弹出来。"
+            return
+        }
+        sttStatus.stringValue = "正在测试…"
+        let url = MediaHub.silentWav()
+        Task {
+            let (t, e) = await MediaHub.cloudTranscribe(url, ep: ep)
+            await MainActor.run {
+                self.sttStatus.stringValue = t != nil ? "✅ 连接成功，「\(ep.model)」可以用" : "⚠️ " + (e ?? "失败")
+            }
+        }
     }
 
     @objc private func saveIt() {
@@ -2603,7 +2823,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if inBubble {
             bubble.setActions([])
             let wait = usePerception ? "👀 我先看一眼你的屏幕…"
-                : (sharePage ? "👀 正在读「\(bubble.shareTitle ?? "当前页面")」…" : "……")
+                : (sharePage ? (MediaHub.wantsVideo(text) ? "🎬 我看几眼画面、听几秒声音…" : "👀 正在读「\(bubble.shareTitle ?? "当前页面")」…") : "……")
             if bubble.chatMode { bubble.setText(wait) } else {
                 let page = Prefs.pageShare ? hub.shareableWindow() : nil
                 bubble.setShare(title: page?.title, on: page != nil)
@@ -2614,12 +2834,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let gen = bubbleGen
         Task { @MainActor in
             var context: String?
-            if sharePage, let page = await self.hub.pageContext() {
+            // Pictures the user attached: a text-only chat model gets the vision model's description instead.
+            if !images.isEmpty && !Cap.visionUsesChat, let i = history.indices.last {
+                if inBubble && gen == self.bubbleGen { self.bubble.setText("🖼️ 看图模型正在看图…") }
+                let (desc, err) = await MediaHub.describe(images, question: text, appName: "用户发来的图片", video: false)
+                let note = desc.map { "\n\n[用户发来的图片内容（看图模型的描述）]\n" + $0 }
+                    ?? "\n\n[用户发来了 \(images.count) 张图片，但这次没看成：\(err ?? "未知原因")。请如实告诉用户，并提醒到 设置 → 模型 → 看图 检查。]"
+                history[i] = ["role": "user", "content": text + note]
+            }
+            if sharePage, let page = await self.hub.pageContext(question: text, progress: { [weak self] msg in
+                DispatchQueue.main.async {
+                    guard let self = self, inBubble, gen == self.bubbleGen, self.bubble.isShown else { return }
+                    self.bubble.setText(msg)
+                }
+            }) {
                 // Put the page right next to the question, so it outweighs older chat turns.
                 if let i = history.indices.last, history[i]["content"] is String {
-                    history[i]["content"] = page + "\n\n---\n我的问题（请以上面这个页面为准来回答）：" + text
+                    let merged = page.text + "\n\n---\n我的问题（请以上面这个页面为准来回答）：" + text
+                    if page.images.isEmpty {
+                        history[i]["content"] = merged
+                    } else {
+                        var parts: [[String: Any]] = [["type": "text", "text": merged]]
+                        for d in page.images {
+                            parts.append(["type": "image_url", "image_url": ["url": "data:image/jpeg;base64," + d.base64EncodedString()]])
+                        }
+                        history[i] = ["role": "user", "content": parts]
+                    }
                 } else {
-                    context = page
+                    context = page.text
                 }
             }
             if usePerception {

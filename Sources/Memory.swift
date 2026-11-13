@@ -414,8 +414,15 @@ final class ContextHub {
     }
 
     /// One-shot read of the page the user chose to share. Nothing is read until they actually ask.
-    func pageContext(budgetChars: Int = 9000) async -> String? {
+    struct PageContext { var text: String; var images: [Data] }
+
+    /// Read the window the user shared, once, because they asked. Chat apps are rebuilt by position
+    /// (so names are known); pictures and video frames go to a vision model only when useful.
+    func pageContext(question: String = "", budgetChars: Int = 9000,
+                     progress: ((String) -> Void)? = nil) async -> PageContext? {
         guard let app = lastExternalApp, !app.isTerminated else { return nil }
+        let bid = app.bundleIdentifier ?? ""
+        let pid = app.processIdentifier
         var card = await reader.capture(app: app, deep: true, wantScreenshot: false, maxNodes: 4000, axBudget: 0.6)
         if let c = card, c.plainText.count < 200, ScreenReader.chromiumBrowsers.contains(c.bundleID) {
             // Chromium builds its accessibility tree lazily the first time we ask: give it a moment.
@@ -424,17 +431,73 @@ final class ContextHub {
         }
         guard let c = card else { return nil }
         await MainActor.run { self.ingestIfEnabled(c) }
+
+        let isChat = Prefs.chatLayout && MediaHub.isChatApp(bid)
+        let wantsVideo = MediaHub.wantsVideo(question) || MediaHub.videoApps.contains(bid)
+        let wantsMedia = MediaHub.wantsMedia(question) || MediaHub.videoApps.contains(bid)
+        let vision = Cap.vision
+        let thin = c.plainText.count < 200
+        // Start listening right away so sound and frames are captured together.
+        let audioTask: Task<String?, Never>? = (MediaHub.wantsVideo(question) && Prefs.videoAudio)
+            ? Task { await MediaHub.listenToScreen(seconds: 6) } : nil
+
+        var shot: (CGImage, CGRect)?
+        if isChat || (vision != nil && (wantsMedia || thin)) {
+            shot = await reader.captureWindowImage(pid: pid, maxWidth: 1800)
+        }
         var body = c.plainText
+        var layout = ""
+        if isChat, let (img, frame) = shot {
+            let o = reader.ocr(img, frame: frame, accurate: true)
+            if !o.isEmpty { layout = MediaHub.chatTranscript(o, window: frame) }
+        }
+        if !layout.isEmpty { body = layout }
         if body.count > budgetChars { body = String(body.prefix(budgetChars)) + "\n…（页面后面的内容省略）" }
         if body.isEmpty { body = "（这个窗口读不到文字，可能是图片或画布类内容）" }
-        return """
+
+        var media = ""
+        var images: [Data] = []
+        if let (img, _) = shot, vision != nil, isChat || wantsMedia || thin {
+            var frames = [img]
+            if wantsVideo {
+                progress?("🎬 我多看几眼画面…")
+                for _ in 0..<2 {
+                    try? await Task.sleep(nanoseconds: 800_000_000)
+                    if let (f, _) = await reader.captureWindowImage(pid: pid, maxWidth: 1280) { frames.append(f) }
+                }
+            }
+            let datas = frames.compactMap { MediaHub.jpeg($0, maxSide: 1280) }
+            if Cap.visionUsesChat {
+                images = datas
+            } else {
+                progress?("🖼️ 看图模型正在看图…")
+                let (desc, err) = await MediaHub.describe(datas, question: question, appName: c.app, video: wantsVideo)
+                if let d = desc { media = "## 画面里的图片 / 视频（看图模型的描述）\n\(d)" }
+                else if let e = err { media = "## 画面里的图片\n（这次没看成：\(e)。请如实告诉用户。）" }
+            }
+        } else if wantsMedia && vision == nil {
+            media = "## 画面里的图片\n（还没有设置看图模型，所以看不到图片和视频画面。请告诉用户：右键小猫 → 设置 → 模型 → 看图，选一个看图模型。）"
+        } else if wantsMedia && shot == nil && !ScreenReader.screenRecordingAllowed() {
+            media = "## 画面里的图片\n（没有「屏幕录制」权限，看不到图片。请告诉用户到 系统设置 → 隐私与安全性 → 屏幕录制 打开 OrdCat。）"
+        }
+        var sound = ""
+        if let t = audioTask {
+            progress?("👂 我听几秒声音…")
+            if let heard = await t.value { sound = "## 刚才几秒的声音（语音转文字）\n\(Redactor.clean(heard))" }
+        }
+
+        var text = """
         ## 用户正在分享的页面
         用户主动把当前页面分享给你。用户说「这个」「这页」「这里」时，指的就是它；请结合页面内容回答，不要编造页面上没有的信息。
         应用：\(c.app)
         窗口标题：\(c.windowTitle)
-        页面文字（按从上到下顺序）：
-        \(body)
         """
+        if !layout.isEmpty { text += "\n" + MediaHub.chatGuide + "\n聊天内容（从上到下）：\n" + body }
+        else { text += "\n页面文字（按从上到下顺序）：\n" + body }
+        if !media.isEmpty { text += "\n\n" + media }
+        if !sound.isEmpty { text += "\n\n" + sound }
+        if !images.isEmpty { text += "\n\n（附上了这个窗口的截图\(images.count > 1 ? "，共 \(images.count) 帧" : "")，可以直接看图回答。）" }
+        return PageContext(text: text, images: images)
     }
 
     private func ingestIfEnabled(_ c: ContextCard) { if Prefs.perception { ingest(c) } }
