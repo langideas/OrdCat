@@ -19,6 +19,7 @@ for S in 16 32 128 256 512; do
   D=$((S*2)); sips -z $D $D Resources/icon_1024.png --out $ICONSET/icon_${S}x${S}@2x.png >/dev/null
 done
 iconutil -c icns $ICONSET -o $APP/Contents/Resources/AppIcon.icns
+cp Resources/localsign.sh $APP/Contents/Resources/localsign.sh
 codesign --force --deep --sign - $APP
 ditto -c -k --keepParent $APP build/OrdCat-macOS.zip
 echo "Built $APP"

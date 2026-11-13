@@ -69,6 +69,66 @@ final class Updater {
         }.resume()
     }
 
+    /// After we quit: put `newApp` at `target` (keeping the old copy until the new one is in place) and open it.
+    static func swapAndRelaunch(target: URL, newApp: URL) -> Bool {
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let script = """
+        while kill -0 \(pid) 2>/dev/null; do sleep 0.2; done
+        rm -rf "$1.old"
+        if [ -e "$1" ]; then
+          if mv "$1" "$1.old" && mv "$2" "$1"; then rm -rf "$1.old"; else mv "$1.old" "$1"; fi
+        else
+          mv "$2" "$1"
+        fi
+        xattr -cr "$1" 2>/dev/null
+        open "$1"
+        """
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", script, "ordcat-update", target.path, newApp.path]
+        do { try p.run(); return true } catch { return false }
+    }
+
+    /// First launch of a version: move out of Downloads / App Translocation into /Applications,
+    /// and replace the ad-hoc signature with this Mac's stable one. Returns true when we are
+    /// about to quit and relaunch. Runs off the main thread.
+    func selfInstallIfNeeded() -> Bool {
+        let ud = UserDefaults.standard
+        let key = "selfInstall-\(current)"
+        if ud.bool(forKey: key) { return false }
+        ud.set(true, forKey: key)
+        let fm = FileManager.default
+        let cur = Bundle.main.bundleURL
+        let apps = URL(fileURLWithPath: "/Applications/OrdCat.app")
+        let misplaced = cur.path.contains("AppTranslocation") || cur.path.contains("/Downloads/")
+            || !fm.isWritableFile(atPath: cur.deletingLastPathComponent().path)
+        let target = misplaced ? apps : cur
+        if misplaced, let v = Bundle(url: apps)?.infoDictionary?["CFBundleShortVersionString"] as? String,
+           v == current || Updater.isNewer(v, than: current),
+           v != current || !LocalSigner.isAdhoc(apps) {
+            // A same-or-newer, properly signed copy already lives in /Applications: use that one.
+            let o = Process()
+            o.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            o.arguments = [apps.path]
+            if (try? o.run()) != nil { return true }
+        }
+        let adhoc = LocalSigner.isAdhoc(cur)
+        if !misplaced && !adhoc { return false }
+        guard fm.isWritableFile(atPath: target.deletingLastPathComponent().path) else { return false }
+        let work = fm.temporaryDirectory.appendingPathComponent("OrdCatInstall-\(UUID().uuidString)")
+        try? fm.createDirectory(at: work, withIntermediateDirectories: true)
+        let copy = work.appendingPathComponent("OrdCat.app")
+        let d = Process()
+        d.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        d.arguments = [cur.path, copy.path]
+        guard (try? d.run()) != nil else { return false }
+        d.waitUntilExit()
+        guard d.terminationStatus == 0 else { return false }
+        let signed = adhoc ? LocalSigner.sign(copy) : true
+        if !misplaced && !signed { return false }
+        return Updater.swapAndRelaunch(target: target, newApp: copy)
+    }
+
     /// Download, unpack, and swap the bundle after we quit. `status` receives Chinese progress lines.
     func install(status: @escaping (String) -> Void) {
         guard let zip = zipURL else { status("还没有可用的更新"); return }
@@ -106,29 +166,12 @@ final class Updater {
                 DispatchQueue.main.async { status("解压失败，稍后再试试") }
                 return
             }
-            // Wait for us to quit, swap atomically-ish (keep the old copy until the new one is in place), relaunch.
-            let pid = ProcessInfo.processInfo.processIdentifier
-            let script = """
-            while kill -0 \(pid) 2>/dev/null; do sleep 0.2; done
-            rm -rf "$1.old"
-            if [ -e "$1" ]; then
-              if mv "$1" "$1.old" && mv "$2" "$1"; then rm -rf "$1.old"; else mv "$1.old" "$1"; fi
-            else
-              mv "$2" "$1"
-            fi
-            xattr -cr "$1" 2>/dev/null
-            open "$1"
-            """
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/bin/sh")
-            p.arguments = ["-c", script, "ordcat-update", bundle.path, newApp.path]
-            do {
-                try p.run()
-            } catch {
-                DispatchQueue.main.async { status("更新启动失败：\(error.localizedDescription)") }
-                return
-            }
+            // Sign with this Mac's own stable identity so permissions survive the update.
+            let signed = LocalSigner.sign(newApp)
+            NSLog("OrdCat update: local signing \(signed ? "ok" : "failed, keeping ad-hoc")")
+            let ok = Updater.swapAndRelaunch(target: bundle, newApp: newApp)
             DispatchQueue.main.async {
+                guard ok else { status("更新启动失败，稍后再试试"); return }
                 status("更新好啦，小猫马上重启～")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { NSApp.terminate(nil) }
             }
@@ -162,5 +205,39 @@ final class RemoteConfig {
                 }
             }
         }.resume()
+    }
+}
+
+/// Signs OrdCat with a self-signed identity created on this Mac (Resources/localsign.sh), so
+/// macOS keeps Accessibility / Screen Recording grants across updates.
+enum LocalSigner {
+    static func run(_ exe: String, _ args: [String], timeout: Double = 60) -> (Int32, String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: exe)
+        p.arguments = args
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = pipe
+        guard (try? p.run()) != nil else { return (-1, "") }
+        let deadline = Date().addingTimeInterval(timeout)
+        while p.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+        if p.isRunning { p.terminate(); return (-1, "timeout") }
+        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return (p.terminationStatus, out)
+    }
+
+    static func isAdhoc(_ app: URL) -> Bool {
+        let (_, out) = run("/usr/bin/codesign", ["-dv", app.path], timeout: 10)
+        return out.contains("Signature=adhoc") || out.contains("not signed")
+    }
+
+    static func sign(_ app: URL) -> Bool {
+        let mine = Bundle.main.path(forResource: "localsign", ofType: "sh")
+        let theirs = app.appendingPathComponent("Contents/Resources/localsign.sh").path
+        guard let script = [mine, theirs].compactMap({ $0 }).first(where: { FileManager.default.fileExists(atPath: $0) })
+        else { return false }
+        let (code, out) = run("/bin/sh", [script, app.path])
+        NSLog("OrdCat localsign: \(code) \(out)")
+        return code == 0
     }
 }

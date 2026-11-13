@@ -978,7 +978,7 @@ final class Bubble: NSObject {
     func notify(_ text: String, actions list: [(String, () -> Void)] = [], hold: Double? = nil) {
         chatMode = false
         setActions(list)
-        textView.string = text
+        textView.textStorage?.setAttributedString(bubbleAttributed(text))
         if isShown {
             // Already on screen: swap content instantly, no fade.
             panel.animator().alphaValue = 1
@@ -995,13 +995,13 @@ final class Bubble: NSObject {
         chatMode = true
         setActions([])
         hideTimer?.invalidate()
-        if let g = greeting { textView.string = g }
+        if let g = greeting { textView.textStorage?.setAttributedString(bubbleAttributed(g)) }
         present(makeKey: true)
         panel.makeFirstResponder(input)
     }
 
     func setText(_ text: String) {
-        textView.string = text
+        textView.textStorage?.setAttributedString(bubbleAttributed(text))
         if isShown { layout() }
     }
 
@@ -1563,7 +1563,7 @@ final class SettingsController: NSObject {
         let ax = NSButton(title: "授权辅助功能", target: self, action: #selector(askAX))
         ax.frame = NSRect(x: 330, y: 98, width: 120, height: 30)
         v2.addSubview(ax)
-        let axHint = NSTextField(wrappingLabelWithString: "选中文字提示需要「辅助功能」权限：系统设置 → 隐私与安全性 → 辅助功能，打开 OrdCat。更新新版本后如果失效，先把旧的 OrdCat 删掉再重新添加。")
+        let axHint = NSTextField(wrappingLabelWithString: "选中文字提示需要「辅助功能」权限：系统设置 → 隐私与安全性 → 辅助功能，打开 OrdCat。从 v0.2.8 起小猫用这台 Mac 自己的签名，授权一次以后更新不会再丢。如果开关是开着却没用，先用「−」删掉旧的 OrdCat 再重新添加。")
         axHint.textColor = .secondaryLabelColor
         axHint.font = .systemFont(ofSize: 11)
         axHint.frame = NSRect(x: 24, y: 56, width: 430, height: 42)
@@ -1799,6 +1799,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let catSize = NSSize(width: 300, height: 330)
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        // Only one cat at a time: quit any other (older) OrdCat that is still running.
+        let me = ProcessInfo.processInfo.processIdentifier
+        for other in NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "app.ordcat.OrdCat")
+        where other.processIdentifier != me { other.terminate() }
+        // First run of this version: move into /Applications if needed and switch to this Mac's
+        // stable signature, so permissions survive future updates.
+        DispatchQueue.global(qos: .userInitiated).async {
+            if Updater.shared.selfInstallIfNeeded() {
+                DispatchQueue.main.async { NSApp.terminate(nil) }
+            }
+        }
         buildMainMenu()
         buildCat()
         buildStatusMenu()
@@ -2309,3 +2320,35 @@ let delegate = AppDelegate()
 app.delegate = delegate
 app.setActivationPolicy(.accessory)
 app.run()
+
+
+/// Light Markdown for the bubble: **bold**, headings and list markers become plain, readable text.
+/// Tolerates half-streamed text (an unclosed ** just makes the rest bold until it closes).
+func bubbleAttributed(_ raw: String, size: CGFloat = 14) -> NSAttributedString {
+    var lines: [String] = []
+    for l in raw.replacingOccurrences(of: "`", with: "").components(separatedBy: "\n") {
+        let t = l.trimmingCharacters(in: .whitespaces)
+        if t.hasPrefix("#") {
+            lines.append(String(t.drop(while: { $0 == "#" })).trimmingCharacters(in: .whitespaces))
+        } else if t.hasPrefix("- ") || t.hasPrefix("* ") || t.hasPrefix("– ") || t.hasPrefix("— ") {
+            lines.append("• " + String(t.dropFirst(2)))
+        } else if t == "---" || t == "***" {
+            lines.append("")
+        } else {
+            lines.append(l)
+        }
+    }
+    let text = lines.joined(separator: "\n")
+    let para = NSMutableParagraphStyle()
+    para.lineSpacing = 2
+    let base: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: size),
+                                               .foregroundColor: NSColor.white,
+                                               .paragraphStyle: para]
+    let out = NSMutableAttributedString()
+    for (i, part) in text.components(separatedBy: "**").enumerated() {
+        var a = base
+        if i % 2 == 1 { a[.font] = NSFont.boldSystemFont(ofSize: size) }
+        out.append(NSAttributedString(string: part, attributes: a))
+    }
+    return out
+}
