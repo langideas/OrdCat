@@ -16,6 +16,7 @@ let kRim = NSColor(calibratedWhite: 1.0, alpha: 0.22)
 struct Preset { let name: String; let base: String; let model: String }
 let kPresets: [Preset] = [
     Preset(name: "Ollama（本地离线）", base: "http://localhost:11434/v1", model: "qwen2.5:7b"),
+    Preset(name: "Groq", base: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-120b"),
     Preset(name: "DeepSeek", base: "https://api.deepseek.com/v1", model: "deepseek-chat"),
     Preset(name: "OpenAI", base: "https://api.openai.com/v1", model: "gpt-4o-mini"),
     Preset(name: "Gemini", base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.0-flash"),
@@ -120,7 +121,9 @@ final class LLM {
         let key = Keychain.get()
         if !key.isEmpty { req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
         let messages: [[String: String]] = [["role": "system", "content": system]] + history
-        let body: [String: Any] = ["model": Prefs.model, "messages": messages, "stream": true, "max_tokens": 500]
+        var body: [String: Any] = ["model": Prefs.model, "messages": messages, "stream": true, "max_tokens": 1200]
+        // Reasoning models (e.g. gpt-oss on Groq) would otherwise spend the budget thinking.
+        if base.contains("groq.com") && Prefs.model.contains("gpt-oss") { body["reasoning_effort"] = "low" }
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         task = Task { [weak self] in
