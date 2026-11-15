@@ -560,7 +560,7 @@ final class SelectionWatcher {
     var onSelect: ((String) -> Void)?
     var onNeedsPermission: (() -> Void)?
     var isOwnPoint: ((NSPoint) -> Bool)?
-    private(set) var ignoreChangeCount = -1
+    var ignoreChangeCount = -1
     private var downPoint = NSPoint.zero
     private var monitor: Any?
     private var asked = false
@@ -1166,6 +1166,7 @@ final class Bubble: NSObject {
         for (i, item) in list.enumerated() {
             let b = NSButton(title: item.0, target: self, action: #selector(doAction(_:)))
             b.bezelStyle = .rounded
+            if list.count > 3 { b.controlSize = .small; b.font = .systemFont(ofSize: 11) }
             b.tag = i
             card.addSubview(b)
             actionButtons.append(b)
@@ -1268,9 +1269,9 @@ final class Bubble: NSObject {
             var x = pad - 4
             for b in actionButtons {
                 b.sizeToFit()
-                let w = max(84, b.frame.width + 16)
+                let w = actionButtons.count > 3 ? max(56, b.frame.width + 8) : max(84, b.frame.width + 16)
                 b.frame = NSRect(x: x, y: y + 3, width: w, height: 30)
-                x += w + 6
+                x += w + (actionButtons.count > 3 ? 3 : 6)
             }
         }
         shareChip.isHidden = !showChip
@@ -1717,6 +1718,7 @@ final class SettingsController: NSObject {
     private let retentionOptions = [1, 3, 7, 30]
     var hub: ContextHub?
     var voice: Voice?
+    var xbuddy: XCompanion?
     private let enginePopup = NSPopUpButton()
     private let sysVoicePopup = NSPopUpButton()
     private let rateSlider = NSSlider(value: 0.5, minValue: 0.35, maxValue: 0.65, target: nil, action: nil)
@@ -1765,6 +1767,7 @@ final class SettingsController: NSObject {
         checks["ocrFallback"]?.state = Prefs.ocrFallback ? .on : .off
         checks["sendScreenshot"]?.state = Prefs.sendScreenshot ? .on : .off
         checks["highlight"]?.state = Prefs.highlight ? .on : .off
+        checks["xMode"]?.state = Prefs.xMode ? .on : .off
         checks["autoUpdate"]?.state = Prefs.autoUpdate ? .on : .off
         perceptionPopup.selectItem(at: Prefs.perceptionHotKeyIndex)
         retentionPopup.selectItem(at: retentionOptions.firstIndex(of: Prefs.retentionDays) ?? 2)
@@ -1786,6 +1789,21 @@ final class SettingsController: NSObject {
         let mb = String(format: "%.1f", Double(st.bytes) / 1_048_576)
         let rec = ScreenReader.screenRecordingAllowed() ? "已授权" : "未授权"
         memStats.stringValue = "记忆 \(st.count) 条 · \(mb) MB · 本次保留 \(hub.keptFrames) 帧 / 丢弃重复 \(hub.droppedFrames) 帧\n向量引擎：\(hub.memory.vectorEngine) · 全文检索：\(hub.memory.ftsOK ? "FTS5" : "LIKE") · 屏幕录制：\(rec)"
+            + (xbuddy.map { "\n陪你刷推：\($0.stats)（长期保存在本机，可随时清空）" } ?? "")
+    }
+
+    func refreshX() {
+        checks["xMode"]?.state = Prefs.xMode ? .on : .off
+        refreshMemStats()
+    }
+
+    @objc private func clearX() {
+        let a = NSAlert()
+        a.messageText = "清空刷推记忆？"
+        a.informativeText = "小猫会忘掉在 X 上记住的人、互动和兴趣，不能恢复。"
+        a.addButton(withTitle: "清空")
+        a.addButton(withTitle: "取消")
+        if a.runModal() == .alertFirstButtonReturn { xbuddy?.clear(); refreshMemStats() }
     }
 
     func refreshUpdate() {
@@ -2007,8 +2025,13 @@ final class SettingsController: NSObject {
         v3.addSubview(excluded)
         memStats.font = .systemFont(ofSize: 11)
         memStats.textColor = .secondaryLabelColor
-        memStats.frame = NSRect(x: 20, y: 56, width: 430, height: 70)
+        memStats.frame = NSRect(x: 20, y: 48, width: 430, height: 58)
         v3.addSubview(memStats)
+        check("xMode", "陪你刷推（X）：记住你关注和互动过的人", y: 112, in: v3)
+        checks["xMode"]?.frame.size.width = 300
+        checks["xMode"]?.toolTip = "在浏览器里看 x.com 时：认识的人出现会竖耳朵；一句话讲重点、筛评论、想回复（不替你发）。只存本机，私信不读。"
+        let bx = NSButton(title: "清空刷推记忆", target: self, action: #selector(clearX))
+        bx.frame = NSRect(x: 326, y: 106, width: 124, height: 30); v3.addSubview(bx)
         let b1 = NSButton(title: "授权屏幕录制", target: self, action: #selector(askScreen))
         b1.frame = NSRect(x: 6, y: 14, width: 116, height: 30); v3.addSubview(b1)
         let b2 = NSButton(title: "查看当前上下文", target: self, action: #selector(previewContext))
@@ -2123,6 +2146,10 @@ final class SettingsController: NSObject {
             Prefs.sendScreenshot = on
             if on && !ScreenReader.screenRecordingAllowed() { ScreenReader.requestScreenRecording() }
         case "highlight": Prefs.highlight = on
+        case "xMode":
+            Prefs.xMode = on
+            if on { Prefs.xOffered = true; _ = SelectionWatcher.trusted(prompt: true) }
+            refreshMemStats()
         case "autoUpdate": Prefs.autoUpdate = on
         case "visionOn":
             Prefs.visionOn = on
@@ -2395,6 +2422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotKey = HotKey(id: 1)
     private let perceptionKey = HotKey(id: 2)
     private lazy var hub = ContextHub(dir: store.dir)
+    private lazy var xbuddy = XCompanion(dir: store.dir, hub: hub)
     private let highlighter = Highlighter()
     private var versionItem: NSMenuItem!
     private var perceptionItem: NSMenuItem!
@@ -2456,6 +2484,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.onPreviewContext = { [weak self] in self?.previewContext() }
         hub.idleSeconds = { [weak self] in self?.idleSeconds() ?? 0 }
         applyPerception(announce: false)
+        settings.xbuddy = xbuddy
+        xbuddy.onKnownPerson = { [weak self] _ in
+            // Someone you know: ears up for a few seconds, no popup. Click the cat to see the card.
+            guard let self = self, self.catPanel.isVisible, !self.bubble.chatMode else { return }
+            self.catView.perk(true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                guard let self = self, !self.bubble.chatMode else { return }
+                self.catView.perk(false)
+            }
+        }
+        xbuddy.onFirstVisit = { [weak self] in self?.offerXMode() }
+        xbuddy.start()
         Updater.shared.onUpdateAvailable = { [weak self] v in self?.announceUpdate(v) }
         if Prefs.autoUpdate { Updater.shared.startAutoCheck() }
         RemoteConfig.shared.fetch { [weak self] text in
@@ -2654,7 +2694,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chosenTopic = nil
         bubble.topicLabel = nil
         bubble.setShare(title: page?.title, on: page != nil)
-        bubble.openChat(greeting: page != nil ? "喵～我能看到你正在看的页面，想问点什么？" : (last ?? "喵～想聊点什么？"))
+        var greeting = page != nil ? "喵～我能看到你正在看的页面，想问点什么？" : (last ?? "喵～想聊点什么？")
+        if Prefs.xMode, let t = page?.title, XCompanion.isXTitle(t), !XCompanion.isPrivate(t) {
+            xbuddy.scanNow()
+            if let p = xbuddy.person(xbuddy.focus), p.known {
+                greeting = xbuddy.card(p) + "\n\n想让我帮你做点什么？"
+            } else {
+                greeting = "喵～陪你刷推中 🐾 想让我帮你做点什么？"
+            }
+        }
+        bubble.openChat(greeting: greeting)
         if page != nil { bubble.setActions(pageQuickActions()); bubble.layout() }
         startShareWatch()
     }
@@ -2775,9 +2824,134 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func pageQuickActions() -> [(String, () -> Void)] {
-        [("总结这页", { [weak self] in self?.ask("帮我用几句话总结一下这个页面。") }),
+        if Prefs.xMode, let t = bubble.shareTitle, XCompanion.isXTitle(t), !XCompanion.isPrivate(t) { return xQuickActions() }
+        return [("总结这页", { [weak self] in self?.ask("帮我用几句话总结一下这个页面。") }),
          ("重点是什么", { [weak self] in self?.ask("这个页面里最值得注意的重点是什么？") }),
          ("帮我解释", { [weak self] in self?.ask("用简单的话帮我解释一下这个页面在讲什么。") })]
+    }
+
+    // MARK: 陪你刷推 (X)
+    private func offerXMode() {
+        guard catPanel.isVisible, !bubble.chatMode, !listener.isListening else { Prefs.xOffered = false; return }
+        catView.perk(true)
+        bubble.notify("你在刷 X 呀～要我陪你刷吗？我会记住你关注和互动过的人，帮你讲重点、筛评论、想回复（不替你发）。全部只存在这台 Mac 上，私信不看。", actions: [
+            ("好呀 🐾", { [weak self] in
+                Prefs.xMode = true
+                _ = SelectionWatcher.trusted(prompt: true)
+                self?.settings.refreshX()
+                self?.bubble.notify("好～从现在起我陪你刷。认识的人出现时我会竖起耳朵，点我就能看 TA 的小卡片。", hold: 8)
+            }),
+            ("先不用", { [weak self] in self?.bubble.hide(); self?.catView.perk(false) })
+        ], hold: 20)
+    }
+
+    private func xQuickActions() -> [(String, () -> Void)] {
+        [("TA 是谁", { [weak self] in self?.xWho() }),
+         ("重点+核实", { [weak self] in self?.xPoint() }),
+         ("筛评论", { [weak self] in self?.xFilter() }),
+         ("想回复", { [weak self] in self?.xDraft() })]
+    }
+
+    private func xShow(_ text: String) {
+        bubble.setText(text)
+        bubble.setActions(xQuickActions())
+        bubble.layout()
+    }
+
+    private func xExtra() -> String? {
+        let s = [xbuddy.interestLine(), xbuddy.personContext() ?? ""].filter { !$0.isEmpty }.joined(separator: "\n")
+        return s.isEmpty ? nil : s
+    }
+
+    private func xWho() {
+        xbuddy.scanNow()
+        if let p = xbuddy.person(xbuddy.focus) {
+            xShow(xbuddy.card(p))
+        } else {
+            xShow("这页上没认出具体是谁～打开 TA 的主页或者点进某一条帖子，再点「TA 是谁」。")
+        }
+    }
+
+    private func xPoint() {
+        xbuddy.scanNow()
+        if bubble.shareTitle != nil && !bubble.sharing { bubble.setShare(title: bubble.shareTitle, on: true) }
+        ask("用一句话讲清这条帖子的重点。然后结合我平时关注的领域，指出 1–3 个值得核实的说法：为什么值得怀疑、怎么去核实。没有可疑的就直说。",
+            extra: xExtra(), after: { [weak self] _ in
+                self?.bubble.setActions(self?.xQuickActions() ?? []); self?.bubble.layout(); return nil
+            })
+    }
+
+    private func xFilter() {
+        guard let r = xbuddy.repliesForFilter() else {
+            xShow("这页上没看到评论～点进一条帖子、往下滑到评论区，再点「筛评论」。")
+            return
+        }
+        let replies = r.posts
+        let page = r.text + """
+
+        请严格按这个格式回答：
+        第一行：值得看：编号,编号（最多 6 个，没有就写「无」）
+        第二行：水评：编号,编号（营销号、广告、引流、复读、纯表情、跑题都算；没有就写「无」）
+        然后用两三句话说说值得看的讨论在聊什么、有哪些不同观点。
+        """
+        ask("帮我筛一下这条帖子下面的评论。", pageOverride: page, extra: xbuddy.interestLine(), after: { [weak self] raw in
+            guard let self = self else { return nil }
+            let n = replies.count
+            let good = XCompanion.numbers(after: "值得看", in: raw).filter { $0 >= 1 && $0 <= n }
+            let bad = XCompanion.numbers(after: "水评", in: raw).filter { $0 >= 1 && $0 <= n }
+            if Prefs.highlight && !good.isEmpty {
+                self.highlighter.show(good.map { replies[$0 - 1].rect }, label: "值得看", seconds: 12, limit: 6)
+            }
+            var lines = raw.components(separatedBy: "\n")
+            if let i = lines.firstIndex(where: { $0.contains("值得看") }) { lines.remove(at: i) }
+            if let i = lines.firstIndex(where: { $0.contains("水评") }) { lines.remove(at: i) }
+            let names: ([Int]) -> String = { $0.map { "@" + replies[$0 - 1].handle }.joined(separator: "、") }
+            let head = "🟡 值得看：" + (good.isEmpty ? "没有特别值得看的" : names(good))
+                + "\n🗑 水评：" + (bad.isEmpty ? "没发现" : names(bad))
+            let rest = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            self.bubble.setActions(self.xQuickActions())
+            return head + (rest.isEmpty ? "" : "\n\n" + rest)
+        })
+    }
+
+    private func xDraft() {
+        let posts = xbuddy.scanNow()
+        var page: String? = nil
+        if let p = posts.first, !p.text.isEmpty {
+            page = "## 我想回复的帖子\n@\(p.handle)\(p.name.isEmpty ? "" : "（\(p.name)）")：\(p.text.prefix(1200))"
+        } else if bubble.shareTitle != nil && !bubble.sharing {
+            bubble.setShare(title: bubble.shareTitle, on: true)
+        }
+        ask("帮我想 3 条回复这条帖子的草稿：自然、像真人说话、别营销腔，每条不超过 60 字。只按「1. 2. 3.」列出来，我自己决定发不发。",
+            pageOverride: page, extra: xExtra(), after: { [weak self] raw in
+                guard let self = self else { return nil }
+                var drafts: [String] = []
+                for l in raw.components(separatedBy: "\n") {
+                    let t = l.trimmingCharacters(in: .whitespaces)
+                    guard let f = t.first, ("1"..."3").contains(String(f)), t.count > 2 else { continue }
+                    var body = String(t.dropFirst())
+                    while let c = body.first, ".、)）:： ".contains(c) { body.removeFirst() }
+                    body = body.replacingOccurrences(of: "**", with: "").trimmingCharacters(in: CharacterSet(charactersIn: " \"“”"))
+                    if !body.isEmpty { drafts.append(body) }
+                }
+                var acts: [(String, () -> Void)] = []
+                for (i, d) in drafts.prefix(3).enumerated() {
+                    acts.append(("复制 \(i + 1)", { [weak self] in self?.copyDraft(d, index: i + 1) }))
+                }
+                acts.append(("换一批", { [weak self] in self?.xDraft() }))
+                self.bubble.setActions(acts)
+                self.bubble.layout()
+                return nil
+            })
+    }
+
+    private func copyDraft(_ d: String, index: Int) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(d, forType: .string)
+        selection.ignoreChangeCount = pb.changeCount
+        lastChange = pb.changeCount
+        bubble.setText("已复制第 \(index) 条 ✂️ 去 X 的回复框里粘贴，改一改再发～我不会替你发。\n\n" + d)
     }
 
     /// While the chat bubble is open, keep the share chip pointed at whatever page is in front.
@@ -2826,7 +3000,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return out
     }
 
-    private func ask(_ text: String, images: [Data] = [], spoken: Bool = false, inBubble: Bool = true) {
+    private func ask(_ text: String, images: [Data] = [], spoken: Bool = false, inBubble: Bool = true,
+                     pageOverride: String? = nil, extra: String? = nil, after: ((String) -> String?)? = nil) {
         voice.stop()
         highlighter.clear()
         // Decide which earlier turns this question may see (default: only the current page's topic).
@@ -2857,7 +3032,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The user can switch off the page chip for this chat: then nothing on screen is read.
         let chipOff = inBubble && bubble.chatMode && bubble.shareTitle != nil && !bubble.sharing
         let usePerception = Prefs.perception && !chipOff
-        let sharePage = !usePerception && inBubble && bubble.chatMode && bubble.sharing && Prefs.pageShare
+        let sharePage = !usePerception && inBubble && bubble.chatMode && bubble.sharing && Prefs.pageShare && pageOverride == nil
         if inBubble {
             bubble.setActions([])
             let wait = usePerception ? "👀 我先看一眼你的屏幕…"
@@ -2902,6 +3077,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     context = page.text
                 }
             }
+            if let po = pageOverride, let i = history.indices.last, history[i]["content"] is String {
+                history[i]["content"] = po + "\n\n---\n我的问题：" + text
+            }
             if usePerception {
                 let ctx = await self.hub.assemble(query: text, wantScreenshot: Prefs.sendScreenshot && images.isEmpty)
                 context = ctx.text
@@ -2912,6 +3090,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     ]
                     history[lastIndex] = ["role": "user", "content": parts]
                 }
+            }
+            if let x = extra, !x.isEmpty {
+                context = context.map { x + "\n\n" + $0 } ?? x
             }
             // A project's standing note is kept in mind for every chat inside it.
             if let p = project, !p.note.isEmpty {
@@ -2937,7 +3118,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let rects = self.hub.resolveTargets(in: raw)
                     if !rects.isEmpty { self.highlighter.show(rects, label: "在这里") }
                 }
-                if Prefs.voice || spoken { self.voice.speak(final.replacingOccurrences(of: "👉", with: "")) }
+                var said = final
+                if let a = after, let shown = a(raw) {
+                    said = shown
+                    self.store.updateLast(shown)
+                    self.store.save()
+                    if inBubble && self.bubble.isShown && gen == self.bubbleGen { self.bubble.setText(shown) }
+                }
+                if Prefs.voice || spoken { self.voice.speak(said.replacingOccurrences(of: "👉", with: "")) }
             })
         }
     }

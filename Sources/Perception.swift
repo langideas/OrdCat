@@ -141,7 +141,7 @@ final class ScreenReader {
     func readAX(pid: pid_t, maxNodes: Int = 1600, budget: TimeInterval = 0.25) -> (title: String, frame: CGRect, elements: [ScreenElement]) {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.3)   // a frozen app must never freeze the cat
-        if (Prefs.perception || Prefs.pageShare) && !manualAXEnabled.contains(pid) {
+        if (Prefs.perception || Prefs.pageShare || Prefs.xMode) && !manualAXEnabled.contains(pid) {
             // Electron apps (VS Code, Slack, Notion…) only expose their tree when asked.
             AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
             // Chromium browsers build the web-page tree only for assistive clients.
@@ -271,9 +271,9 @@ final class Highlighter {
         panels.removeAll()
     }
 
-    func show(_ rects: [CGRect], label: String? = nil, seconds: Double = 7) {
+    func show(_ rects: [CGRect], label: String? = nil, seconds: Double = 7, limit: Int = 4) {
         clear()
-        for (i, r0) in rects.prefix(4).enumerated() {
+        for (i, r0) in rects.prefix(limit).enumerated() {
             var r = Highlighter.cocoaRect(r0).insetBy(dx: -8, dy: -8)
             if r.width < 36 { r = r.insetBy(dx: -(36 - r.width) / 2, dy: 0) }
             if r.height < 36 { r = r.insetBy(dx: 0, dy: -(36 - r.height) / 2) }
