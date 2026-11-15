@@ -137,57 +137,7 @@ enum Prefs {
 
 // MARK: - Chat history (persisted locally)
 
-struct ChatMessage: Codable {
-    let role: String          // "user" | "assistant"
-    var text: String
-    var imageNames: [String]
-    let date: Date
-}
-
-final class ChatStore {
-    private(set) var messages: [ChatMessage] = []
-    private var observers: [() -> Void] = []
-    let dir: URL
-    private var imagesDir: URL { dir.appendingPathComponent("images") }
-    private var file: URL { dir.appendingPathComponent("history.json") }
-
-    init() {
-        dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("OrdCat")
-        try? FileManager.default.createDirectory(at: dir.appendingPathComponent("images"), withIntermediateDirectories: true)
-        if let data = try? Data(contentsOf: file) {
-            let dec = JSONDecoder()
-            dec.dateDecodingStrategy = .iso8601
-            messages = (try? dec.decode([ChatMessage].self, from: data)) ?? []
-        }
-    }
-
-    func observe(_ f: @escaping () -> Void) { observers.append(f) }
-    func notify() { for o in observers { o() } }
-
-    func append(_ m: ChatMessage) { messages.append(m); save(); notify() }
-    func updateLast(_ text: String) {
-        guard !messages.isEmpty else { return }
-        messages[messages.count - 1].text = text
-        notify()
-    }
-    func save() {
-        let enc = JSONEncoder()
-        enc.dateEncodingStrategy = .iso8601
-        if let data = try? enc.encode(messages) { try? data.write(to: file, options: .atomic) }
-    }
-    func clear() {
-        messages.removeAll()
-        try? FileManager.default.removeItem(at: imagesDir)
-        try? FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
-        save(); notify()
-    }
-    func saveImage(_ data: Data) -> String? {
-        let name = UUID().uuidString + ".jpg"
-        do { try data.write(to: imageURL(name)); return name } catch { return nil }
-    }
-    func imageURL(_ name: String) -> URL { imagesDir.appendingPathComponent(name) }
-}
+// ChatMessage / ChatStore live in Chats.swift (conversations, categories, projects).
 
 // MARK: - LLM client (streaming, OpenAI-compatible)
 
@@ -1361,9 +1311,12 @@ final class Bubble: NSObject {
 
 struct PendingFile { let name: String; let text: String }
 
-final class ChatWindowController: NSObject, NSWindowDelegate {
+final class ChatWindowController: NSObject, NSWindowDelegate, NSSplitViewDelegate {
     private var window: NSWindow?
     private let store: ChatStore
+    private var sidebar: ChatSidebar!
+    private var split: NSSplitView!
+    private var deleteButton: NSButton!
     private let transcript = NSTextView()
     private let input = NSTextField()
     private let attachLabel = NSTextField(labelWithString: "")
@@ -1382,11 +1335,57 @@ final class ChatWindowController: NSObject, NSWindowDelegate {
     init(store: ChatStore) {
         self.store = store
         super.init()
-        store.observe { [weak self] in self?.queueRender() }
+        store.observe { [weak self] structural in
+            guard let self = self, self.isVisible else { return }
+            if structural { self.sidebar?.reload(); self.updateTitle() }
+            self.queueRender()
+        }
+    }
+
+    private func updateTitle() {
+        guard let w = window else { return }
+        let c = store.currentConversation
+        var t = c?.title ?? store.pendingTitleShown ?? "新对话"
+        if let p = store.currentProject { t = "\(p.emoji) \(p.name) · " + t }
+        w.title = t + " — OrdCat 🐈‍⬛"
+        deleteButton?.isEnabled = c != nil
+    }
+
+    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { 180 }
+    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { 380 }
+    func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool { subview === sidebar?.view }
+    func splitView(_ splitView: NSSplitView, resizeSubviewsWithOldSize oldSize: NSSize) {
+        // Keep the sidebar's width when the window is resized; the chat takes the rest.
+        guard splitView.subviews.count == 2 else { splitView.adjustSubviews(); return }
+        let side = splitView.subviews[0], main = splitView.subviews[1]
+        let H = splitView.bounds.height, W = splitView.bounds.width
+        let sw = side.isHidden ? 0 : min(side.frame.width, max(0, W - 300))
+        let d = side.isHidden ? 0 : splitView.dividerThickness
+        side.frame = NSRect(x: 0, y: 0, width: sw, height: H)
+        main.frame = NSRect(x: sw + d, y: 0, width: W - sw - d, height: H)
+    }
+    @objc private func toggleSidebar() {
+        guard let side = sidebar?.view, let split = split else { return }
+        side.isHidden.toggle()
+        if !side.isHidden && side.frame.width < 180 { side.frame.size.width = 240 }
+        split.adjustSubviews()
+        split.needsLayout = true
+        UserDefaults.standard.set(side.isHidden, forKey: "chatSidebarHidden")
+    }
+    @objc private func deleteCurrent() {
+        guard let c = store.currentConversation else { return }
+        let a = NSAlert()
+        a.messageText = "删除对话「\(c.title)」？"
+        a.informativeText = "删除后无法恢复。"
+        a.addButton(withTitle: "删除")
+        a.addButton(withTitle: "取消")
+        if a.runModal() == .alertFirstButtonReturn { store.deleteConversation(c.id) }
     }
 
     func show() {
         if window == nil { build() }
+        sidebar.reload()
+        updateTitle()
         render()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
@@ -1400,17 +1399,35 @@ final class ChatWindowController: NSObject, NSWindowDelegate {
     }
 
     private func build() {
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 640),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 640),
                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         w.title = "和 OrdCat 聊天 🐈‍⬛"
-        w.minSize = NSSize(width: 380, height: 360)
+        w.minSize = NSSize(width: 420, height: 360)
         w.isReleasedWhenClosed = false
         w.delegate = self
         w.center()
-        w.setFrameAutosaveName("OrdCatChat")
-        let v = DropView(frame: w.contentRect(forFrameRect: w.frame))
-        v.onFiles = { [weak self] urls in self?.add(urls) }
-        w.contentView = v
+        w.setFrameAutosaveName("OrdCatChat2")
+        let root = DropView(frame: w.contentRect(forFrameRect: w.frame))
+        root.onFiles = { [weak self] urls in self?.add(urls) }
+        w.contentView = root
+
+        // Left: chats, categories and projects. Right: the open chat.
+        split = NSSplitView(frame: root.bounds)
+        split.isVertical = true
+        split.dividerStyle = .thin
+        split.autoresizingMask = [.width, .height]
+        split.delegate = self
+        sidebar = ChatSidebar(store: store)
+        sidebar.window = w
+        sidebar.onClearAll = { [weak self] in self?.clearHistory() }
+        let side = sidebar.view
+        side.frame = NSRect(x: 0, y: 0, width: 240, height: root.bounds.height)
+        let v = NSView(frame: NSRect(x: 241, y: 0, width: root.bounds.width - 241, height: root.bounds.height))
+        split.addSubview(side)
+        split.addSubview(v)
+        root.addSubview(split)
+        side.isHidden = UserDefaults.standard.bool(forKey: "chatSidebarHidden")
+        split.adjustSubviews()
         let W = v.bounds.width, H = v.bounds.height
 
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 100, width: W, height: H - 100))
@@ -1432,14 +1449,23 @@ final class ChatWindowController: NSObject, NSWindowDelegate {
         sep.autoresizingMask = [.width, .maxYMargin]
         v.addSubview(sep)
 
-        let clear = NSButton(title: "清空记录", target: self, action: #selector(clearHistory))
-        clear.bezelStyle = .rounded
-        clear.controlSize = .small
-        clear.frame = NSRect(x: 10, y: 64, width: 84, height: 26)
-        clear.autoresizingMask = [.maxXMargin, .maxYMargin]
-        v.addSubview(clear)
+        let sideB = NSButton(title: "◧", target: self, action: #selector(toggleSidebar))
+        sideB.bezelStyle = .rounded
+        sideB.controlSize = .small
+        sideB.toolTip = "显示/隐藏左侧的对话和项目栏"
+        sideB.frame = NSRect(x: 10, y: 64, width: 34, height: 26)
+        sideB.autoresizingMask = [.maxXMargin, .maxYMargin]
+        v.addSubview(sideB)
 
-        attachLabel.frame = NSRect(x: 102, y: 68, width: W - 200, height: 18)
+        deleteButton = NSButton(title: "删除对话", target: self, action: #selector(deleteCurrent))
+        deleteButton.bezelStyle = .rounded
+        deleteButton.controlSize = .small
+        deleteButton.toolTip = "删除正在看的这个对话（全部清空在左栏右键或设置里）"
+        deleteButton.frame = NSRect(x: 48, y: 64, width: 76, height: 26)
+        deleteButton.autoresizingMask = [.maxXMargin, .maxYMargin]
+        v.addSubview(deleteButton)
+
+        attachLabel.frame = NSRect(x: 132, y: 68, width: W - 230, height: 18)
         attachLabel.textColor = .secondaryLabelColor
         attachLabel.font = .systemFont(ofSize: 12)
         attachLabel.lineBreakMode = .byTruncatingMiddle
@@ -1484,7 +1510,7 @@ final class ChatWindowController: NSObject, NSWindowDelegate {
     }
 
     @objc private func mic() { onMic?() }
-    @objc private func clearHistory() {
+    @objc func clearHistory() {
         let a = NSAlert()
         a.messageText = "清空所有聊天记录？"
         a.informativeText = "清空后无法恢复，小猫也会忘掉之前聊过的内容。"
@@ -1571,11 +1597,13 @@ final class ChatWindowController: NSObject, NSWindowDelegate {
         let out = NSMutableAttributedString()
         let df = DateFormatter()
         df.dateFormat = "M月d日 HH:mm"
-        if store.messages.isEmpty {
-            out.append(NSAttributedString(string: "还没有聊天记录～在下面和小猫打个招呼吧 🐾\n",
+        let msgs = store.currentMessages
+        if msgs.isEmpty {
+            let hello = store.currentProject.map { "新对话 · \($0.emoji) \($0.name)\n" + ($0.note.isEmpty ? "" : "小猫会记着这个项目的说明。\n") } ?? ""
+            out.append(NSAttributedString(string: hello + "在下面和小猫打个招呼吧 🐾\n",
                                           attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.secondaryLabelColor]))
         }
-        for m in store.messages {
+        for m in msgs {
             let isUser = m.role == "user"
             let para = NSMutableParagraphStyle()
             para.alignment = isUser ? .right : .left
@@ -2772,7 +2800,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Build the request history: recent turns as text; images only for the newest message.
     private func apiHistory(newImages: [Data], since: Date? = nil, until: Date? = nil) -> [[String: Any]] {
-        var pool = store.messages
+        var pool = store.currentMessages   // only the open conversation
         if let s = since {
             // Topic window: earlier topic turns, plus the message just added (always the last one).
             let last = pool.last
@@ -2810,8 +2838,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             until = topics.first(where: { $0.start > pickedTopic.start })?.start
             if until != nil { since = pickedTopic.start }
         } else if let t = pageTopic {
-            since = beginTopic(title: t).start
+            let topic = beginTopic(title: t)
+            since = topic.start
+            // A page the cat hasn't talked about yet starts its own conversation (category 网页).
+            if Date().timeIntervalSince(topic.start) < 2 && !store.currentMessages.isEmpty {
+                store.startNew(title: t, category: "网页")
+            }
         }
+        // Coming back from the bubble after a long break: start a fresh conversation in the list.
+        if inBubble && chosenTopic == nil && store.current != nil && store.idleTime > 2 * 3600 {
+            store.startNew()
+        }
+        let project = store.currentProject
         let names = images.compactMap { store.saveImage($0) }
         store.append(ChatMessage(role: "user", text: text, imageNames: names, date: Date()))
         var history = apiHistory(newImages: images, since: since, until: until)
@@ -2874,6 +2912,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     ]
                     history[lastIndex] = ["role": "user", "content": parts]
                 }
+            }
+            // A project's standing note is kept in mind for every chat inside it.
+            if let p = project, !p.note.isEmpty {
+                let note = "[这个对话属于用户的项目「\(p.name)」，项目说明如下，回答时请参考]\n" + p.note
+                context = context.map { note + "\n\n" + $0 } ?? note
             }
             self.llm.stream(history, context: context, onDelta: { [weak self] t in
                 guard let self = self else { return }
