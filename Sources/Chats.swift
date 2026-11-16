@@ -23,6 +23,8 @@ struct Conversation: Codable {
     var updated: Date
     var autoTitle: Bool
     var autoCategory: Bool
+    /// Renamed once by the model from what was actually said.
+    var aiTitled: Bool? = nil
 }
 
 struct ChatProject: Codable {
@@ -228,6 +230,18 @@ final class ChatStore {
         f(&conversations[i])
         saveIndex(); notify()
     }
+    /// Does this conversation still want a better title?
+    func wantsAITitle(_ id: String) -> Bool {
+        guard let c = conversations.first(where: { $0.id == id }) else { return false }
+        return c.aiTitled != true && (c.autoTitle || c.category == "网页")
+    }
+    func setAITitle(_ id: String, _ t: String) {
+        var t = t.trimmingCharacters(in: .whitespacesAndNewlines)
+        t = t.trimmingCharacters(in: CharacterSet(charactersIn: "\"“”「」《》'#*。.：:"))
+        if let nl = t.firstIndex(of: "\n") { t = String(t[..<nl]) }
+        guard !t.isEmpty, t.count <= 24, wantsAITitle(id) else { return }
+        edit(id) { $0.title = t; $0.aiTitled = true }
+    }
     func rename(_ id: String, to t: String) {
         let t = t.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
@@ -364,12 +378,14 @@ final class ChatSidebar: NSObject, NSTableViewDataSource, NSTableViewDelegate, N
         scroll.autohidesScrollers = true
         let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("c"))
         col.resizingMask = .autoresizingMask
+        col.width = 228
+        col.maxWidth = 2000
         table.addTableColumn(col)
         table.headerView = nil
         table.backgroundColor = .clear
         table.style = .sourceList
         table.intercellSpacing = NSSize(width: 0, height: 2)
-        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         table.dataSource = self
         table.delegate = self
         table.target = self
@@ -379,6 +395,13 @@ final class ChatSidebar: NSObject, NSTableViewDataSource, NSTableViewDelegate, N
         table.menu = menu
         scroll.documentView = table
         view.addSubview(scroll)
+        // Titles use the full sidebar width (the column used to stay 100 pt wide → "X 上的…").
+        scroll.contentView.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: scroll.contentView,
+                                               queue: .main) { [weak self] _ in
+            guard let t = self?.table, let col = t.tableColumns.first else { return }
+            col.width = max(120, t.enclosingScrollView?.contentView.bounds.width ?? 228)
+        }
         reload()
     }
 

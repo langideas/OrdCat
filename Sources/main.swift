@@ -51,12 +51,23 @@ enum Keychain {
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                    kSecAttrService as String: service]
         SecItemDelete(base as CFDictionary)
+        lock.lock(); cache[service] = value; lock.unlock()
         guard !value.isEmpty, let data = value.data(using: .utf8) else { return }
         var add = base
         add[kSecValueData as String] = data
         SecItemAdd(add as CFDictionary, nil)
     }
+    /// Read once per launch: every Keychain read can make macOS ask for the login password.
+    private static var cache: [String: String] = [:]
+    private static let lock = NSLock()
     static func get(service: String = Keychain.service) -> String {
+        lock.lock(); let hit = cache[service]; lock.unlock()
+        if let h = hit { return h }
+        let v = read(service)
+        lock.lock(); cache[service] = v; lock.unlock()
+        return v
+    }
+    private static func read(_ service: String) -> String {
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                 kSecAttrService as String: service,
                                 kSecReturnData as String: true,
@@ -70,6 +81,7 @@ enum Keychain {
 
 enum Prefs {
     static let d = UserDefaults.standard
+    static var settingsZoom: Double { get { d.object(forKey: "settingsZoom") as? Double ?? 1.0 } set { d.set(newValue, forKey: "settingsZoom") } }
     private static func bool(_ k: String, _ def: Bool) -> Bool { d.object(forKey: k) as? Bool ?? def }
     static var base: String {
         get { d.string(forKey: "base") ?? kPresets[0].base }
@@ -1682,7 +1694,7 @@ func jpegData(cgImage cg: CGImage) -> Data? {
 
 // MARK: - Settings window
 
-final class SettingsController: NSObject {
+final class SettingsController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let preset = NSPopUpButton()
     private let base = NSTextField()
@@ -1779,9 +1791,10 @@ final class SettingsController: NSObject {
         refreshSign()
         refreshAX()
         status.stringValue = ""
-        if let tv = window?.contentView?.subviews.first as? NSTabView { tv.selectTabViewItem(at: tab) }
+        tabsView?.selectTabViewItem(at: tab)
+        segControl?.selectedSegment = tab
         NSApp.activate(ignoringOtherApps: true)
-        window?.center()
+        if !restoredFrame { window?.center(); restoredFrame = true }
         window?.makeKeyAndOrderFront(nil)
     }
 
@@ -1839,16 +1852,51 @@ final class SettingsController: NSObject {
     }
 
     private func build() {
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 420),
-                         styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        let saved = UserDefaults.standard.string(forKey: "settingsFrame").map(NSRectFromString)
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 500),
+                         styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         w.title = "OrdCat 设置 · v\(Updater.shared.current)"
         w.isReleasedWhenClosed = false
+        w.minSize = NSSize(width: 420, height: 360)
+        if let f = saved, f.width >= 420 { w.setFrame(f, display: false); restoredFrame = true }
         let root = NSView(frame: w.contentRect(forFrameRect: w.frame))
         w.contentView = root
-        let tabs = NSTabView(frame: root.bounds.insetBy(dx: 10, dy: 10))
+        // Clear, large section switcher instead of the small built-in tab strip.
+        let seg = NSSegmentedControl(labels: ["模型", "小猫", "感知与记忆", "声音", "技能", "关于"],
+                                     trackingMode: .selectOne, target: self, action: #selector(segChanged(_:)))
+        seg.font = .systemFont(ofSize: 13, weight: .medium)
+        seg.controlSize = .large
+        seg.sizeToFit()
+        seg.frame.origin = NSPoint(x: (root.bounds.width - seg.frame.width) / 2, y: root.bounds.height - seg.frame.height - 12)
+        seg.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin]
+        seg.selectedSegment = 0
+        root.addSubview(seg)
+        segControl = seg
+        let tabs = NSTabView(frame: NSRect(x: 8, y: 40, width: root.bounds.width - 16,
+                                           height: root.bounds.height - seg.frame.height - 60))
+        tabs.tabViewType = .noTabsNoBorder
         tabsView = tabs
         tabs.autoresizingMask = [.width, .height]
         root.addSubview(tabs)
+        // Bottom bar: interface size.
+        let zl = NSTextField(labelWithString: "界面大小")
+        zl.font = .systemFont(ofSize: 12)
+        zl.textColor = .secondaryLabelColor
+        zl.frame = NSRect(x: 16, y: 12, width: 60, height: 18)
+        root.addSubview(zl)
+        let zoom = NSSegmentedControl(labels: ["小", "标准", "大", "特大"], trackingMode: .selectOne,
+                                      target: self, action: #selector(zoomChanged(_:)))
+        zoom.font = .systemFont(ofSize: 12)
+        zoom.frame = NSRect(x: 78, y: 8, width: 200, height: 24)
+        zoom.selectedSegment = zoomSteps.firstIndex(of: Prefs.settingsZoom) ?? 1
+        root.addSubview(zoom)
+        let tip = NSTextField(labelWithString: "可拖动窗口边缘调大小，内容放不下时可上下左右滚动")
+        tip.font = .systemFont(ofSize: 11)
+        tip.textColor = .tertiaryLabelColor
+        tip.frame = NSRect(x: 290, y: 12, width: root.bounds.width - 300, height: 16)
+        tip.autoresizingMask = [.width]
+        tip.lineBreakMode = .byTruncatingTail
+        root.addSubview(tip)
 
         // Tab 1: model
         let t1 = NSTabViewItem(identifier: "model")
@@ -2118,7 +2166,67 @@ final class SettingsController: NSObject {
         t4.view = v4
         tabs.addTabViewItem(t4)
 
+        // Every page scrolls both ways and follows the interface size.
+        for item in tabs.tabViewItems {
+            guard let content = item.view else { continue }
+            item.view = scrollable(content)
+        }
+        w.delegate = self
         window = w
+    }
+
+    private var segControl: NSSegmentedControl?
+    private var pageScrolls: [NSScrollView] = []
+    private var restoredFrame = false
+    private let zoomSteps: [Double] = [0.9, 1.0, 1.15, 1.3]
+
+    /// Top-left anchored, scrollable, zoomable wrapper around a fixed-size settings page.
+    private func scrollable(_ content: NSView) -> NSView {
+        final class Flipped: NSView { override var isFlipped: Bool { true } }
+        let doc = Flipped(frame: NSRect(origin: .zero, size: content.frame.size))
+        content.frame.origin = .zero
+        doc.addSubview(content)
+        let sv = NSScrollView(frame: NSRect(x: 0, y: 0, width: 520, height: 400))
+        sv.documentView = doc
+        sv.hasVerticalScroller = true
+        sv.hasHorizontalScroller = true
+        sv.autohidesScrollers = true
+        sv.drawsBackground = false
+        sv.borderType = .noBorder
+        sv.allowsMagnification = true
+        sv.minMagnification = 0.8
+        sv.maxMagnification = 1.6
+        sv.magnification = CGFloat(Prefs.settingsZoom)
+        sv.autoresizingMask = [.width, .height]
+        pageScrolls.append(sv)
+        return sv
+    }
+
+    @objc private func segChanged(_ s: NSSegmentedControl) {
+        tabsView?.selectTabViewItem(at: s.selectedSegment)
+    }
+
+    @objc private func zoomChanged(_ s: NSSegmentedControl) {
+        let z = zoomSteps[max(0, min(zoomSteps.count - 1, s.selectedSegment))]
+        Prefs.settingsZoom = z
+        for sv in pageScrolls { sv.magnification = CGFloat(z) }
+        // Grow the window a little with the zoom so less scrolling is needed.
+        if let w = window, let scr = w.screen?.visibleFrame {
+            var f = w.frame
+            let want = NSSize(width: min(scr.width, 560 * z), height: min(scr.height, 500 * z))
+            if f.width < want.width || f.height < want.height {
+                f.origin.y -= max(0, want.height - f.height)
+                f.size = NSSize(width: max(f.width, want.width), height: max(f.height, want.height))
+                w.setFrame(f, display: true, animate: true)
+            }
+        }
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        if let w = window { UserDefaults.standard.set(NSStringFromRect(w.frame), forKey: "settingsFrame") }
+    }
+    func windowDidMove(_ notification: Notification) {
+        if let w = window { UserDefaults.standard.set(NSStringFromRect(w.frame), forKey: "settingsFrame") }
     }
 
     @objc private func toggled(_ b: NSButton) {
@@ -2321,7 +2429,7 @@ final class SettingsController: NSObject {
     @objc private func modelPaneChanged(_ seg: NSSegmentedControl) {
         for (i, p) in modelPanes.enumerated() { p.isHidden = i != seg.selectedSegment }
     }
-    @objc private func goVoiceTab() { tabsView?.selectTabViewItem(at: 3) }
+    @objc private func goVoiceTab() { tabsView?.selectTabViewItem(at: 3); segControl?.selectedSegment = 3 }
 
     @objc private func visionPresetChanged() {
         let p = kVisionPresets[visionPreset.indexOfSelectedItem]
@@ -2882,11 +2990,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bubble.layout()
     }
 
+    /// After the first answer, let the model name the conversation from what was said (shown in full in the sidebar).
+    private let titleLLM = LLM()
+    private func autoTitle(user: String, reply: String) {
+        guard let id = store.current, store.wantsAITitle(id) else { return }
+        let u = user.components(separatedBy: "\n\n---\n").last ?? user
+        let prompt = "给下面这段对话起一个标题：不超过 12 个字，具体说出在聊什么（比如「X 帖子：Zaps 条款解读」「修 Swift 编译报错」），不要标点和引号，只输出标题本身。\n\n用户：\(u.prefix(500))\n小猫：\(reply.prefix(400))"
+        titleLLM.stream([["role": "user", "content": prompt]], onDelta: { _ in }, onDone: { [weak self] t, err in
+            guard err == nil, let t = t else { return }
+            self?.store.setAITitle(id, t)
+        })
+    }
+
+    private let gistLLM = LLM()
+    private var gists: [String: String] = [:]
+    private var gistPending = ""
+
     private func xGreeting(scan: Bool = true) -> String {
         if scan { xbuddy.scanNow() }
+        // A single post page: talk about the post, not just the person.
+        if let p = xbuddy.mainPost {
+            let key = "\(p.handle)|\(p.text.prefix(80))"
+            var g = "📝 @\(p.handle)\(p.name.isEmpty ? "" : "（\(p.name)）") 的帖子\n"
+            if let gist = gists[key] {
+                g += "一句话：\(gist)\n"
+            } else {
+                g += "「\(p.text.count > 90 ? String(p.text.prefix(90)) + "…" : p.text)」\n"
+                if p.text.count > 60 { requestGist(p, key: key) }
+            }
+            let r = xbuddy.replyStats
+            if r.total > 0 {
+                g += "💬 这屏读到 \(r.total) 条回复" + (r.water + r.spam > 0 ? "，其中 \(r.water) 条水评、\(r.spam) 条营销号" : "") + "\n"
+            }
+            if let who = xbuddy.person(p.handle), who.known {
+                let n = who.interactions.count
+                g += "👤 " + (who.following == true ? "你关注了 TA" : "你认识 TA") + (n > 0 ? "，互动过 \(n) 次" : "") + "\n"
+            }
+            return g + "\n想看重点、筛评论，还是帮你想回复？"
+        }
         if let p = xbuddy.person(xbuddy.focus), p.known { return xbuddy.card(p) + "\n\n想让我帮你做点什么？" }
         if let f = xbuddy.focus { return "这页是 @\(f) 🐾 我还不太认识 TA。想让我帮你做点什么？" }
         return "喵～陪你刷推中 🐾 想让我帮你做点什么？"
+    }
+
+    /// One-sentence gist of a long post, fetched quietly and dropped into the card when it arrives.
+    private func requestGist(_ p: XPost, key: String) {
+        guard gistPending != key, !Prefs.base.isEmpty else { return }
+        gistPending = key
+        let prompt = "用一句中文概括这条帖子在说什么（不超过 40 字，只输出这一句）：\n@\(p.handle)：\(p.text.prefix(1500))"
+        gistLLM.stream([["role": "user", "content": prompt]], onDelta: { _ in }, onDone: { [weak self] t, err in
+            guard let self = self else { return }
+            self.gistPending = ""
+            guard err == nil, let t = t?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return }
+            self.gists[key] = String(t.prefix(80))
+            if self.gists.count > 200 { self.gists.removeAll() }
+            if self.xGreetingLive, self.bubble.isShown, self.bubble.chatMode,
+               let m = self.xbuddy.mainPost, "\(m.handle)|\(m.text.prefix(80))" == key {
+                self.xShow(self.xGreeting(scan: false))
+            }
+        })
+    }
+
+    /// Show an X popup: inside the open chat bubble when it is up, as a light popup otherwise.
+    private func xPopup(_ text: String, _ acts: [(String, () -> Void)], hold: Double) {
+        if bubble.chatMode && bubble.isShown {
+            var a = acts
+            a.append(("返回", { [weak self] in
+                guard let self = self else { return }
+                self.xGreetingLive = true
+                self.xShow(self.xGreeting(scan: false))
+            }))
+            bubble.setText(text)
+            bubble.setActions(a)
+            bubble.layout()
+        } else {
+            bubble.notify(text, actions: acts, hold: hold)
+        }
     }
 
     /// You moved to another X page while the bubble shows the X card: switch the card right away.
@@ -2915,7 +3094,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func flushXAlerts() {
         guard !pendingXAlerts.isEmpty else { return }
         // Never interrupt a chat, voice, or reply ideas you are reading.
-        guard catPanel.isVisible, !bubble.chatMode, !listener.isListening, !xReplyShowing,
+        // Never interrupt a conversation, voice, or reply ideas you are reading; the open X card is fine.
+        let chatBusy = bubble.chatMode && bubble.isShown && !xGreetingLive
+        guard catPanel.isVisible, !chatBusy, !listener.isListening, !xReplyShowing,
               xbuddy.readablePage() != nil else {
             if !(xbuddy.readablePage() != nil) { pendingXAlerts.removeAll() }
             return
@@ -2960,7 +3141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if rest > 0 { text += "\n另外还有 \(rest) 条别的提醒" }
         catView.perk(true)
-        bubble.notify(text, actions: acts, hold: kind == .signal ? 12 : 8)
+        xPopup(text, acts, hold: kind == .signal ? 12 : 8)
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in self?.catView.perk(false) }
     }
 
@@ -2982,14 +3163,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func xReplyAssist(_ post: XPost?) {
-        guard catPanel.isVisible, !bubble.chatMode, !listener.isListening else { return }
+        guard catPanel.isVisible, !listener.isListening else { return }
         guard let p = post, !p.text.isEmpty else {
-            bubble.notify("✍️ 想回复呀～这条我没读到文字，点我再用「想回复」试试。", hold: 4)
+            xPopup("✍️ 想回复呀～这条我没读到文字，点「想回复」再试试。", [], hold: 4)
             return
         }
         xReplyShowing = true
         catView.perk(true)
-        bubble.notify("✍️ 在帮你想怎么回 @\(p.handle)…", hold: 30)
+        xPopup("✍️ 在帮你想怎么回 @\(p.handle)…", [], hold: 30)
         var ctx = [xbuddy.interestLine()]
         if let who = xbuddy.person(p.handle) {
             ctx.append("[作者 @\(who.handle)：\(who.following == true ? "我已关注" : "我没关注")，我们互动过 \(who.interactions.count) 次]")
@@ -3005,8 +3186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     onDelta: { _ in }, onDone: { [weak self] full, err in
             guard let self = self else { return }
             self.catView.perk(false)
-            guard !self.bubble.chatMode else { self.xReplyShowing = false; return }
-            if let e = err { self.xReplyShowing = false; self.bubble.notify("✍️ " + e, hold: 6); return }
+            if let e = err { self.xReplyShowing = false; self.xPopup("✍️ " + e, [], hold: 6); return }
             let drafts = self.parseDrafts(full ?? "")
             guard !drafts.isEmpty else { self.xReplyShowing = false; return }
             var text = "✍️ 回复 @\(p.handle) 可以这样说：\n"
@@ -3020,11 +3200,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.selection.ignoreChangeCount = pb.changeCount
                     self.lastChange = pb.changeCount
                     self.xReplyShowing = false
-                    self.bubble.notify("已复制第 \(i + 1) 条 ✂️ 在回复框里按 ⌘V，改一改再发～", hold: 3)
+                    self.xPopup("已复制第 \(i + 1) 条 ✂️ 在回复框里按 ⌘V，改一改再发～\n\n\(d)", [], hold: 3)
                 }))
             }
             acts.append(("换一批", { [weak self] in self?.xReplyAssist(p) }))
-            self.bubble.notify(text, actions: acts, hold: 40)
+            self.xPopup(text, acts, hold: 40)
             DispatchQueue.main.asyncAfter(deadline: .now() + 40) { [weak self] in self?.xReplyShowing = false }
         })
     }
@@ -3286,6 +3466,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if inBubble && self.bubble.isShown && gen == self.bubbleGen { self.bubble.setText(final) }
                 guard err == nil else { return }
                 self.hub.recordChat(user: text, reply: final)
+                self.autoTitle(user: text, reply: final)
                 if usePerception && Prefs.highlight {
                     let rects = self.hub.resolveTargets(in: raw)
                     if !rects.isEmpty { self.highlighter.show(rects, label: "在这里") }

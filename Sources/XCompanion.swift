@@ -250,7 +250,7 @@ final class XCompanion {
     /// An X page you allowed the cat to read (mode on, not DMs/settings/notifications).
     func readablePage() -> XPage? {
         guard let pg = currentPage(), !XCompanion.isPrivate(pg.title), !XCompanion.isPrivateURL(pg.url) else { return nil }
-        return Prefs.xMode ? pg : nil
+        return Prefs.xMode && Billing.isUnlocked("x") ? pg : nil
     }
 
     /// Full check for the settings button: detect, read once, say what happened.
@@ -274,6 +274,9 @@ final class XCompanion {
         let handles = ax.elements.filter { $0.text.hasPrefix("@") && $0.text.count <= 16 }.count
         lines.append("读到页面元素 \(ax.elements.count) 个（\(ms) 毫秒），其中 @账号 \(handles) 个，认出帖子 \(parsed.posts.count) 条")
         if let f = parsed.focus { lines.append("这页的主角：@\(f)") }
+        if let p = parsed.posts.first { lines.append("第一条：@\(p.handle)「\(p.text.prefix(30))」") }
+        lines.append("回复框：\(composerStatus)")
+        lines.append("技能订阅：\(Billing.statusLine("x"))")
         if ax.elements.count < 20 {
             lines.append("⚠️ 页面内容几乎读不到：浏览器可能没开放网页的辅助功能信息")
         } else if parsed.posts.isEmpty {
@@ -284,6 +287,23 @@ final class XCompanion {
     }
 
     private(set) var lastReadCount = -1
+    /// Last thing the reply-box watcher saw (for 检查刷推).
+    private(set) var composerStatus = "还没点过回复框"
+    /// A single post page (x.com/<user>/status/<id>).
+    var onStatusPage: Bool { probe.url.contains("/status/") || XCompanion.titleName(lastTitleText) != nil }
+    private var lastTitleText = ""
+    /// The post a status page is about (the first one at the top).
+    var mainPost: XPost? { onStatusPage ? lastPosts.first : nil }
+    /// Replies on a status page, and how many of them look like 水评 / spam.
+    var replyStats: (total: Int, water: Int, spam: Int) {
+        guard onStatusPage, lastPosts.count > 1 else { return (0, 0, 0) }
+        var w = 0, sp = 0
+        for p in lastPosts.dropFirst() {
+            let c = XCompanion.classify(p, isReply: true, words: [], accounts: [])
+            if c.spam != nil { sp += 1 } else if c.water { w += 1 }
+        }
+        return (lastPosts.count - 1, w, sp)
+    }
     private var scanning = false
     private let axQueue = DispatchQueue(label: "app.ordcat.xscan", qos: .utility)
 
@@ -298,8 +318,8 @@ final class XCompanion {
             status += "（私信/设置/通知页，不读）"
             focus = nil; lastPosts = []; return
         }
-        guard Prefs.xMode else {
-            status += "，但「陪你刷推」还没打开"
+        guard Prefs.xMode && Billing.isUnlocked("x") else {
+            status += Prefs.xMode ? "，但「陪你刷推」订阅已到期" : "，但「陪你刷推」还没打开"
             if !Prefs.xOffered { Prefs.xOffered = true; onFirstVisit?() }
             return
         }
@@ -333,6 +353,7 @@ final class XCompanion {
     }
 
     private func apply(_ elements: [ScreenElement], app: NSRunningApplication, title: String, newPage: Bool) {
+        lastTitleText = title
         let parsed = XCompanion.parse(elements, title: title)
         initialScanOfPage = newPage
         lastPosts = parsed.posts
@@ -666,8 +687,10 @@ final class XCompanion {
     private static let replyingRe = re("^(?:Replying to|回覆給|回复给|回复|回覆|正在回复|返信先)\\s*@?([A-Za-z0-9_]{1,15})?")
 
     private func checkComposer(_ pg: XPage) {
-        guard Prefs.xAlert("reply"), let f = hub.reader.focusedField(pid: pg.app.processIdentifier) else { lastFocusKey = ""; return }
+        guard Prefs.xAlert("reply") else { return }
+        guard let f = hub.reader.focusedField(pid: pg.app.processIdentifier) else { lastFocusKey = ""; return }
         guard f.role == "AXTextArea" || (f.role == "AXTextField" && f.hint.contains("回")) else { lastFocusKey = ""; return }
+        composerStatus = "点到了输入框（\(f.role)\(f.hint.isEmpty ? "" : "：" + f.hint)）"
         let fk = "\(pg.url)|\(Int(f.rect.minY / 40))"
         guard fk != lastFocusKey else { return }
         lastFocusKey = fk
@@ -687,7 +710,7 @@ final class XCompanion {
                     if m.range(at: 1).location != NSNotFound { target = (t as NSString).substring(with: m.range(at: 1)) }
                     else if i + 1 < els.count, let h = XCompanion.match(XCompanion.handleRe, els[i + 1].text) { target = h }
                 }
-                guard isReply else { return }   // a new post, not a reply
+                guard isReply else { self.composerStatus += "，但这是发新帖，不是回复"; return }   // a new post, not a reply
                 let posts = XCompanion.parse(els, title: title).posts
                 // The post you reply to sits above the box: the named one, else the nearest above, else the main post.
                 let above = posts.filter { $0.rect.minY < f.rect.minY }
@@ -696,6 +719,7 @@ final class XCompanion {
                 let key = "\(url)|\(post?.handle ?? "")|\(post?.text.prefix(30) ?? "")"
                 guard key != self.replyKey || Date().timeIntervalSince(self.replyAt) > 600 else { return }
                 self.replyKey = key; self.replyAt = Date()
+                self.composerStatus = "回复框 → 给 @\(post?.handle ?? "?") 想回复建议"
                 self.onReplyComposer?(post)
             }
         }

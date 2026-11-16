@@ -11,6 +11,8 @@ struct Skill {
     let emoji: String
     let name: String
     let summary: String
+    /// Opened by subscription (basic features are always free).
+    let paid: Bool
     let isOn: () -> Bool
     let setOn: (Bool) -> Void
     /// Builds this skill's settings inside the given frame.
@@ -35,6 +37,7 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
     private var skills: [Skill] = []
     private var rows: [SkillRow] = []
     private var switches: [String: NSSwitch] = [:]
+    private var badges: [String: NSButton] = [:]
     private var detail: NSView?
     private var selected = 0
     private let detailFrame = NSRect(x: 0, y: 0, width: 470, height: 238)
@@ -54,7 +57,7 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
         title.font = .boldSystemFont(ofSize: 14)
         title.frame = NSRect(x: 16, y: 330, width: 80, height: 20)
         view.addSubview(title)
-        let hint = NSTextField(labelWithString: "给小猫装上的本领。打开开关就生效，点一行看它的设置。")
+        let hint = NSTextField(labelWithString: "基础功能免费，技能按订阅开启。打开开关就生效，点一行看设置。")
         hint.font = .systemFont(ofSize: 11)
         hint.textColor = .secondaryLabelColor
         hint.frame = NSRect(x: 70, y: 331, width: 390, height: 16)
@@ -79,8 +82,18 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
             sm.font = .systemFont(ofSize: 11)
             sm.textColor = .secondaryLabelColor
             sm.lineBreakMode = .byTruncatingTail
-            sm.frame = NSRect(x: 44, y: 6, width: 320, height: 16)
+            sm.frame = NSRect(x: 44, y: 6, width: 250, height: 16)
             r.addSubview(sm)
+            if sk.paid {
+                let b = NSButton(title: "", target: self, action: #selector(subscribe(_:)))
+                b.bezelStyle = .inline
+                b.font = .systemFont(ofSize: 11, weight: .medium)
+                b.identifier = NSUserInterfaceItemIdentifier(sk.id)
+                b.frame = NSRect(x: 290, y: 12, width: 86, height: 22)
+                b.toolTip = "订阅、试用或输入订阅码"
+                r.addSubview(b)
+                badges[sk.id] = b
+            }
             let sw = NSSwitch()
             sw.frame = NSRect(x: 382, y: 11, width: 50, height: 24)
             sw.state = sk.isOn() ? .on : .off
@@ -121,15 +134,40 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
         let id = sw.identifier?.rawValue ?? ""
         guard let sk = skills.first(where: { $0.id == id }) else { return }
         let on = sw.state == .on
+        if on && sk.paid && !Billing.isUnlocked(id) {
+            sw.state = .off
+            Billing.showSubscribe(id, name: sk.name) { [weak self] in
+                if Billing.isUnlocked(id) { sk.setOn(true); self?.onChanged?(id, true) }
+                self?.refresh()
+            }
+            refresh()
+            return
+        }
         sk.setOn(on)
         onChanged?(id, on)
         refresh()
     }
 
     /// Re-read every switch and status line (after the cat changed something itself).
+    @objc private func subscribe(_ b: NSButton) {
+        let id = b.identifier?.rawValue ?? ""
+        guard let sk = skills.first(where: { $0.id == id }) else { return }
+        Billing.showSubscribe(id, name: sk.name) { [weak self] in self?.refresh() }
+    }
+
+    private func badge(_ id: String) -> String {
+        if !Billing.enabled { return "公测免费" }
+        if Billing.isSubscribed(id) { return "已订阅" }
+        if Billing.trialStart(id) != nil && Billing.trialLeft(id) > 0 { return "试用剩 \(Billing.trialLeft(id)) 天" }
+        return Billing.price(id)
+    }
+
     func refresh() {
-        for sk in skills { switches[sk.id]?.state = sk.isOn() ? .on : .off }
-        if let xb = xbuddy { xStats.stringValue = "\(xb.stats)\n状态：\(xb.status)" }
+        for sk in skills {
+            switches[sk.id]?.state = sk.isOn() && (!sk.paid || Billing.isUnlocked(sk.id)) ? .on : .off
+            badges[sk.id]?.title = badge(sk.id)
+        }
+        if let xb = xbuddy { xStats.stringValue = "\(xb.stats)\n订阅：\(Billing.statusLine("x"))" }
     }
 
     // MARK: the skills
@@ -138,6 +176,7 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
         [
             Skill(id: "x", emoji: "🐦", name: "陪你刷推（X）",
                   summary: "认人、信号提醒、标出营销号和水评、点回复时给建议",
+                  paid: true,
                   isOn: { Prefs.xMode },
                   setOn: { on in
                       Prefs.xMode = on

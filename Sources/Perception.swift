@@ -195,8 +195,12 @@ final class ScreenReader {
         AXUIElementSetMessagingTimeout(app, 0.15)
         guard let fv = attr(app, kAXFocusedUIElementAttribute as String), CFGetTypeID(fv) == AXUIElementGetTypeID() else { return nil }
         let el = fv as! AXUIElement
-        let role = str(el, kAXRoleAttribute as String) ?? ""
-        guard role == "AXTextArea" || role == "AXTextField" || role == "AXComboBox" else { return nil }
+        var role = str(el, kAXRoleAttribute as String) ?? ""
+        let textRole = role == "AXTextArea" || role == "AXTextField" || role == "AXComboBox"
+        // Rich editors in web pages (X's reply box) often show up as a group inside an editable area.
+        let editable = attr(el, "AXEditableAncestor") != nil || (attr(el, "AXEditable") as? Bool ?? false)
+        guard textRole || editable else { return nil }
+        if !textRole { role = "AXTextArea" }
         let hint = [str(el, "AXPlaceholderValue"), str(el, kAXDescriptionAttribute as String), str(el, kAXTitleAttribute as String)]
             .compactMap { $0 }.joined(separator: " ")
         return (role, hint, rect(el) ?? .zero)
