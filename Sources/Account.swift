@@ -2,7 +2,7 @@
 //
 // Local profile (name, username, avatar) always works. Cloud account (email / phone sign-up, subscriptions bound to
 // the account, account deletion) runs on Supabase; its address and public anon key come from config/remote.json:
-//   "account": { "supabaseURL": "https://xxxx.supabase.co", "anonKey": "eyJ…" }
+//   "account": { "supabaseURL": "https://xxxx.supabase.co", "anonKey": "sb_publishable_…" }
 // Server side lives in supabase/ (tables, storage bucket, delete-account and lemon-webhook functions).
 
 import Cocoa
