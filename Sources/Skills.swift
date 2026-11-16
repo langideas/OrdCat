@@ -6,6 +6,9 @@
 
 import Cocoa
 
+let kPaneW: CGFloat = 500
+let kDetailH: CGFloat = 420
+
 struct Skill {
     let id: String
     let emoji: String
@@ -19,6 +22,9 @@ struct Skill {
     let settings: (NSRect) -> NSView
 }
 
+/// Top-down layout (y grows downward), so rows stack naturally.
+final class FlipView: NSView { override var isFlipped: Bool { true } }
+
 /// A clickable row in the skills list: emoji + name + one-line summary + switch.
 private final class SkillRow: NSView {
     var onSelect: (() -> Void)?
@@ -29,7 +35,7 @@ private final class SkillRow: NSView {
 }
 
 final class SkillsPane: NSObject, NSTextFieldDelegate {
-    let view = NSView(frame: NSRect(x: 0, y: 0, width: 470, height: 360))
+    let view: NSView = FlipView(frame: NSRect(x: 0, y: 0, width: kPaneW, height: 560))
     weak var xbuddy: XCompanion?
     /// Called when a skill is switched (so the app can react right away).
     var onChanged: ((String, Bool) -> Void)?
@@ -40,7 +46,7 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
     private var badges: [String: NSButton] = [:]
     private var detail: NSView?
     private var selected = 0
-    private let detailFrame = NSRect(x: 0, y: 0, width: 470, height: 238)
+    private var detailFrame = NSRect(x: 0, y: 0, width: kPaneW, height: kDetailH)
 
     // 陪你刷推 controls
     private var xChecks: [String: NSButton] = [:]
@@ -53,49 +59,52 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
     func build(xbuddy: XCompanion?) {
         self.xbuddy = xbuddy
         skills = makeSkills()
+        let W = kPaneW
+        var y: CGFloat = 12
         let title = NSTextField(labelWithString: "技能")
-        title.font = .boldSystemFont(ofSize: 14)
-        title.frame = NSRect(x: 16, y: 330, width: 80, height: 20)
+        title.font = .boldSystemFont(ofSize: 15)
+        title.frame = NSRect(x: 16, y: y, width: 120, height: 20)
         view.addSubview(title)
-        let hint = NSTextField(labelWithString: "基础功能免费，技能按订阅开启。打开开关就生效，点一行看设置。")
-        hint.font = .systemFont(ofSize: 11)
+        y += 24
+        let hint = NSTextField(wrappingLabelWithString: "基础功能免费，技能按订阅开启。打开开关就生效，点一行看它的设置。")
+        hint.font = .systemFont(ofSize: 11.5)
         hint.textColor = .secondaryLabelColor
-        hint.frame = NSRect(x: 70, y: 331, width: 390, height: 16)
+        hint.frame = NSRect(x: 16, y: y, width: W - 32, height: 32)
         view.addSubview(hint)
+        y += 36
 
-        // List (scrolls when there are many skills).
-        let rowH: CGFloat = 46
-        let listH = max(CGFloat(skills.count) * (rowH + 4), rowH)
-        let doc = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: listH))
+        // Every skill is one full row; the list grows with the skills (the page scrolls, not the list).
+        let rowH: CGFloat = 56
         for (i, sk) in skills.enumerated() {
-            let y = listH - CGFloat(i + 1) * (rowH + 4) + 4
-            let r = SkillRow(frame: NSRect(x: 0, y: y, width: 440, height: rowH))
+            let r = SkillRow(frame: NSRect(x: 12, y: y, width: W - 24, height: rowH))
+            let rw = r.frame.width
             let em = NSTextField(labelWithString: sk.emoji)
-            em.font = .systemFont(ofSize: 22)
-            em.frame = NSRect(x: 8, y: 10, width: 32, height: 28)
+            em.font = .systemFont(ofSize: 24)
+            em.frame = NSRect(x: 10, y: 13, width: 34, height: 30)
             r.addSubview(em)
             let nm = NSTextField(labelWithString: sk.name)
-            nm.font = .boldSystemFont(ofSize: 13)
-            nm.frame = NSRect(x: 44, y: 24, width: 300, height: 18)
+            nm.font = .boldSystemFont(ofSize: 13.5)
+            nm.frame = NSRect(x: 50, y: 30, width: rw - 200, height: 18)
             r.addSubview(nm)
             let sm = NSTextField(labelWithString: sk.summary)
-            sm.font = .systemFont(ofSize: 11)
+            sm.font = .systemFont(ofSize: 11.5)
             sm.textColor = .secondaryLabelColor
             sm.lineBreakMode = .byTruncatingTail
-            sm.frame = NSRect(x: 44, y: 6, width: 250, height: 16)
+            sm.toolTip = sk.summary
+            sm.frame = NSRect(x: 50, y: 10, width: rw - 200, height: 16)
             r.addSubview(sm)
             if sk.paid {
                 let b = NSButton(title: "", target: self, action: #selector(subscribe(_:)))
                 b.bezelStyle = .inline
                 b.font = .systemFont(ofSize: 11, weight: .medium)
                 b.identifier = NSUserInterfaceItemIdentifier(sk.id)
-                b.frame = NSRect(x: 290, y: 12, width: 86, height: 22)
+                b.frame = NSRect(x: rw - 146, y: 17, width: 84, height: 22)
                 b.toolTip = "订阅、试用或输入订阅码"
                 r.addSubview(b)
                 badges[sk.id] = b
             }
             let sw = NSSwitch()
-            sw.frame = NSRect(x: 382, y: 11, width: 50, height: 24)
+            sw.frame = NSRect(x: rw - 56, y: 16, width: 46, height: 24)
             sw.state = sk.isOn() ? .on : .off
             sw.identifier = NSUserInterfaceItemIdentifier(sk.id)
             sw.target = self
@@ -103,20 +112,17 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
             r.addSubview(sw)
             switches[sk.id] = sw
             r.onSelect = { [weak self] in self?.select(i) }
-            doc.addSubview(r)
+            view.addSubview(r)
             rows.append(r)
+            y += rowH + 4
         }
-        let scroll = NSScrollView(frame: NSRect(x: 14, y: 246, width: 442, height: 80))
-        scroll.documentView = doc
-        scroll.hasVerticalScroller = skills.count > 1
-        scroll.drawsBackground = false
-        scroll.borderType = .noBorder
-        view.addSubview(scroll)
-        doc.scroll(NSPoint(x: 0, y: listH))
-
-        let line = NSBox(frame: NSRect(x: 14, y: 240, width: 442, height: 1))
+        y += 6
+        let line = NSBox(frame: NSRect(x: 16, y: y, width: W - 32, height: 1))
         line.boxType = .separator
         view.addSubview(line)
+        y += 8
+        detailFrame = NSRect(x: 0, y: y, width: W, height: kDetailH)
+        view.setFrameSize(NSSize(width: W, height: y + kDetailH))
         select(0)
     }
 
@@ -198,76 +204,99 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
     }
 
     private func xSettings(_ f: NSRect) -> NSView {
-        let v = NSView(frame: f)
-        let head = NSTextField(labelWithString: "有这些情况时弹窗提醒我：")
-        head.font = .systemFont(ofSize: 12, weight: .medium)
-        head.frame = NSRect(x: 16, y: 216, width: 300, height: 18)
-        v.addSubview(head)
-        let items: [(String, String, CGFloat, CGFloat)] = [
-            ("autopost", "📝 点进帖子自动弹分析", 20, 194), ("reply", "✍️ 点回复时给回复建议", 240, 194),
-            ("signal", "📡 命中我的信号", 20, 172), ("spam", "🚫 营销号 / 广告", 240, 172),
-            ("water", "🗑 帖子下的水评", 20, 150), ("known", "👋 互动过的人出现", 240, 150),
-            ("follow", "🆕 我关注的人发帖", 20, 128)
+        let v = FlipView(frame: f)
+        let W = f.width
+        func section(_ t: String, _ y: CGFloat) {
+            let l = NSTextField(labelWithString: t)
+            l.font = .systemFont(ofSize: 12.5, weight: .semibold)
+            l.frame = NSRect(x: 16, y: y, width: W - 32, height: 18)
+            v.addSubview(l)
+        }
+        section("有这些情况时弹窗提醒我", 4)
+        let colW = (W - 48) / 2
+        let items: [(String, String)] = [
+            ("autopost", "📝 点进帖子自动弹分析"), ("reply", "✍️ 点回复时给回复建议"),
+            ("signal", "📡 命中我的信号"), ("spam", "🚫 营销号 / 广告"),
+            ("water", "🗑 帖子下的水评"), ("known", "👋 互动过的人出现"),
+            ("follow", "🆕 我关注的人发帖")
         ]
-        for (k, t, x, y) in items {
+        for (n, (k, t)) in items.enumerated() {
             let b = NSButton(checkboxWithTitle: t, target: self, action: #selector(xAlertToggled(_:)))
             b.identifier = NSUserInterfaceItemIdentifier(k)
             b.state = Prefs.xAlert(k) ? .on : .off
-            b.frame = NSRect(x: x, y: y, width: 210, height: 20)
+            b.frame = NSRect(x: 22 + CGFloat(n % 2) * (colW + 8), y: 28 + CGFloat(n / 2) * 25, width: colW, height: 20)
             v.addSubview(b)
             xChecks[k] = b
         }
-        func lab(_ s: String, _ y: CGFloat) {
-            let l = NSTextField(labelWithString: s)
-            l.alignment = .right
-            l.frame = NSRect(x: 4, y: y + 3, width: 84, height: 18)
-            v.addSubview(l)
-        }
+        var y: CGFloat = 28 + 4 * 25 + 6
         let rs = NSButton(title: "回复建议设置…", target: self, action: #selector(replySettings))
         rs.bezelStyle = .rounded
-        rs.controlSize = .small
-        rs.frame = NSRect(x: 236, y: 124, width: 140, height: 24)
+        rs.frame = NSRect(x: 18, y: y, width: 150, height: 28)
         v.addSubview(rs)
-        lab("关键词信号", 98)
-        xWords.frame = NSRect(x: 94, y: 98, width: 356, height: 24)
+        let rsHint = NSTextField(labelWithString: "几条、语气、长度、语言、关于我")
+        rsHint.font = .systemFont(ofSize: 11)
+        rsHint.textColor = .secondaryLabelColor
+        rsHint.frame = NSRect(x: 176, y: y + 6, width: W - 192, height: 16)
+        v.addSubview(rsHint)
+        y += 44
+
+        section("信号", y)
+        y += 24
+        let labW: CGFloat = 76
+        func field(_ name: String, _ ctl: NSView, h: CGFloat = 24) {
+            let l = NSTextField(labelWithString: name)
+            l.alignment = .right
+            l.frame = NSRect(x: 12, y: y + 4, width: labW, height: 18)
+            v.addSubview(l)
+            ctl.frame = NSRect(x: labW + 20, y: y, width: W - labW - 36, height: h)
+            v.addSubview(ctl)
+            y += h + 10
+        }
         xWords.placeholderString = "例如：AI, 融资, 空投, OpenAI（逗号分隔）"
         xWords.stringValue = Prefs.xSignalWords
         xWords.delegate = self
-        v.addSubview(xWords)
-        lab("特别关注", 70)
-        xAccounts.frame = NSRect(x: 94, y: 70, width: 356, height: 24)
-        xAccounts.placeholderString = "例如：@elonmusk, @sama（TA 们一出现就提醒）"
+        field("关键词", xWords)
+        xAccounts.placeholderString = "例如：@elonmusk, @sama"
         xAccounts.stringValue = Prefs.xSignalAccounts
         xAccounts.delegate = self
-        v.addSubview(xAccounts)
-        lab("提醒频率", 40)
+        field("特别关注", xAccounts)
         xGap.removeAllItems()
         for g in gapOptions { xGap.addItem(withTitle: g.0) }
         let cur = gapOptions.enumerated().min { abs($0.element.1 - Prefs.xAlertGap) < abs($1.element.1 - Prefs.xAlertGap) }?.offset ?? 1
         xGap.selectItem(at: cur)
         xGap.target = self
         xGap.action = #selector(gapChanged)
-        xGap.frame = NSRect(x: 92, y: 38, width: 220, height: 26)
-        v.addSubview(xGap)
-        xStats.font = .systemFont(ofSize: 10.5)
+        field("提醒频率", xGap, h: 26)
+        xGap.frame.size.width = min(240, xGap.frame.width)
+
+        let line = NSBox(frame: NSRect(x: 16, y: y, width: W - 32, height: 1))
+        line.boxType = .separator
+        v.addSubview(line)
+        y += 10
+        section("刷推记忆", y)
+        y += 22
+        xStats.font = .systemFont(ofSize: 11)
         xStats.textColor = .secondaryLabelColor
-        xStats.frame = NSRect(x: 16, y: 4, width: 220, height: 32)
+        xStats.frame = NSRect(x: 18, y: y, width: W - 36, height: 46)
         v.addSubview(xStats)
+        y += 50
         let check = NSButton(title: "检查刷推", target: self, action: #selector(checkX))
-        check.frame = NSRect(x: 240, y: 6, width: 104, height: 30)
+        check.bezelStyle = .rounded
+        check.frame = NSRect(x: 14, y: y, width: 110, height: 30)
         v.addSubview(check)
         let clear = NSButton(title: "清空刷推记忆", target: self, action: #selector(clearX))
-        clear.frame = NSRect(x: 342, y: 6, width: 116, height: 30)
+        clear.bezelStyle = .rounded
+        clear.frame = NSRect(x: 128, y: y, width: 130, height: 30)
         v.addSubview(clear)
         refresh()
         return v
     }
 
     private func agentSettings(_ f: NSRect) -> NSView {
-        let v = NSView(frame: f)
+        let v = FlipView(frame: f)
         let c = NSButton(checkboxWithTitle: "每一步都先问我（推荐）", target: self, action: #selector(agentConfirmToggled(_:)))
         c.state = Prefs.agentConfirm ? .on : .off
-        c.frame = NSRect(x: 16, y: 208, width: 400, height: 20)
+        c.frame = NSRect(x: 16, y: 6, width: f.width - 32, height: 20)
         v.addSubview(c)
         let info = NSTextField(wrappingLabelWithString: """
         怎么用：在聊天里说「帮我……」，比如「帮我在备忘录里新建一条：明天买猫粮」「帮我打开 Safari 搜索今天的天气」。也可以用「/做 」开头。
@@ -280,7 +309,7 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
         """)
         info.font = .systemFont(ofSize: 11)
         info.textColor = .secondaryLabelColor
-        info.frame = NSRect(x: 16, y: 40, width: 420, height: 160)
+        info.frame = NSRect(x: 16, y: 36, width: f.width - 32, height: 190)
         v.addSubview(info)
         return v
     }

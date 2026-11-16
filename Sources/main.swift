@@ -2421,10 +2421,24 @@ final class SettingsController: NSObject, NSWindowDelegate {
     /// Top-left anchored, scrollable, zoomable wrapper around a fixed-size settings page.
     private func scrollable(_ content: NSView) -> NSView {
         final class Flipped: NSView { override var isFlipped: Bool { true } }
+        /// Keeps the page centered when the window is wider than the page, and scrollable when it is smaller.
+        final class CenteringScroll: NSScrollView {
+            weak var page: NSView?
+            override func tile() {
+                super.tile()
+                guard let page = page, let doc = documentView else { return }
+                let visW = contentView.bounds.width
+                let w = max(page.frame.width, visW)
+                if abs(doc.frame.width - w) > 0.5 { doc.setFrameSize(NSSize(width: w, height: page.frame.height)) }
+                let x = max(0, floor((w - page.frame.width) / 2))
+                if abs(page.frame.origin.x - x) > 0.5 { page.setFrameOrigin(NSPoint(x: x, y: 0)) }
+            }
+        }
         let doc = Flipped(frame: NSRect(origin: .zero, size: content.frame.size))
         content.frame.origin = .zero
         doc.addSubview(content)
-        let sv = NSScrollView(frame: NSRect(x: 0, y: 0, width: 520, height: 400))
+        let sv = CenteringScroll(frame: NSRect(x: 0, y: 0, width: 520, height: 400))
+        sv.page = content
         sv.documentView = doc
         sv.hasVerticalScroller = true
         sv.hasHorizontalScroller = true
