@@ -109,12 +109,16 @@ final class XCompanion {
         let inter = people.values.reduce(0) { $0 + $1.interactions.count }
         let fol = people.values.filter { $0.following == true }.count
         return "记得 \(people.count) 个人 · 已关注 \(fol) · 互动 \(inter) 次"
+            + (lastReadCount >= 0 ? " · 上次读到 \(lastReadCount) 条帖子" : "")
     }
 
     // MARK: page detection
 
     static let browsers: Set<String> = ScreenReader.chromiumBrowsers.union(
-        ["com.apple.Safari", "com.apple.SafariTechnologyPreview", "org.mozilla.firefox"])
+        ["com.apple.Safari", "com.apple.SafariTechnologyPreview", "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition",
+         "org.mozilla.nightly", "com.google.Chrome.dev", "com.microsoft.edgemac.Beta", "com.microsoft.edgemac.Dev",
+         "company.thebrowser.dia", "app.zen-browser.zen", "com.kagi.kagimacOS", "com.openai.atlas", "ai.perplexity.comet",
+         "com.operasoftware.OperaGX", "org.torproject.torbrowser", "net.waterfox.waterfox", "com.duckduckgo.macos.browser"])
 
     private static func stripCount(_ t: String) -> String {
         var s = t.trimmingCharacters(in: .whitespaces)
@@ -122,10 +126,37 @@ final class XCompanion {
         return s
     }
 
+    private static let titleXRe = try! NSRegularExpression(pattern: "/ (X|Twitter)(\\s*[-—–|].*)?$")
+
+    /// Title check, tolerant of what browsers append ("- Google Chrome", "- Personal", "and 3 more pages").
     static func isXTitle(_ t: String?) -> Bool {
         guard let t = t else { return false }
         let s = stripCount(t)
-        return s.hasSuffix("/ X") || s.hasSuffix("/ Twitter") || s.hasSuffix("on X") || s == "X"
+        if s == "X" || s.hasPrefix("X - ") || s.hasPrefix("X — ") { return true }
+        if s.contains(" on X: ") || s.contains(" on X：") || s.hasPrefix("X 上的") || s.contains("在 X 上") { return true }
+        let ns = s as NSString
+        return titleXRe.firstMatch(in: s, range: NSRange(location: 0, length: ns.length)) != nil
+    }
+
+    private static func hostPath(_ url: String) -> (host: String, path: String) {
+        var u = url.lowercased().trimmingCharacters(in: .whitespaces)
+        if let r = u.range(of: "://") { u = String(u[r.upperBound...]) }
+        let host = String(u.prefix { $0 != "/" && $0 != "?" && $0 != "#" })
+        return (host, String(u.dropFirst(host.count)))
+    }
+
+    static func isXURL(_ url: String) -> Bool {
+        let h = hostPath(url).host
+        return ["x.com", "twitter.com", "mobile.x.com", "mobile.twitter.com", "www.x.com", "www.twitter.com", "pro.x.com"].contains(h)
+    }
+
+    static func isPrivateURL(_ url: String) -> Bool {
+        guard isXURL(url) else { return false }
+        let p = hostPath(url).path
+        for pre in ["/messages", "/i/chat", "/i/grok", "/settings", "/notifications", "/i/verified", "/i/account_access"] where p.hasPrefix(pre) {
+            return true
+        }
+        return false
     }
 
     /// DMs, chat, settings: never read.
@@ -137,40 +168,135 @@ final class XCompanion {
         return false
     }
 
+    // MARK: is an X page in front? (with a reason, for 设置 → 感知与记忆 → 检查刷推)
+
+    struct XPage { let app: NSRunningApplication; let title: String; let url: String; let web: AXUIElement? }
+
+    /// Plain-words reason for the last check, shown in settings.
+    private(set) var status = "还没检查过"
+    private var probeKey = ""
+    private var probeAt = Date.distantPast
+    private var probe: (web: AXUIElement?, url: String) = (nil, "")
+
+    func currentPage(forceProbe: Bool = false) -> XPage? {
+        guard AXIsProcessTrusted() else {
+            status = "❌ 没有「辅助功能」权限：系统设置 → 隐私与安全性 → 辅助功能 → 打开 OrdCat"
+            return nil
+        }
+        guard let app = hub.lastExternalApp, !app.isTerminated else { status = "还没看到你打开别的应用"; return nil }
+        let bid = app.bundleIdentifier ?? ""
+        guard let win = hub.shareableWindow(), win.app.processIdentifier == app.processIdentifier else {
+            status = "❌ 读不到「\(app.localizedName ?? bid)」的窗口"
+            return nil
+        }
+        let titleHit = XCompanion.isXTitle(win.title)
+        guard XCompanion.browsers.contains(bid) || titleHit else {
+            status = "最近用的是「\(app.localizedName ?? bid)」，不是浏览器（\(bid)）"
+            return nil
+        }
+        let key = "\(app.processIdentifier)|\(win.title)"
+        if forceProbe || key != probeKey || Date().timeIntervalSince(probeAt) > 15 {
+            probe = hub.reader.webPage(pid: app.processIdentifier)
+            probeKey = key; probeAt = Date()
+        }
+        let urlHit = XCompanion.isXURL(probe.url)
+        guard urlHit || titleHit else {
+            let addr = probe.url.isEmpty ? "地址读不到" : "地址 \(XCompanion.hostPath(probe.url).host)"
+            status = "浏览器里不是 X 页面（标题「\(win.title.prefix(36))」，\(addr)）"
+            return nil
+        }
+        status = "✅ 认出 X 页面（靠\(urlHit ? "网址" : "标题")）\(probe.web == nil ? "，但没找到网页内容区" : "")"
+        return XPage(app: app, title: win.title, url: probe.url, web: probe.web)
+    }
+
+    /// An X page you allowed the cat to read (mode on, not DMs/settings/notifications).
+    func readablePage() -> XPage? {
+        guard let pg = currentPage(), !XCompanion.isPrivate(pg.title), !XCompanion.isPrivateURL(pg.url) else { return nil }
+        return Prefs.xMode ? pg : nil
+    }
+
+    /// Full check for the settings button: detect, read once, say what happened.
+    func diagnose() -> String {
+        var lines: [String] = []
+        lines.append("版本：\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")")
+        lines.append("「陪你刷推」开关：\(Prefs.xMode ? "已打开" : "没打开")")
+        guard let pg = currentPage(forceProbe: true) else { lines.append(status); return lines.joined(separator: "\n") }
+        lines.append(status)
+        lines.append("浏览器：\(pg.app.localizedName ?? "")（\(pg.app.bundleIdentifier ?? "")）")
+        lines.append("标题：\(pg.title.prefix(60))")
+        if !pg.url.isEmpty { lines.append("网址：\(XCompanion.hostPath(pg.url).host)\(XCompanion.hostPath(pg.url).path.prefix(40))") }
+        if XCompanion.isPrivate(pg.title) || XCompanion.isPrivateURL(pg.url) {
+            lines.append("🔒 这是私信/设置/通知页，小猫不读")
+            return lines.joined(separator: "\n")
+        }
+        let t0 = Date()
+        let ax = hub.reader.readAX(pid: pg.app.processIdentifier, maxNodes: 6000, budget: 2.0, root: pg.web)
+        let parsed = XCompanion.parse(ax.elements, title: pg.title)
+        let ms = Int(Date().timeIntervalSince(t0) * 1000)
+        let handles = ax.elements.filter { $0.text.hasPrefix("@") && $0.text.count <= 16 }.count
+        lines.append("读到页面元素 \(ax.elements.count) 个（\(ms) 毫秒），其中 @账号 \(handles) 个，认出帖子 \(parsed.posts.count) 条")
+        if let f = parsed.focus { lines.append("这页的主角：@\(f)") }
+        if ax.elements.count < 20 {
+            lines.append("⚠️ 页面内容几乎读不到：浏览器可能没开放网页的辅助功能信息")
+        } else if parsed.posts.isEmpty {
+            let sample = ax.elements.prefix(400).filter { $0.text.count <= 30 }.suffix(12).map { "\($0.role)「\($0.text)」" }
+            lines.append("⚠️ 读到了内容但没认出帖子。样例：" + sample.joined(separator: " "))
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private(set) var lastReadCount = -1
+    private var scanning = false
+    private let axQueue = DispatchQueue(label: "app.ordcat.xscan", qos: .utility)
+
     private func tick() {
-        guard AXIsProcessTrusted(), let app = hub.lastExternalApp, !app.isTerminated,
-              XCompanion.browsers.contains(app.bundleIdentifier ?? ""),
-              let win = hub.shareableWindow(), XCompanion.isXTitle(win.title) else {
+        guard let pg = currentPage() else {
             onX = false; focus = nil
             save()
             return
         }
         onX = true
-        if XCompanion.isPrivate(win.title) { focus = nil; lastPosts = []; return }
+        if XCompanion.isPrivate(pg.title) || XCompanion.isPrivateURL(pg.url) {
+            status += "（私信/设置/通知页，不读）"
+            focus = nil; lastPosts = []; return
+        }
         guard Prefs.xMode else {
+            status += "，但「陪你刷推」还没打开"
             if !Prefs.xOffered { Prefs.xOffered = true; onFirstVisit?() }
             return
         }
-        let changed = win.title != lastTitle
-        guard changed || (Date().timeIntervalSince(lastScan) > 12 && hub.idleSeconds() < 60) else { return }
-        lastTitle = win.title
-        scan(app: app, title: win.title, newPage: changed)
+        let key = pg.url.isEmpty ? pg.title : pg.url
+        let changed = key != lastTitle
+        guard !scanning, changed || (Date().timeIntervalSince(lastScan) > 12 && hub.idleSeconds() < 60) else { return }
+        lastTitle = key
+        lastScan = Date()
+        scanning = true
+        // Reading a big X page can take a second: do it off the main thread so the cat never stutters.
+        let pid = pg.app.processIdentifier, web = pg.web, title = pg.title, app = pg.app
+        axQueue.async { [weak self] in
+            guard let self = self else { return }
+            let ax = self.hub.reader.readAX(pid: pid, maxNodes: 5000, budget: 1.5, root: web)
+            DispatchQueue.main.async {
+                self.scanning = false
+                self.apply(ax.elements, app: app, title: title, newPage: changed)
+            }
+        }
     }
 
     /// Read the X page now (also used right before filtering replies or drafting).
     @discardableResult
     func scanNow() -> [XPost] {
-        guard Prefs.xMode, let app = hub.lastExternalApp, !app.isTerminated,
-              let win = hub.shareableWindow(), XCompanion.isXTitle(win.title), !XCompanion.isPrivate(win.title) else { return [] }
-        scan(app: app, title: win.title, newPage: false)
+        guard let pg = readablePage() else { return [] }
+        lastScan = Date()
+        let ax = hub.reader.readAX(pid: pg.app.processIdentifier, maxNodes: 5000, budget: 1.2, root: pg.web)
+        apply(ax.elements, app: pg.app, title: pg.title, newPage: false)
         return lastPosts
     }
 
-    private func scan(app: NSRunningApplication, title: String, newPage: Bool) {
-        lastScan = Date()
-        let ax = hub.reader.readAX(pid: app.processIdentifier, maxNodes: 3200, budget: 0.35)
-        let parsed = XCompanion.parse(ax.elements, title: title)
+    private func apply(_ elements: [ScreenElement], app: NSRunningApplication, title: String, newPage: Bool) {
+        let parsed = XCompanion.parse(elements, title: title)
         lastPosts = parsed.posts
+        lastReadCount = parsed.posts.count
         let now = Date()
         let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
         let today = df.string(from: now)

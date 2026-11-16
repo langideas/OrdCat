@@ -1789,12 +1789,27 @@ final class SettingsController: NSObject {
         let mb = String(format: "%.1f", Double(st.bytes) / 1_048_576)
         let rec = ScreenReader.screenRecordingAllowed() ? "已授权" : "未授权"
         memStats.stringValue = "记忆 \(st.count) 条 · \(mb) MB · 本次保留 \(hub.keptFrames) 帧 / 丢弃重复 \(hub.droppedFrames) 帧\n向量引擎：\(hub.memory.vectorEngine) · 全文检索：\(hub.memory.ftsOK ? "FTS5" : "LIKE") · 屏幕录制：\(rec)"
-            + (xbuddy.map { "\n陪你刷推：\($0.stats)（长期保存在本机，可随时清空）" } ?? "")
+            + (xbuddy.map { "\n陪你刷推：\($0.stats)\n刷推状态：\($0.status)" } ?? "")
     }
 
     func refreshX() {
         checks["xMode"]?.state = Prefs.xMode ? .on : .off
         refreshMemStats()
+    }
+
+    @objc private func checkX() {
+        guard let xb = xbuddy else { return }
+        let report = xb.diagnose()
+        refreshMemStats()
+        let a = NSAlert()
+        a.messageText = "陪你刷推 · 检查结果"
+        a.informativeText = report + "\n\n提示：先切到浏览器打开 x.com，再回到这里点「检查刷推」。"
+        a.addButton(withTitle: "复制结果")
+        a.addButton(withTitle: "好")
+        if a.runModal() == .alertFirstButtonReturn {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(report, forType: .string)
+        }
     }
 
     @objc private func clearX() {
@@ -2025,10 +2040,12 @@ final class SettingsController: NSObject {
         v3.addSubview(excluded)
         memStats.font = .systemFont(ofSize: 11)
         memStats.textColor = .secondaryLabelColor
-        memStats.frame = NSRect(x: 20, y: 48, width: 430, height: 58)
+        memStats.frame = NSRect(x: 20, y: 44, width: 430, height: 62)
         v3.addSubview(memStats)
-        check("xMode", "陪你刷推（X）：记住你关注和互动过的人", y: 112, in: v3)
-        checks["xMode"]?.frame.size.width = 300
+        check("xMode", "陪你刷推（X）", y: 112, in: v3)
+        checks["xMode"]?.frame.size.width = 150
+        let bxc = NSButton(title: "检查刷推", target: self, action: #selector(checkX))
+        bxc.frame = NSRect(x: 206, y: 106, width: 118, height: 30); v3.addSubview(bxc)
         checks["xMode"]?.toolTip = "在浏览器里看 x.com 时：认识的人出现会竖耳朵；一句话讲重点、筛评论、想回复（不替你发）。只存本机，私信不读。"
         let bx = NSButton(title: "清空刷推记忆", target: self, action: #selector(clearX))
         bx.frame = NSRect(x: 326, y: 106, width: 124, height: 30); v3.addSubview(bx)
@@ -2695,7 +2712,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bubble.topicLabel = nil
         bubble.setShare(title: page?.title, on: page != nil)
         var greeting = page != nil ? "喵～我能看到你正在看的页面，想问点什么？" : (last ?? "喵～想聊点什么？")
-        if Prefs.xMode, let t = page?.title, XCompanion.isXTitle(t), !XCompanion.isPrivate(t) {
+        let onX = xbuddy.readablePage() != nil
+        if onX {
             xbuddy.scanNow()
             if let p = xbuddy.person(xbuddy.focus), p.known {
                 greeting = xbuddy.card(p) + "\n\n想让我帮你做点什么？"
@@ -2704,7 +2722,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         bubble.openChat(greeting: greeting)
-        if page != nil { bubble.setActions(pageQuickActions()); bubble.layout() }
+        if onX { bubble.setActions(xQuickActions()); bubble.layout() }
+        else if page != nil { bubble.setActions(pageQuickActions()); bubble.layout() }
         startShareWatch()
     }
 
@@ -2824,7 +2843,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func pageQuickActions() -> [(String, () -> Void)] {
-        if Prefs.xMode, let t = bubble.shareTitle, XCompanion.isXTitle(t), !XCompanion.isPrivate(t) { return xQuickActions() }
+        if xbuddy.readablePage() != nil { return xQuickActions() }
         return [("总结这页", { [weak self] in self?.ask("帮我用几句话总结一下这个页面。") }),
          ("重点是什么", { [weak self] in self?.ask("这个页面里最值得注意的重点是什么？") }),
          ("帮我解释", { [weak self] in self?.ask("用简单的话帮我解释一下这个页面在讲什么。") })]

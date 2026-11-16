@@ -83,7 +83,12 @@ final class ScreenReader {
         "com.lastpass.LastPass", "com.dashlane.dashlanephonefinal", "in.sinew.Enpass-Desktop"
     ]
 
-    private var manualAXEnabled = Set<pid_t>()
+    private var manualAXSet = Set<pid_t>()
+    private let manualAXLock = NSLock()
+    private var manualAXEnabled: Set<pid_t> {
+        get { manualAXLock.lock(); defer { manualAXLock.unlock() }; return manualAXSet }
+        set { manualAXLock.lock(); manualAXSet = newValue; manualAXLock.unlock() }
+    }
     static let chromiumBrowsers: Set<String> = ["com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.canary",
         "com.microsoft.edgemac", "com.brave.Browser", "company.thebrowser.Browser", "com.vivaldi.Vivaldi",
         "com.operasoftware.Opera", "org.chromium.Chromium"]
@@ -138,7 +143,54 @@ final class ScreenReader {
     }
 
     /// Walk the focused window's accessibility tree. Budgeted so it never stalls the UI.
-    func readAX(pid: pid_t, maxNodes: Int = 1600, budget: TimeInterval = 0.25) -> (title: String, frame: CGRect, elements: [ScreenElement]) {
+    /// Ask the app to build its full accessibility tree (Electron apps and Chromium browsers only do this on request).
+    func ensureTree(pid: pid_t) {
+        guard !manualAXEnabled.contains(pid) else { return }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.3)
+        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        let bid = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""
+        if ScreenReader.chromiumBrowsers.contains(bid) {
+            AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        }
+        manualAXEnabled.insert(pid)
+    }
+
+    /// The web page inside a browser window: its AXWebArea (to read only the page, not the browser UI)
+    /// and its address (AXURL on the web area, or the address bar's text as a fallback).
+    func webPage(pid: pid_t) -> (web: AXUIElement?, url: String) {
+        ensureTree(pid: pid)
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.3)
+        guard let wv = attr(app, kAXFocusedWindowAttribute as String), CFGetTypeID(wv) == AXUIElementGetTypeID() else {
+            return (nil, "")
+        }
+        var queue: [(AXUIElement, Int)] = [(wv as! AXUIElement, 0)]
+        var i = 0
+        var barURL = ""
+        let deadline = Date().addingTimeInterval(0.4)
+        while i < queue.count && i < 600 && Date() < deadline {
+            let (el, depth) = queue[i]; i += 1
+            let role = str(el, kAXRoleAttribute as String) ?? ""
+            if role == "AXWebArea" {
+                var url = ""
+                if let v = attr(el, "AXURL") {
+                    if let u = v as? URL { url = u.absoluteString } else if let s2 = v as? String { url = s2 }
+                }
+                return (el, url.isEmpty ? barURL : url)
+            }
+            if role == "AXSecureTextField" { continue }
+            if barURL.isEmpty, role == "AXTextField" || role == "AXComboBox",
+               let v = str(el, kAXValueAttribute as String), !v.contains(" "), v.contains(".") , v.count < 400 {
+                barURL = v
+            }
+            if depth < 14 { for c in children(el) { queue.append((c, depth + 1)) } }
+        }
+        return (nil, barURL)
+    }
+
+    func readAX(pid: pid_t, maxNodes: Int = 1600, budget: TimeInterval = 0.25,
+                root: AXUIElement? = nil) -> (title: String, frame: CGRect, elements: [ScreenElement]) {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.3)   // a frozen app must never freeze the cat
         if (Prefs.perception || Prefs.pageShare || Prefs.xMode) && !manualAXEnabled.contains(pid) {
@@ -158,7 +210,7 @@ final class ScreenReader {
         let title = str(win, kAXTitleAttribute as String) ?? ""
         let frame = rect(win) ?? .zero
         var out: [ScreenElement] = []
-        var stack: [(AXUIElement, Int)] = [(win, 0)]
+        var stack: [(AXUIElement, Int)] = [(root ?? win, 0)]
         var visited = 0
         let deadline = Date().addingTimeInterval(budget)
         while let (el, depth) = stack.popLast() {
