@@ -2473,7 +2473,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
             guard let content = item.view else { continue }
             let sv = scrollable(content)
             item.view = sv
-            if let doc = sv.documentView, content.superview !== doc {
+            if let doc = (sv as? NSScrollView)?.documentView, content.superview !== doc {
                 content.removeFromSuperview()
                 content.frame.origin = .zero
                 doc.addSubview(content)
