@@ -71,6 +71,11 @@ final class XCompanion {
 
     var onKnownPerson: ((XPerson) -> Void)?
     var onFirstVisit: (() -> Void)?
+    /// You just liked / bookmarked / reposted someone (seen live, not on page load).
+    var onInteraction: ((String, String) -> Void)?
+    /// A page was read: how many posts the cat can see now.
+    var onRead: ((Int) -> Void)?
+    private var initialScanOfPage = false
 
     init(dir: URL, hub: ContextHub) {
         url = dir.appendingPathComponent("x_people.json")
@@ -82,7 +87,7 @@ final class XCompanion {
 
     func start() {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in self?.tick() }
+        timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.tick() }
         timer?.tolerance = 1.5
     }
 
@@ -267,7 +272,7 @@ final class XCompanion {
         }
         let key = pg.url.isEmpty ? pg.title : pg.url
         let changed = key != lastTitle
-        guard !scanning, changed || (Date().timeIntervalSince(lastScan) > 12 && hub.idleSeconds() < 60) else { return }
+        guard !scanning, changed || (Date().timeIntervalSince(lastScan) > 5 && hub.idleSeconds() < 60) else { return }
         lastTitle = key
         lastScan = Date()
         scanning = true
@@ -295,8 +300,10 @@ final class XCompanion {
 
     private func apply(_ elements: [ScreenElement], app: NSRunningApplication, title: String, newPage: Bool) {
         let parsed = XCompanion.parse(elements, title: title)
+        initialScanOfPage = newPage
         lastPosts = parsed.posts
         lastReadCount = parsed.posts.count
+        defer { onRead?(parsed.posts.count) }
         let now = Date()
         let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
         let today = df.string(from: now)
@@ -309,6 +316,7 @@ final class XCompanion {
                 markSet.insert(key); marks.append(key)
                 let snippet = String(p.text.prefix(160))
                 people[p.handle.lowercased()]?.interactions.append(XInteraction(kind: m, date: now, snippet: snippet))
+                if !initialScanOfPage { onInteraction?(p.handle, m) }
                 if let n = people[p.handle.lowercased()]?.interactions.count, n > 40 {
                     people[p.handle.lowercased()]?.interactions.removeFirst(n - 40)
                 }
@@ -365,9 +373,14 @@ final class XCompanion {
 
     private static func re(_ p: String) -> NSRegularExpression { try! NSRegularExpression(pattern: p) }
     private static let handleRe = re("^@([A-Za-z0-9_]{1,15})$")
-    private static let followingRe = re("^(?:Following|正在关注|已关注|Unfollow|取消关注)\\s*@([A-Za-z0-9_]{1,15})$")
-    private static let followRe = re("^(?:Follow back|Follow|回关|关注)\\s*@([A-Za-z0-9_]{1,15})$")
-    private static let timeRe = re("^(?:\\d+\\s*(?:s|m|h|d|秒|分钟|小时|天)|\\d{1,2}月\\d{1,2}日|\\d{4}年\\d{1,2}月\\d{1,2}日|[A-Z][a-z]{2} \\d{1,2}(?:, \\d{4})?)$")
+    private static let followingRe = re("^(?:Following|正在关注|已关注|Unfollow|取消关注|正在跟隨|已跟隨|取消跟隨|跟隨中|正在追蹤|追蹤中|已追蹤|取消追蹤)\\s*@([A-Za-z0-9_]{1,15})$")
+    private static let followRe = re("^(?:Follow back|Follow|回关|关注|跟隨|回跟|追蹤|回追蹤)\\s*@([A-Za-z0-9_]{1,15})$")
+    private static let timeRe = re("^(?:\\d+\\s*(?:s|m|h|d|秒|分钟|分鐘|分|小时|小時|天|時間)|\\d{1,2}月\\d{1,2}日|\\d{4}年\\d{1,2}月\\d{1,2}日|[A-Z][a-z]{2} \\d{1,2}(?:, \\d{4})?|\\d{1,2} [A-Z][a-z]{2}(?: \\d{4})?)$")
+    /// The reply button closes every post, in any language ("12576 則回覆。回覆", "Reply", "回复").
+    private static func isReplyButton(_ t: String) -> Bool {
+        for k in ["回覆", "回复", "Repl", "repl", "返信", "답글", "Respon", "Répond", "Antwort"] where t.contains(k) { return true }
+        return false
+    }
     private static let countRe = re("^[0-9.,]+\\s*(?:[KkMm万千亿])?$")
     private static let profileRe = re("\\(@([A-Za-z0-9_]{1,15})\\)")
 
@@ -379,9 +392,12 @@ final class XCompanion {
 
     private static func marks(of button: String) -> Set<String> {
         var out = Set<String>()
-        if button.contains("Liked") || button.contains("已喜欢") || button.contains("取消喜欢") || button.contains("Unlike") { out.insert("like") }
-        if button.contains("Bookmarked") || button.contains("已加入书签") || button.contains("已添加书签") || button.contains("删除书签") || button.contains("Remove Bookmark") { out.insert("bookmark") }
-        if button.contains("Reposted") || button.contains("已转帖") || button.contains("已转推") || button.contains("Undo repost") || button.contains("撤销转帖") { out.insert("repost") }
+        let likeK = ["Liked", "Unlike", "已喜欢", "取消喜欢", "已喜歡", "取消喜歡", "已按讚", "收回讚"]
+        let bmK = ["Bookmarked", "Remove Bookmark", "已加入书签", "已添加书签", "删除书签", "移除书签", "已加入書籤", "移除書籤", "刪除書籤", "已新增書籤"]
+        let rpK = ["Reposted", "Undo repost", "已转帖", "已转推", "撤销转帖", "已轉發", "取消轉發", "撤銷轉發", "已轉推", "已轉貼"]
+        if likeK.contains(where: { button.contains($0) }) { out.insert("like") }
+        if bmK.contains(where: { button.contains($0) }) { out.insert("bookmark") }
+        if rpK.contains(where: { button.contains($0) }) { out.insert("repost") }
         return out
     }
 
@@ -389,13 +405,83 @@ final class XCompanion {
     private static func titleName(_ title: String) -> String? {
         let t = stripCount(title)
         if let r = t.range(of: " on X:") { return String(t[..<r.lowerBound]).trimmingCharacters(in: .whitespaces) }
+        for sep in [" 在 X 上", "在 X 上", " 在 X：", " 在 X:"] {
+            if let r = t.range(of: sep), r.lowerBound > t.startIndex { return String(t[..<r.lowerBound]).trimmingCharacters(in: .whitespaces) }
+        }
         if t.hasPrefix("X 上的"), let r = t.range(of: "：") ?? t.range(of: ":") {
             return String(t[t.index(t.startIndex, offsetBy: 4)..<r.lowerBound]).trimmingCharacters(in: .whitespaces)
         }
         return nil
     }
 
+    private static func isAdLabel(_ t: String) -> Bool { ["Ad", "广告", "推广", "Promoted", "廣告", "推廣", "宣傳"].contains(t) }
+
+    /// Main parser: every post on X ends with its action row (reply · repost · like · views · bookmark · share).
+    /// So: cut the page at reply buttons; each piece's first standalone @handle is the author. Works in any UI language.
     static func parse(_ els: [ScreenElement], title: String) -> (posts: [XPost], follow: [String: Bool], focus: String?) {
+        let byRows = parseByActionRows(els, title: title)
+        if !byRows.posts.isEmpty { return byRows }
+        let old = parseByHeader(els, title: title)
+        return (old.posts, byRows.follow.merging(old.follow) { a, _ in a }, old.focus ?? byRows.focus)
+    }
+
+    static func parseByActionRows(_ els: [ScreenElement], title: String) -> (posts: [XPost], follow: [String: Bool], focus: String?) {
+        var follow: [String: Bool] = [:]
+        var posts: [XPost] = []
+        let mainName = titleName(title)
+        var focus: String? = match(profileRe, title)
+        var segStart = 0
+        var i = 0
+        while i < els.count {
+            let e = els[i]
+            let t = e.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if e.role == "按钮" {
+                if let h = match(followingRe, t) { follow[h] = true; i += 1; continue }
+                if let h = match(followRe, t) { if follow[h] == nil { follow[h] = false }; i += 1; continue }
+            }
+            guard e.role == "按钮", isReplyButton(t) else { i += 1; continue }
+            // The action row: this button and the buttons/links right after it on the same line.
+            var marks = Set<String>()
+            var rowRect = e.rect
+            var j = i
+            while j < els.count, abs(els[j].rect.midY - e.rect.midY) < 16, els[j].role == "按钮" || els[j].role == "链接" {
+                marks.formUnion(XCompanion.marks(of: els[j].text)); rowRect = rowRect.union(els[j].rect); j += 1
+            }
+            // The piece of page before it: author = first standalone @handle, then the body.
+            var author: (h: String, name: String, idx: Int)?
+            for k in segStart..<i {
+                let tk = els[k].text.trimmingCharacters(in: .whitespaces)
+                guard els[k].role != "按钮", let h = match(handleRe, tk) else { continue }
+                var name = ""
+                if k > segStart {
+                    let p = els[k - 1].text.trimmingCharacters(in: .whitespaces)
+                    if match(handleRe, p) == nil, p.count <= 50, els[k - 1].role != "按钮" { name = p }
+                }
+                author = (h, name, k); break
+            }
+            if let a = author {
+                var text = ""
+                var rect = els[a.idx].rect
+                var isAd = false
+                for k in (a.idx + 1)..<i {
+                    let tk = els[k].text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    rect = rect.union(els[k].rect)
+                    if isAdLabel(tk) { isAd = true; continue }
+                    guard els[k].role == "文本" || els[k].role == "链接" || els[k].role == "标题" else { continue }
+                    if tk.count < 2 || tk == "·" || tk == a.name || match(timeRe, tk) != nil || match(countRe, tk) != nil { continue }
+                    if text.count < 1200, !text.contains(tk) { text += (text.isEmpty ? "" : " ") + tk }
+                }
+                posts.append(XPost(handle: a.h, name: a.name, text: text, rect: rect.union(rowRect), marks: marks, isAd: isAd))
+                if focus == nil, let mn = mainName, a.name == mn { focus = a.h }
+            }
+            segStart = j
+            i = j
+        }
+        if focus == nil, mainName != nil, let first = posts.first { focus = first.handle }
+        return (posts, follow, focus)
+    }
+
+    static func parseByHeader(_ els: [ScreenElement], title: String) -> (posts: [XPost], follow: [String: Bool], focus: String?) {
         var follow: [String: Bool] = [:]
         var posts: [XPost] = []
         var cur: XPost?
@@ -446,7 +532,7 @@ final class XCompanion {
             }
             guard cur != nil else { continue }
             if t.count < 2 || t == "·" || match(timeRe, t) != nil || match(countRe, t) != nil || t == cur!.name { continue }
-            if t == "Ad" || t == "广告" || t == "推广" || t == "Promoted" { cur!.isAd = true; continue }
+            if isAdLabel(t) { cur!.isAd = true; continue }
             if e.role == "文本" || e.role == "链接" || e.role == "标题" {
                 if cur!.text.count < 1200 { cur!.text += (cur!.text.isEmpty ? "" : " ") + t }
                 cur!.rect = cur!.rect.union(e.rect)

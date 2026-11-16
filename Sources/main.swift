@@ -2440,6 +2440,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let perceptionKey = HotKey(id: 2)
     private lazy var hub = ContextHub(dir: store.dir)
     private lazy var xbuddy = XCompanion(dir: store.dir, hub: hub)
+    private var lastXReact = Date.distantPast
     private let highlighter = Highlighter()
     private var versionItem: NSMenuItem!
     private var perceptionItem: NSMenuItem!
@@ -2512,6 +2513,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         xbuddy.onFirstVisit = { [weak self] in self?.offerXMode() }
+        xbuddy.onInteraction = { [weak self] handle, kind in
+            guard let self = self, self.catPanel.isVisible, !self.bubble.chatMode,
+                  Date().timeIntervalSince(self.lastXReact) > 20 else { return }
+            self.lastXReact = Date()
+            let icon = kind == "bookmark" ? "🔖" : (kind == "repost" ? "🔁" : "❤️")
+            self.catView.perk(true)
+            self.bubble.notify("\(icon) 记住啦：你\(XCompanion.verb(kind)) @\(handle)", hold: 2.5)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.catView.perk(false) }
+        }
+        xbuddy.onRead = { [weak self] n in
+            guard let self = self, n > 0, self.catPanel.isVisible, !self.bubble.chatMode else { return }
+            let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
+            let today = df.string(from: Date())
+            guard UserDefaults.standard.string(forKey: "xHelloDay") != today else { return }
+            UserDefaults.standard.set(today, forKey: "xHelloDay")
+            self.catView.perk(true)
+            self.bubble.notify("陪你刷推中 🐾 这页我看到 \(n) 条帖子。点我：TA 是谁 · 重点+核实 · 筛评论 · 想回复", hold: 6)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in self?.catView.perk(false) }
+        }
         xbuddy.start()
         Updater.shared.onUpdateAvailable = { [weak self] v in self?.announceUpdate(v) }
         if Prefs.autoUpdate { Updater.shared.startAutoCheck() }
