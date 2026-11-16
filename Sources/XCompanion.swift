@@ -120,6 +120,8 @@ final class XCompanion {
     var onPostOpening: ((String) -> Void)?
     /// The same post page, but its text finished loading: refresh the card if it is still up.
     var onPostUpdated: (() -> Void)?
+    /// You switched away from X (another tab or app).
+    var onLeftX: (() -> Void)?
     /// Bumped on every page change; scans started for an older page don't announce anything.
     private(set) var pageGen = 0
     private var pageChangedAt = Date.distantPast
@@ -321,6 +323,7 @@ final class XCompanion {
     /// Last thing the reply-box watcher saw (for 检查刷推).
     private(set) var composerStatus = "还没点过回复框"
     /// A single post page (x.com/<user>/status/<id>).
+    var currentURL: String { probe.url }
     var onStatusPage: Bool { probe.url.contains("/status/") || XCompanion.titleName(lastTitleText) != nil }
     private var lastTitleText = ""
     /// x.com/<handle>/status/<id> → handle.
@@ -332,9 +335,42 @@ final class XCompanion {
     /// The post a status page is about: the author's post near the top (the first post as a fallback).
     var mainPost: XPost? {
         guard onStatusPage else { return nil }
-        if let h = XCompanion.statusAuthor(probe.url)?.lowercased(),
-           let p = lastPosts.prefix(4).first(where: { $0.handle.lowercased() == h }) { return p }
+        let author = XCompanion.statusAuthor(probe.url) ?? ""
+        if !author.isEmpty, let p = lastPosts.prefix(4).first(where: { $0.handle.lowercased() == author.lowercased() }) { return p }
+        // The tab title already carries the post ("X 上的 名字：「…」 / X"): use it when the page layout can't be parsed.
+        if let t = titlePost { return t }
         return waitingPost ? nil : lastPosts.first
+    }
+    /// The current tab title, and the title when the address last changed (a title that hasn't changed yet is the old post's).
+    private var curTitle = ""
+    private var titleAtChange = ""
+    /// The post read from the tab title, once the title belongs to the current page.
+    var titlePost: XPost? {
+        guard onStatusPage, curTitle != titleAtChange || !waitingPost,
+              let a = XCompanion.statusAuthor(probe.url) else { return nil }
+        return XCompanion.postFromTitle(curTitle, handle: a)
+    }
+    /// "X 上的 Karol Kozicki：「I rarely…」 / X", "Karol Kozicki on X: "I rarely…" / X" → the post.
+    static func postFromTitle(_ raw: String, handle: String) -> XPost? {
+        var t = stripCount(raw)
+        if let r = t.range(of: " / X", options: .backwards) { t = String(t[..<r.lowerBound]) }
+        else if let r = t.range(of: " / Twitter", options: .backwards) { t = String(t[..<r.lowerBound]) }
+        let seps = ["：「", ": \u{201C}", ": \"", "：“", "：", ": "]
+        guard let sep = seps.compactMap({ t.range(of: $0) }).min(by: { $0.lowerBound < $1.lowerBound }) else { return nil }
+        var name = String(t[..<sep.lowerBound]).trimmingCharacters(in: .whitespaces)
+        var text = String(t[sep.upperBound...]).trimmingCharacters(in: .whitespaces)
+        for pre in ["X 上的", "X上的", "在 X 上的", "Twitter 上的"] where name.hasPrefix(pre) {
+            name = String(name.dropFirst(pre.count)).trimmingCharacters(in: .whitespaces)
+        }
+        for suf in [" on X", " on Twitter", " 在 X 上", " 在X上"] where name.hasSuffix(suf) {
+            name = String(name.dropLast(suf.count)).trimmingCharacters(in: .whitespaces)
+        }
+        let quotes: Set<Character> = ["「", "」", "\"", "\u{201C}", "\u{201D}", "『", "』"]
+        while let f = text.first, quotes.contains(f) { text.removeFirst() }
+        while let l = text.last, quotes.contains(l) { text.removeLast() }
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        return XPost(handle: handle, name: name, text: text, rect: .zero, marks: [], isAd: false)
     }
     /// Replies on a status page, and how many of them look like 水评 / spam.
     var replyStats: (total: Int, water: Int, spam: Int) {
@@ -347,14 +383,20 @@ final class XCompanion {
         return (lastPosts.count - 1, w, sp)
     }
     private var scanning = false
+    private var missCount = 0
     private let axQueue = DispatchQueue(label: "app.ordcat.xscan", qos: .utility)
 
     private func tick() {
         guard let pg = currentPage() else {
+            // Two misses in a row (~1 s), so a single slow read doesn't count as leaving.
+            missCount += 1
+            guard missCount >= 2 else { return }
+            if onX { lastTitle = ""; DispatchQueue.main.async { [weak self] in self?.onLeftX?() } }
             onX = false; focus = nil
             save()
             return
         }
+        missCount = 0
         onX = true
         if XCompanion.isPrivate(pg.title) || XCompanion.isPrivateURL(pg.url) {
             status += "（私信/设置/通知页，不读）"
@@ -367,6 +409,8 @@ final class XCompanion {
         }
         // The address is the page (the title lags behind and carries unread counts like "(3)").
         let key = pg.url.isEmpty ? XCompanion.stripCount(pg.title) : XCompanion.pageKey(pg.url)
+        if key != lastTitle { titleAtChange = curTitle }
+        curTitle = pg.title
         if key != lastTitle {
             lastTitle = key
             pageGen += 1
@@ -416,7 +460,9 @@ final class XCompanion {
         if waitingPost {
             let author = XCompanion.statusAuthor(probe.url)?.lowercased() ?? ""
             let found = lastPosts.prefix(4).contains { $0.handle.lowercased() == author && !$0.text.isEmpty }
-            if !found && Date().timeIntervalSince(pageChangedAt) < 5 { return }
+            // The page layout couldn't be read yet, but the tab title already names the post: good enough.
+            let fromTitle = !found && curTitle != titleAtChange && XCompanion.postFromTitle(curTitle, handle: author) != nil
+            if !found && !fromTitle && Date().timeIntervalSince(pageChangedAt) < 5 { return }
             waitingPost = false
         }
         needsAnnounce = false

@@ -2887,6 +2887,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         xbuddy.onReplyComposer = { [weak self] post in self?.xReplyAssist(post) }
         xbuddy.onPageChanged = { [weak self] in self?.xPageChanged() }
         xbuddy.onPostOpening = { [weak self] h in self?.xPostOpening(h) }
+        xbuddy.onLeftX = { [weak self] in
+            guard let self = self, self.bubble.isShown else { return }
+            if self.bubble.chatMode && self.xGreetingLive {
+                self.xGreetingLive = false
+                let page = Prefs.pageShare ? self.hub.shareableWindow() : nil
+                self.bubble.setShare(title: page?.title, on: page != nil)
+                self.bubble.setChoices([])
+                self.bubble.setText(page != nil ? "喵～我能看到你正在看的页面，想问点什么？" : "喵～想聊点什么？")
+                self.bubble.setActions(page != nil ? self.pageQuickActions() : [])
+                self.bubble.layout()
+            } else if self.bubble.tag == "xcard" && !self.bubble.chatMode {
+                self.bubble.hide()
+            }
+        }
         xbuddy.onPostUpdated = { [weak self] in
             guard let self = self, self.bubble.isShown, !self.xReplyShowing else { return }
             if self.bubble.chatMode && self.xGreetingLive { self.xShow(self.xGreeting(scan: false)) }
@@ -3405,6 +3419,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if xbuddy.mainPost != nil {
             guard xCardMayShow() else { return }
             showXCard(xGreeting(scan: false))
+        } else if cardUp && xbuddy.onStatusPage, let h = XCompanion.statusAuthor(xbuddy.currentURL) {
+            // A post page we couldn't read: say so instead of falling back to the generic greeting.
+            let t = "📝 @\(h) 的帖子\n这页我没读全 😿 点「重点+核实」我直接读整页给你看"
+            if bubble.chatMode { xShow(t) } else { showXCard(t) }
         } else if cardUp {
             // Left the post (back to the timeline or a profile).
             if bubble.chatMode { xShow(xGreeting(scan: false)) } else { bubble.hide() }
