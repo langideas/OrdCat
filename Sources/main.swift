@@ -1719,6 +1719,7 @@ final class SettingsController: NSObject {
     var hub: ContextHub?
     var voice: Voice?
     var xbuddy: XCompanion?
+    let skillsPane = SkillsPane()
     private let enginePopup = NSPopUpButton()
     private let sysVoicePopup = NSPopUpButton()
     private let rateSlider = NSSlider(value: 0.5, minValue: 0.35, maxValue: 0.65, target: nil, action: nil)
@@ -1737,6 +1738,7 @@ final class SettingsController: NSObject {
 
     func show(tab: Int = 0) {
         if window == nil { build() }
+        skillsPane.refresh()
         base.stringValue = Prefs.base
         model.stringValue = Prefs.model
         key.stringValue = Keychain.get()
@@ -1789,36 +1791,11 @@ final class SettingsController: NSObject {
         let mb = String(format: "%.1f", Double(st.bytes) / 1_048_576)
         let rec = ScreenReader.screenRecordingAllowed() ? "已授权" : "未授权"
         memStats.stringValue = "记忆 \(st.count) 条 · \(mb) MB · 本次保留 \(hub.keptFrames) 帧 / 丢弃重复 \(hub.droppedFrames) 帧\n向量引擎：\(hub.memory.vectorEngine) · 全文检索：\(hub.memory.ftsOK ? "FTS5" : "LIKE") · 屏幕录制：\(rec)"
-            + (xbuddy.map { "\n陪你刷推：\($0.stats)\n刷推状态：\($0.status)" } ?? "")
+
     }
 
     func refreshX() {
-        checks["xMode"]?.state = Prefs.xMode ? .on : .off
-        refreshMemStats()
-    }
-
-    @objc private func checkX() {
-        guard let xb = xbuddy else { return }
-        let report = xb.diagnose()
-        refreshMemStats()
-        let a = NSAlert()
-        a.messageText = "陪你刷推 · 检查结果"
-        a.informativeText = report + "\n\n提示：先切到浏览器打开 x.com，再回到这里点「检查刷推」。"
-        a.addButton(withTitle: "复制结果")
-        a.addButton(withTitle: "好")
-        if a.runModal() == .alertFirstButtonReturn {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(report, forType: .string)
-        }
-    }
-
-    @objc private func clearX() {
-        let a = NSAlert()
-        a.messageText = "清空刷推记忆？"
-        a.informativeText = "小猫会忘掉在 X 上记住的人、互动和兴趣，不能恢复。"
-        a.addButton(withTitle: "清空")
-        a.addButton(withTitle: "取消")
-        if a.runModal() == .alertFirstButtonReturn { xbuddy?.clear(); refreshMemStats() }
+        skillsPane.refresh()
     }
 
     func refreshUpdate() {
@@ -2042,13 +2019,9 @@ final class SettingsController: NSObject {
         memStats.textColor = .secondaryLabelColor
         memStats.frame = NSRect(x: 20, y: 44, width: 430, height: 62)
         v3.addSubview(memStats)
-        check("xMode", "陪你刷推（X）", y: 112, in: v3)
-        checks["xMode"]?.frame.size.width = 150
-        let bxc = NSButton(title: "检查刷推", target: self, action: #selector(checkX))
-        bxc.frame = NSRect(x: 206, y: 106, width: 118, height: 30); v3.addSubview(bxc)
-        checks["xMode"]?.toolTip = "在浏览器里看 x.com 时：认识的人出现会竖耳朵；一句话讲重点、筛评论、想回复（不替你发）。只存本机，私信不读。"
-        let bx = NSButton(title: "清空刷推记忆", target: self, action: #selector(clearX))
-        bx.frame = NSRect(x: 326, y: 106, width: 124, height: 30); v3.addSubview(bx)
+        let skHint = NSTextField(labelWithString: "「陪你刷推」等技能在 设置 → 技能 里开关。")
+        skHint.font = .systemFont(ofSize: 11); skHint.textColor = .secondaryLabelColor
+        skHint.frame = NSRect(x: 24, y: 114, width: 420, height: 16); v3.addSubview(skHint)
         let b1 = NSButton(title: "授权屏幕录制", target: self, action: #selector(askScreen))
         b1.frame = NSRect(x: 6, y: 14, width: 116, height: 30); v3.addSubview(b1)
         let b2 = NSButton(title: "查看当前上下文", target: self, action: #selector(previewContext))
@@ -2107,6 +2080,12 @@ final class SettingsController: NSObject {
         tabs.addTabViewItem(t5)
 
         // Tab 4: about & updates
+        let tSk = NSTabViewItem(identifier: "skills")
+        tSk.label = "技能"
+        skillsPane.build(xbuddy: xbuddy)
+        tSk.view = skillsPane.view
+        tabs.addTabViewItem(tSk)
+
         let t4 = NSTabViewItem(identifier: "about")
         t4.label = "关于"
         let v4 = NSView(frame: NSRect(x: 0, y: 0, width: 470, height: 360))
@@ -2441,6 +2420,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var hub = ContextHub(dir: store.dir)
     private lazy var xbuddy = XCompanion(dir: store.dir, hub: hub)
     private var lastXReact = Date.distantPast
+    private let xllm = LLM()
+    /// The X greeting card is still what the bubble shows (no question asked yet): follow page changes live.
+    private var xGreetingLive = false
+    private var pendingXAlerts: [XAlert] = []
+    private var xAlertTimer: Timer?
     private let highlighter = Highlighter()
     private var versionItem: NSMenuItem!
     private var perceptionItem: NSMenuItem!
@@ -2531,6 +2515,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.catView.perk(true)
             self.bubble.notify("陪你刷推中 🐾 这页我看到 \(n) 条帖子。点我：TA 是谁 · 重点+核实 · 筛评论 · 想回复", hold: 6)
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in self?.catView.perk(false) }
+        }
+        xbuddy.onAlerts = { [weak self] a in self?.queueXAlerts(a) }
+        xbuddy.onReplyComposer = { [weak self] post in self?.xReplyAssist(post) }
+        xbuddy.onPageChanged = { [weak self] in self?.xPageChanged() }
+        settings.skillsPane.onChanged = { [weak self] id, on in
+            guard let self = self, id == "x" else { return }
+            self.bubble.notify(on ? "「陪你刷推」开啦 🐾 去 x.com 刷一刷，我在旁边看着。" : "「陪你刷推」关掉啦，我不看 X 了。", hold: 4)
         }
         xbuddy.start()
         Updater.shared.onUpdateAvailable = { [weak self] v in self?.announceUpdate(v) }
@@ -2733,15 +2724,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bubble.setShare(title: page?.title, on: page != nil)
         var greeting = page != nil ? "喵～我能看到你正在看的页面，想问点什么？" : (last ?? "喵～想聊点什么？")
         let onX = xbuddy.readablePage() != nil
-        if onX {
-            xbuddy.scanNow()
-            if let p = xbuddy.person(xbuddy.focus), p.known {
-                greeting = xbuddy.card(p) + "\n\n想让我帮你做点什么？"
-            } else {
-                greeting = "喵～陪你刷推中 🐾 想让我帮你做点什么？"
-            }
-        }
+        if onX { greeting = xGreeting() }
         bubble.openChat(greeting: greeting)
+        xGreetingLive = onX
         if onX { bubble.setActions(xQuickActions()); bubble.layout() }
         else if page != nil { bubble.setActions(pageQuickActions()); bubble.layout() }
         startShareWatch()
@@ -2780,7 +2765,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(true, forKey: key)
             DispatchQueue.main.async {
                 self?.bubble.notify("这一版没能用本机固定签名，所以每次更新都要重新授权。可以在 设置 → 关于 点「修复授权」再试一次。", 
-                                    actions: [("去修复", { [weak self] in self?.settings.show(tab: 4) })], hold: 12)
+                                    actions: [("去修复", { [weak self] in self?.settings.show(tab: 5) })], hold: 12)
             }
         }
     }
@@ -2878,7 +2863,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Prefs.xMode = true
                 _ = SelectionWatcher.trusted(prompt: true)
                 self?.settings.refreshX()
-                self?.bubble.notify("好～从现在起我陪你刷。认识的人出现时我会竖起耳朵，点我就能看 TA 的小卡片。", hold: 8)
+                self?.bubble.notify("好～从现在起我陪你刷。命中信号、营销号、水评我会提醒你，点回复时给你回复建议。想改提醒：右键我 → 设置 → 技能。", hold: 8)
             }),
             ("先不用", { [weak self] in self?.bubble.hide(); self?.catView.perk(false) })
         ], hold: 20)
@@ -2895,6 +2880,153 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bubble.setText(text)
         bubble.setActions(xQuickActions())
         bubble.layout()
+    }
+
+    private func xGreeting(scan: Bool = true) -> String {
+        if scan { xbuddy.scanNow() }
+        if let p = xbuddy.person(xbuddy.focus), p.known { return xbuddy.card(p) + "\n\n想让我帮你做点什么？" }
+        if let f = xbuddy.focus { return "这页是 @\(f) 🐾 我还不太认识 TA。想让我帮你做点什么？" }
+        return "喵～陪你刷推中 🐾 想让我帮你做点什么？"
+    }
+
+    /// You moved to another X page while the bubble shows the X card: switch the card right away.
+    private func xPageChanged() {
+        guard xGreetingLive, bubble.isShown, bubble.chatMode else { return }
+        if let pg = xbuddy.readablePage() { bubble.setShare(title: pg.title, on: bubble.sharing) }
+        xShow(xGreeting(scan: false))
+    }
+
+    // MARK: 刷推 popups
+
+    private func queueXAlerts(_ a: [XAlert]) {
+        pendingXAlerts.append(contentsOf: a)
+        if pendingXAlerts.count > 40 { pendingXAlerts.removeFirst(pendingXAlerts.count - 40) }
+        let since = Date().timeIntervalSince(lastXReact)
+        let hasSignal = pendingXAlerts.contains { $0.kind == .signal }
+        let wait = max(0, (hasSignal ? min(3, Prefs.xAlertGap) : Prefs.xAlertGap) - since)
+        if wait <= 0.05 { flushXAlerts(); return }
+        if xAlertTimer == nil {
+            xAlertTimer = Timer.scheduledTimer(withTimeInterval: wait, repeats: false) { [weak self] _ in
+                self?.xAlertTimer = nil; self?.flushXAlerts()
+            }
+        }
+    }
+
+    private func flushXAlerts() {
+        guard !pendingXAlerts.isEmpty else { return }
+        // Never interrupt a chat, voice, or reply ideas you are reading.
+        guard catPanel.isVisible, !bubble.chatMode, !listener.isListening, !xReplyShowing,
+              xbuddy.readablePage() != nil else {
+            if !(xbuddy.readablePage() != nil) { pendingXAlerts.removeAll() }
+            return
+        }
+        let all = pendingXAlerts
+        pendingXAlerts.removeAll()
+        guard let top = all.map({ $0.kind.rawValue }).min(), let kind = XAlert.Kind(rawValue: top) else { return }
+        let group = all.filter { $0.kind == kind }
+        let rest = all.count - group.count
+        lastXReact = Date()
+        let names = group.prefix(4).map { "@" + $0.post.handle }.joined(separator: "、") + (group.count > 4 ? " 等" : "")
+        let snippet: (XPost) -> String = { p in p.text.count > 70 ? String(p.text.prefix(70)) + "…" : p.text }
+        var text = ""
+        var acts: [(String, () -> Void)] = []
+        let rects = group.map { $0.post.rect }
+        switch kind {
+        case .signal:
+            let a = group[0]
+            text = "📡 信号：\(a.reason)\n@\(a.post.handle)：\(snippet(a.post))"
+            if group.count > 1 { text += "\n（这屏还有 \(group.count - 1) 条命中）" }
+            acts = [("在哪", { [weak self] in self?.highlighter.show(rects, label: "信号", seconds: 8, limit: 6) }),
+                    ("想回复", { [weak self] in self?.xReplyAssist(a.post) })]
+        case .spam:
+            text = group.count == 1 ? "🚫 营销号 / 广告：@\(group[0].post.handle)（\(group[0].reason)）"
+                                    : "🚫 这屏有 \(group.count) 个营销号 / 广告：\(names)"
+            acts = [("标出来", { [weak self] in self?.highlighter.show(rects, label: "营销号", seconds: 8, limit: 6) })]
+        case .known:
+            let a = group[0]
+            text = "👋 @\(a.post.handle) 出现了，\(a.reason)" + (group.count > 1 ? "\n还有 \(names)" : "")
+            acts = [("在哪", { [weak self] in self?.highlighter.show(rects, label: "熟人", seconds: 6, limit: 4) }),
+                    ("TA 是谁", { [weak self] in
+                        guard let self = self, let p = self.xbuddy.person(a.post.handle) else { return }
+                        self.bubble.notify(self.xbuddy.card(p), hold: 12) })]
+        case .follow:
+            let a = group[0]
+            text = "🆕 你关注的 @\(a.post.handle) 发帖了：\(snippet(a.post))" + (group.count > 1 ? "\n还有 \(group.count - 1) 条" : "")
+            acts = [("在哪", { [weak self] in self?.highlighter.show(rects, label: "关注", seconds: 6, limit: 4) })]
+        case .water:
+            text = "🗑 评论里有 \(group.count) 条水评：\(names)"
+            acts = [("标出来", { [weak self] in self?.highlighter.show(rects, label: "水评", seconds: 8, limit: 8) }),
+                    ("筛评论", { [weak self] in self?.openChat(); self?.xFilter() })]
+        }
+        if rest > 0 { text += "\n另外还有 \(rest) 条别的提醒" }
+        catView.perk(true)
+        bubble.notify(text, actions: acts, hold: kind == .signal ? 12 : 8)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in self?.catView.perk(false) }
+    }
+
+    // MARK: reply ideas when you click reply
+
+    private var xReplyShowing = false
+
+    private func parseDrafts(_ raw: String) -> [String] {
+        var drafts: [String] = []
+        for l in raw.components(separatedBy: "\n") {
+            let t = l.trimmingCharacters(in: .whitespaces)
+            guard let f = t.first, ("1"..."3").contains(String(f)), t.count > 2 else { continue }
+            var body = String(t.dropFirst())
+            while let c = body.first, ".、)）:： ".contains(c) { body.removeFirst() }
+            body = body.replacingOccurrences(of: "**", with: "").trimmingCharacters(in: CharacterSet(charactersIn: " \"“”"))
+            if !body.isEmpty { drafts.append(body) }
+        }
+        return drafts
+    }
+
+    private func xReplyAssist(_ post: XPost?) {
+        guard catPanel.isVisible, !bubble.chatMode, !listener.isListening else { return }
+        guard let p = post, !p.text.isEmpty else {
+            bubble.notify("✍️ 想回复呀～这条我没读到文字，点我再用「想回复」试试。", hold: 4)
+            return
+        }
+        xReplyShowing = true
+        catView.perk(true)
+        bubble.notify("✍️ 在帮你想怎么回 @\(p.handle)…", hold: 30)
+        var ctx = [xbuddy.interestLine()]
+        if let who = xbuddy.person(p.handle) {
+            ctx.append("[作者 @\(who.handle)：\(who.following == true ? "我已关注" : "我没关注")，我们互动过 \(who.interactions.count) 次]")
+        }
+        let prompt = """
+        ## 我想回复的帖子
+        @\(p.handle)\(p.name.isEmpty ? "" : "（\(p.name)）")：\(p.text.prefix(1200))
+
+        帮我想 3 条回复草稿：自然、像真人说话、别营销腔，用帖子的语言，每条不超过 60 字。
+        第 1 条接住观点，第 2 条提个好问题，第 3 条轻松幽默。只按「1. 2. 3.」列出来。
+        """
+        xllm.stream([["role": "user", "content": prompt]], context: ctx.filter { !$0.isEmpty }.joined(separator: "\n"),
+                    onDelta: { _ in }, onDone: { [weak self] full, err in
+            guard let self = self else { return }
+            self.catView.perk(false)
+            guard !self.bubble.chatMode else { self.xReplyShowing = false; return }
+            if let e = err { self.xReplyShowing = false; self.bubble.notify("✍️ " + e, hold: 6); return }
+            let drafts = self.parseDrafts(full ?? "")
+            guard !drafts.isEmpty else { self.xReplyShowing = false; return }
+            var text = "✍️ 回复 @\(p.handle) 可以这样说：\n"
+            for (i, d) in drafts.prefix(3).enumerated() { text += "\n\(i + 1). \(d)" }
+            var acts: [(String, () -> Void)] = []
+            for (i, d) in drafts.prefix(3).enumerated() {
+                acts.append(("复制 \(i + 1)", { [weak self] in
+                    guard let self = self else { return }
+                    let pb = NSPasteboard.general
+                    pb.clearContents(); pb.setString(d, forType: .string)
+                    self.selection.ignoreChangeCount = pb.changeCount
+                    self.lastChange = pb.changeCount
+                    self.xReplyShowing = false
+                    self.bubble.notify("已复制第 \(i + 1) 条 ✂️ 在回复框里按 ⌘V，改一改再发～", hold: 3)
+                }))
+            }
+            acts.append(("换一批", { [weak self] in self?.xReplyAssist(p) }))
+            self.bubble.notify(text, actions: acts, hold: 40)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 40) { [weak self] in self?.xReplyShowing = false }
+        })
     }
 
     private func xExtra() -> String? {
@@ -3041,6 +3173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func ask(_ text: String, images: [Data] = [], spoken: Bool = false, inBubble: Bool = true,
                      pageOverride: String? = nil, extra: String? = nil, after: ((String) -> String?)? = nil) {
+        xGreetingLive = false
         voice.stop()
         highlighter.clear()
         // Decide which earlier turns this question may see (default: only the current page's topic).

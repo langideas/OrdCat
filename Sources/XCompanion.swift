@@ -13,6 +13,28 @@ import Cocoa
 extension Prefs {
     static var xMode: Bool { get { d.object(forKey: "xMode") as? Bool ?? false } set { d.set(newValue, forKey: "xMode") } }
     static var xOffered: Bool { get { d.object(forKey: "xOffered") as? Bool ?? false } set { d.set(newValue, forKey: "xOffered") } }
+    /// Signal keywords, comma separated ("AI, 融资, 空投").
+    static var xSignalWords: String { get { d.string(forKey: "xSignalWords") ?? "" } set { d.set(newValue, forKey: "xSignalWords") } }
+    /// Accounts to watch, comma separated ("@elonmusk, @sama").
+    static var xSignalAccounts: String { get { d.string(forKey: "xSignalAccounts") ?? "" } set { d.set(newValue, forKey: "xSignalAccounts") } }
+    /// Seconds between two popups (signals may cut in after 3 s).
+    static var xAlertGap: Double { get { d.object(forKey: "xAlertGap") as? Double ?? 8 } set { d.set(newValue, forKey: "xAlertGap") } }
+    static let xAlertDefaults: [String: Bool] = ["signal": true, "spam": true, "water": true, "known": true, "follow": false, "reply": true]
+    static func xAlert(_ k: String) -> Bool { d.object(forKey: "xAlert." + k) as? Bool ?? (xAlertDefaults[k] ?? false) }
+    static func setXAlert(_ k: String, _ on: Bool) { d.set(on, forKey: "xAlert." + k) }
+
+    static func list(_ s: String) -> [String] {
+        s.components(separatedBy: CharacterSet(charactersIn: ",，、;；\n"))
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+}
+
+/// Something worth a popup while you scroll X.
+struct XAlert {
+    enum Kind: Int { case signal = 0, spam, known, follow, water }
+    let kind: Kind
+    let post: XPost
+    let reason: String
 }
 
 struct XInteraction: Codable {
@@ -75,6 +97,17 @@ final class XCompanion {
     var onInteraction: ((String, String) -> Void)?
     /// A page was read: how many posts the cat can see now.
     var onRead: ((Int) -> Void)?
+    /// New posts on screen that match a signal, look like spam, come from people you know…
+    var onAlerts: (([XAlert]) -> Void)?
+    /// You focused the reply box: the post you are replying to (nil when unclear).
+    var onReplyComposer: ((XPost?) -> Void)?
+    /// The X page in front changed (new profile, new post, back to the timeline).
+    var onPageChanged: (() -> Void)?
+    private var seenKeys = Set<String>()
+    private var seenOrder: [String] = []
+    private var replyKey = ""
+    private var replyAt = Date.distantPast
+    private var lastFocusKey = ""
     private var initialScanOfPage = false
 
     init(dir: URL, hub: ContextHub) {
@@ -87,8 +120,8 @@ final class XCompanion {
 
     func start() {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.tick() }
-        timer?.tolerance = 1.5
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
+        timer?.tolerance = 0.3
     }
 
     func save() {
@@ -272,7 +305,8 @@ final class XCompanion {
         }
         let key = pg.url.isEmpty ? pg.title : pg.url
         let changed = key != lastTitle
-        guard !scanning, changed || (Date().timeIntervalSince(lastScan) > 5 && hub.idleSeconds() < 60) else { return }
+        checkComposer(pg)
+        guard !scanning, changed || (Date().timeIntervalSince(lastScan) > 2.5 && hub.idleSeconds() < 30) else { return }
         lastTitle = key
         lastScan = Date()
         scanning = true
@@ -303,7 +337,12 @@ final class XCompanion {
         initialScanOfPage = newPage
         lastPosts = parsed.posts
         lastReadCount = parsed.posts.count
-        defer { onRead?(parsed.posts.count) }
+        defer {
+            onRead?(parsed.posts.count)
+            if newPage { onPageChanged?() }
+            let alerts = findAlerts(parsed.posts, title: title)
+            if !alerts.isEmpty { onAlerts?(alerts) }
+        }
         let now = Date()
         let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
         let today = df.string(from: now)
@@ -425,8 +464,26 @@ final class XCompanion {
         return (old.posts, byRows.follow.merging(old.follow) { a, _ in a }, old.focus ?? byRows.focus)
     }
 
-    static func parseByActionRows(_ els: [ScreenElement], title: String) -> (posts: [XPost], follow: [String: Bool], focus: String?) {
+    static func parseByActionRows(_ all: [ScreenElement], title: String) -> (posts: [XPost], follow: [String: Bool], focus: String?) {
+        // Keep only the main column (where the action rows are), so the sidebar ("相關人士", "你可能會喜歡")
+        // and the left menu never mix into posts.
+        let replies = all.filter { $0.role == "按钮" && isReplyButton($0.text) }
+        var els = all
+        if let minX = replies.map({ $0.rect.minX }).min() {
+            var maxX = replies.map { $0.rect.maxX }.max() ?? minX
+            for r in replies {
+                for e in all where e.role == "按钮" && abs(e.rect.midY - r.rect.midY) < 16 && e.rect.minX >= r.rect.minX && e.rect.minX - r.rect.minX < 700 {
+                    maxX = max(maxX, e.rect.maxX)
+                }
+            }
+            let lo = minX - 90, hi = maxX + 40
+            els = all.filter { $0.rect.midX >= lo && $0.rect.midX <= hi }
+        }
         var follow: [String: Bool] = [:]
+        for e in all where e.role == "按钮" {
+            let t = e.text.trimmingCharacters(in: .whitespaces)
+            if let h = match(followingRe, t) { follow[h] = true } else if let h = match(followRe, t), follow[h] == nil { follow[h] = false }
+        }
         var posts: [XPost] = []
         let mainName = titleName(title)
         var focus: String? = match(profileRe, title)
@@ -435,10 +492,6 @@ final class XCompanion {
         while i < els.count {
             let e = els[i]
             let t = e.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if e.role == "按钮" {
-                if let h = match(followingRe, t) { follow[h] = true; i += 1; continue }
-                if let h = match(followRe, t) { if follow[h] == nil { follow[h] = false }; i += 1; continue }
-            }
             guard e.role == "按钮", isReplyButton(t) else { i += 1; continue }
             // The action row: this button and the buttons/links right after it on the same line.
             var marks = Set<String>()
@@ -455,7 +508,8 @@ final class XCompanion {
                 var name = ""
                 if k > segStart {
                     let p = els[k - 1].text.trimmingCharacters(in: .whitespaces)
-                    if match(handleRe, p) == nil, p.count <= 50, els[k - 1].role != "按钮" { name = p }
+                    if match(handleRe, p) == nil, p.count <= 50, els[k - 1].role == "文本" || els[k - 1].role == "链接",
+                       match(timeRe, p) == nil, p != "·" { name = p }
                 }
                 author = (h, name, k); break
             }
@@ -541,6 +595,110 @@ final class XCompanion {
         if let c = cur { posts.append(c) }
         if focus == nil, mainName != nil, let first = posts.first { focus = first.handle }
         return (posts, follow, focus)
+    }
+
+    // MARK: live alerts
+
+    private static let spamWords = ["私信我", "私我", "加V", "加v", "加微", "微信", "VX", "vx", "领取", "領取", "免费送", "免費送", "空投", "白名单", "白名單",
+        "点击链接", "點擊連結", "主页链接", "主頁連結", "进群", "進群", "电报", "電報", "t.me/", "Telegram", "DM me", "dm me", "link in bio",
+        "Link in bio", "giveaway", "Giveaway", "airdrop", "Airdrop", "返佣", "带单", "帶單", "稳赚", "穩賺", "日赚", "日賺", "月入", "躺赚", "躺賺",
+        "保本", "翻倍", "100x", "1000x", "代币", "代幣", "presale", "Presale", "whitelist", "OnlyFans", "onlyfans", "约炮", "約炮", "裸聊"]
+    private static let waterPhrases: Set<String> = ["太棒了", "支持", "666", "6666", "+1", "哈哈", "哈哈哈", "哈哈哈哈", "顶", "頂", "沙发", "沙發", "前排",
+        "牛", "牛逼", "厉害", "厲害", "同意", "说得好", "說得好", "好", "赞", "讚", "great", "nice", "amazing", "wow", "true", "this", "so true",
+        "exactly", "facts", "based", "lol", "lmao", "yes", "agreed", "awesome", "cool", "fire", "love it", "gm", "gn", "wagmi", "lfg"]
+
+    private static func meaningful(_ t: String) -> String {
+        String(t.unicodeScalars.filter { CharacterSet.letters.contains($0) || CharacterSet.decimalDigits.contains($0) || $0 == "+" }.map(Character.init))
+    }
+
+    /// Local, instant: no model call while scrolling.
+    static func classify(_ p: XPost, isReply: Bool, words: [String], accounts: Set<String>) -> (spam: String?, water: Bool, signal: String?) {
+        let t = p.text
+        var spam: String? = nil
+        if p.isAd { spam = "广告" }
+        else if let w = spamWords.first(where: { t.contains($0) }) { spam = "引流词「\(w)」" }
+        else {
+            let emoji = t.unicodeScalars.filter { $0.properties.isEmojiPresentation }.count
+            if emoji >= 8 && (t.contains("http") || t.contains(".com") || t.contains("👇")) { spam = "满屏表情+链接" }
+        }
+        var signal: String? = nil
+        if accounts.contains(p.handle.lowercased()) { signal = "特别关注 @\(p.handle)" }
+        else if let w = words.first(where: { t.range(of: $0, options: .caseInsensitive) != nil }) { signal = "关键词「\(w)」" }
+        var water = false
+        if isReply && spam == nil {
+            let m = meaningful(t).lowercased()
+            let plain = t.lowercased().trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters).union(.symbols))
+            water = m.count <= 3 || waterPhrases.contains(plain) || waterPhrases.contains(m)
+        }
+        return (spam, water, signal)
+    }
+
+    private func findAlerts(_ posts: [XPost], title: String) -> [XAlert] {
+        guard Prefs.xMode else { return [] }
+        let isStatus = probe.url.contains("/status/") || XCompanion.titleName(title) != nil
+        let words = Prefs.list(Prefs.xSignalWords)
+        let accounts = Set(Prefs.list(Prefs.xSignalAccounts).map { $0.replacingOccurrences(of: "@", with: "").lowercased() })
+        var out: [XAlert] = []
+        for (i, p) in posts.enumerated() {
+            let key = "\(p.handle.lowercased())|\(p.text.prefix(60))"
+            guard !seenKeys.contains(key) else { continue }
+            seenKeys.insert(key); seenOrder.append(key)
+            if seenOrder.count > 3000 { seenKeys.remove(seenOrder.removeFirst()) }
+            let c = XCompanion.classify(p, isReply: isStatus && i > 0, words: words, accounts: accounts)
+            if let sg = c.signal, Prefs.xAlert("signal") { out.append(XAlert(kind: .signal, post: p, reason: sg)); continue }
+            if let sp = c.spam, Prefs.xAlert("spam") { out.append(XAlert(kind: .spam, post: p, reason: sp)); continue }
+            if c.water, Prefs.xAlert("water") { out.append(XAlert(kind: .water, post: p, reason: "水评")); continue }
+            if let who = person(p.handle) {
+                let n = who.interactions.count
+                if n >= 2, Prefs.xAlert("known") {
+                    out.append(XAlert(kind: .known, post: p, reason: "你和 TA 互动过 \(n) 次")); continue
+                }
+                if who.following == true, Prefs.xAlert("follow") {
+                    out.append(XAlert(kind: .follow, post: p, reason: "你关注的人")); continue
+                }
+            }
+        }
+        return out
+    }
+
+    // MARK: reply box → reply ideas
+
+    private static let replyingRe = re("^(?:Replying to|回覆給|回复给|回复|回覆|正在回复|返信先)\\s*@?([A-Za-z0-9_]{1,15})?")
+
+    private func checkComposer(_ pg: XPage) {
+        guard Prefs.xAlert("reply"), let f = hub.reader.focusedField(pid: pg.app.processIdentifier) else { lastFocusKey = ""; return }
+        guard f.role == "AXTextArea" || (f.role == "AXTextField" && f.hint.contains("回")) else { lastFocusKey = ""; return }
+        let fk = "\(pg.url)|\(Int(f.rect.minY / 40))"
+        guard fk != lastFocusKey else { return }
+        lastFocusKey = fk
+        let path = XCompanion.hostPath(pg.url).path
+        let pid = pg.app.processIdentifier, web = pg.web, title = pg.title, url = pg.url
+        axQueue.async { [weak self] in
+            guard let self = self else { return }
+            let ax = self.hub.reader.readAX(pid: pid, maxNodes: 5000, budget: 1.2, root: web)
+            DispatchQueue.main.async {
+                let els = ax.elements
+                var target: String? = nil
+                var isReply = path.contains("/status/")
+                for (i, e) in els.enumerated() where e.rect.maxY <= f.rect.maxY + 4 {
+                    let t = e.text.trimmingCharacters(in: .whitespaces)
+                    guard let m = XCompanion.replyingRe.firstMatch(in: t, range: NSRange(location: 0, length: (t as NSString).length)) else { continue }
+                    isReply = true
+                    if m.range(at: 1).location != NSNotFound { target = (t as NSString).substring(with: m.range(at: 1)) }
+                    else if i + 1 < els.count, let h = XCompanion.match(XCompanion.handleRe, els[i + 1].text) { target = h }
+                }
+                guard isReply else { return }   // a new post, not a reply
+                let posts = XCompanion.parse(els, title: title).posts
+                // The post you reply to sits above the box: the named one, else the nearest above, else the main post.
+                let above = posts.filter { $0.rect.minY < f.rect.minY }
+                let post = above.last(where: { target != nil && $0.handle.lowercased() == target!.lowercased() })
+                    ?? (path.contains("/status/") ? posts.first : above.last) ?? posts.first
+                let key = "\(url)|\(post?.handle ?? "")|\(post?.text.prefix(30) ?? "")"
+                guard key != self.replyKey || Date().timeIntervalSince(self.replyAt) > 600 else { return }
+                self.replyKey = key; self.replyAt = Date()
+                self.onReplyComposer?(post)
+            }
+        }
     }
 
     // MARK: what the cat says

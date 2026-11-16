@@ -189,6 +189,19 @@ final class ScreenReader {
         return (nil, barURL)
     }
 
+    /// The text box that has keyboard focus in an app (role, label/placeholder, screen rect). Never reads its content.
+    func focusedField(pid: pid_t) -> (role: String, hint: String, rect: CGRect)? {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.15)
+        guard let fv = attr(app, kAXFocusedUIElementAttribute as String), CFGetTypeID(fv) == AXUIElementGetTypeID() else { return nil }
+        let el = fv as! AXUIElement
+        let role = str(el, kAXRoleAttribute as String) ?? ""
+        guard role == "AXTextArea" || role == "AXTextField" || role == "AXComboBox" else { return nil }
+        let hint = [str(el, "AXPlaceholderValue"), str(el, kAXDescriptionAttribute as String), str(el, kAXTitleAttribute as String)]
+            .compactMap { $0 }.joined(separator: " ")
+        return (role, hint, rect(el) ?? .zero)
+    }
+
     func readAX(pid: pid_t, maxNodes: Int = 1600, budget: TimeInterval = 0.25,
                 root: AXUIElement? = nil) -> (title: String, frame: CGRect, elements: [ScreenElement]) {
         let app = AXUIElementCreateApplication(pid)
