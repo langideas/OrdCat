@@ -77,6 +77,8 @@ struct XPost {
     var rect: CGRect
     var marks: Set<String>
     var isAd: Bool
+    /// The post's time link (opens the post when clicked), when found.
+    var link: CGRect = .zero
 }
 
 private struct XData: Codable {
@@ -482,6 +484,15 @@ final class XCompanion {
 
     /// Read the X page now (also used right before filtering replies or drafting).
     @discardableResult
+    /// Read the page again and find these posts where they are *now* (you may have scrolled since the popup).
+    func locate(_ wanted: [XPost]) -> [XPost] {
+        let fresh = scanNow()
+        let screen = NSScreen.screens.reduce(CGRect.zero) { $0.union($1.frame) }
+        return wanted.compactMap { w in
+            fresh.first { $0.handle.lowercased() == w.handle.lowercased() && $0.text.prefix(30) == w.text.prefix(30) }
+        }.filter { $0.rect.height > 10 && $0.rect.height < screen.height * 0.9 }
+    }
+
     func scanNow() -> [XPost] {
         guard let pg = readablePage() else { return [] }
         lastScan = Date()
@@ -659,7 +670,11 @@ final class XCompanion {
                 marks.formUnion(XCompanion.marks(of: els[j].text)); rowRect = rowRect.union(els[j].rect); j += 1
             }
             // The piece of page before it: author = first standalone @handle, then the body.
+            // Prefer the @handle with a time on its own line ("@poteto · 11月15日"): a profile header
+            // or bio above the first post also has an @handle, but never a time next to it.
             var author: (h: String, name: String, idx: Int)?
+            var firstAny: (h: String, name: String, idx: Int)?
+            var link = CGRect.zero
             for k in segStart..<i {
                 let tk = els[k].text.trimmingCharacters(in: .whitespaces)
                 guard els[k].role != "按钮", let h = match(handleRe, tk) else { continue }
@@ -669,8 +684,14 @@ final class XCompanion {
                     if match(handleRe, p) == nil, p.count <= 50, els[k - 1].role == "文本" || els[k - 1].role == "链接",
                        match(timeRe, p) == nil, p != "·" { name = p }
                 }
-                author = (h, name, k); break
+                if firstAny == nil { firstAny = (h, name, k) }
+                var timeRect = CGRect.zero
+                for m in (k + 1)..<min(i, k + 5) where abs(els[m].rect.midY - els[k].rect.midY) < 14 {
+                    if match(timeRe, els[m].text.trimmingCharacters(in: .whitespaces)) != nil { timeRect = els[m].rect; break }
+                }
+                if timeRect != .zero { author = (h, name, k); link = timeRect; break }
             }
+            if author == nil { author = firstAny }
             if let a = author {
                 var text = ""
                 var rect = els[a.idx].rect
@@ -683,7 +704,7 @@ final class XCompanion {
                     if tk.count < 2 || tk == "·" || tk == a.name || match(timeRe, tk) != nil || match(countRe, tk) != nil { continue }
                     if text.count < 1200, !text.contains(tk) { text += (text.isEmpty ? "" : " ") + tk }
                 }
-                posts.append(XPost(handle: a.h, name: a.name, text: text, rect: rect.union(rowRect), marks: marks, isAd: isAd))
+                posts.append(XPost(handle: a.h, name: a.name, text: text, rect: rect.union(rowRect), marks: marks, isAd: isAd, link: link))
                 if focus == nil, let mn = mainName, a.name == mn { focus = a.h }
             }
             segStart = j

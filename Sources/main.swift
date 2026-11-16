@@ -3474,38 +3474,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let snippet: (XPost) -> String = { p in p.text.count > 70 ? String(p.text.prefix(70)) + "…" : p.text }
         var text = ""
         var acts: [(String, () -> Void)] = []
-        let rects = group.map { $0.post.rect }
+        let posts = group.map { $0.post }
+        // Mark where they are right now (found again at click time, so scrolling never puts the box in the wrong place).
+        let mark: (String, Int, Double) -> () -> Void = { [weak self] label, limit, secs in
+            { guard let self = self else { return }
+              let found = self.xbuddy.locate(posts)
+              if found.isEmpty { self.xPopup("它已经滚出屏幕啦 🐾 点「打开」我直接带你去看", self.openActs(posts), hold: 6); return }
+              self.highlighter.show(found.map { $0.rect }, label: label, seconds: secs, limit: limit) }
+        }
         switch kind {
         case .signal:
             let a = group[0]
             text = "📡 信号：\(a.reason)\n@\(a.post.handle)：\(snippet(a.post))"
             if group.count > 1 { text += "\n（这屏还有 \(group.count - 1) 条命中）" }
-            acts = [("在哪", { [weak self] in self?.highlighter.show(rects, label: "信号", seconds: 8, limit: 6) }),
-                    ("想回复", { [weak self] in self?.xReplyAssist(a.post) })]
+            acts = openActs([a.post]) + [("在哪", mark("信号", 6, 8)), ("想回复", { [weak self] in self?.xReplyAssist(a.post) })]
         case .spam:
             text = group.count == 1 ? "🚫 营销号 / 广告：@\(group[0].post.handle)（\(group[0].reason)）"
                                     : "🚫 这屏有 \(group.count) 个营销号 / 广告：\(names)"
-            acts = [("标出来", { [weak self] in self?.highlighter.show(rects, label: "营销号", seconds: 8, limit: 6) })]
+            acts = [("标出来", mark("营销号", 6, 8))]
         case .known:
             let a = group[0]
             text = "👋 @\(a.post.handle) 出现了，\(a.reason)" + (group.count > 1 ? "\n还有 \(names)" : "")
-            acts = [("在哪", { [weak self] in self?.highlighter.show(rects, label: "熟人", seconds: 6, limit: 4) }),
+            acts = openActs([a.post]) + [("在哪", mark("熟人", 4, 6)),
                     ("TA 是谁", { [weak self] in
                         guard let self = self, let p = self.xbuddy.person(a.post.handle) else { return }
                         self.bubble.notify(self.xbuddy.card(p), hold: 12) })]
         case .follow:
             let a = group[0]
             text = "🆕 你关注的 @\(a.post.handle) 发帖了：\(snippet(a.post))" + (group.count > 1 ? "\n还有 \(group.count - 1) 条" : "")
-            acts = [("在哪", { [weak self] in self?.highlighter.show(rects, label: "关注", seconds: 6, limit: 4) })]
+            acts = openActs([a.post]) + [("在哪", mark("关注", 4, 6))]
         case .water:
             text = "🗑 评论里有 \(group.count) 条水评：\(names)"
-            acts = [("标出来", { [weak self] in self?.highlighter.show(rects, label: "水评", seconds: 8, limit: 8) }),
+            acts = [("标出来", mark("水评", 8, 8)),
                     ("筛评论", { [weak self] in self?.openChat(); self?.xFilter() })]
         }
         if rest > 0 { text += "\n另外还有 \(rest) 条别的提醒" }
         catView.perk(true)
         xPopup(text, acts, hold: kind == .signal ? 12 : 8)
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in self?.catView.perk(false) }
+    }
+
+    /// 「打开」: open the post itself (a click on its time link, like you would); the post card then explains it.
+    private func openActs(_ posts: [XPost]) -> [(String, () -> Void)] {
+        guard let first = posts.first else { return [] }
+        return [("打开", { [weak self] in
+            guard let self = self, let app = self.hub.lastExternalApp else { return }
+            guard let p = self.xbuddy.locate([first]).first, p.link != .zero else {
+                self.xPopup("这条已经不在屏幕上了，往回滚一下就能看到 @\(first.handle) 🐾", [], hold: 5)
+                return
+            }
+            app.activate(options: [.activateIgnoringOtherApps])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                let pt = CGPoint(x: p.link.midX, y: p.link.midY)
+                let src = CGEventSource(stateID: .hidSystemState)
+                CGEvent(mouseEventSource: src, mouseType: .leftMouseDown, mouseCursorPosition: pt, mouseButton: .left)?.post(tap: .cghidEventTap)
+                CGEvent(mouseEventSource: src, mouseType: .leftMouseUp, mouseCursorPosition: pt, mouseButton: .left)?.post(tap: .cghidEventTap)
+            }
+        })]
     }
 
     // MARK: reply ideas when you click reply
