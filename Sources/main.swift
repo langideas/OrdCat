@@ -673,11 +673,28 @@ final class SelectionWatcher {
         guard Prefs.selectFallback else { return }
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
         if front == "com.apple.finder" || front == Bundle.main.bundleIdentifier { return }
+        if SelectionWatcher.captureToolActive(front: front) { return }
         copyFallback { [weak self] s in
             guard let self = self, gen == self.generation,
                   let s = s, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             self.onSelect?(s)
         }
+    }
+
+    /// True while macOS Screenshot / screen recording (⌘⇧5, ⌘⇧4) or another capture tool is on screen.
+    /// We must never press ⌘C or touch the clipboard then — it can break the capture and its save.
+    static func captureToolActive(front: String) -> Bool {
+        let ids = ["com.apple.screencaptureui", "com.apple.screenshot.launcher", "com.apple.QuickTimePlayerX",
+                   "com.apple.Preview", "com.cleanshot", "pl.maketheweb.cleanshotx", "com.obsproject.obs-studio",
+                   "com.techsmith.snagit", "com.loom.desktop", "com.apple.FaceTime"]
+        if ids.contains(where: { front.hasPrefix($0) }) { return true }
+        let owners = ["screencaptureui", "Screenshot", "截屏", "截圖", "screencapture", "CleanShot", "OBS", "Loom"]
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return false }
+        for w in list {
+            let owner = w[kCGWindowOwnerName as String] as? String ?? ""
+            if owners.contains(where: { owner.localizedCaseInsensitiveContains($0) }) { return true }
+        }
+        return false
     }
 
     private func axSelectedText() -> String? {
