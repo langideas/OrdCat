@@ -216,6 +216,66 @@ final class ScreenReader {
         return (role, hint, rect(el) ?? .zero)
     }
 
+    /// X's reply editor: the focused editable box, or else the page's box whose placeholder says reply.
+    /// Returns the element and its screen rect (top-left origin). Only used to put a reply draft in; never to send.
+    func replyEditor(pid: pid_t) -> (el: AXUIElement, rect: CGRect, focused: Bool)? {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.3)
+        func editable(_ e: AXUIElement) -> Bool {
+            let r = str(e, kAXRoleAttribute as String) ?? ""
+            if r == "AXTextField" || r == "AXSearchField" { return false }   // address bar, search box
+            return r == "AXTextArea" || (attr(e, "AXEditable") as? Bool ?? false)
+        }
+        if let fv = attr(app, kAXFocusedUIElementAttribute as String), CFGetTypeID(fv) == AXUIElementGetTypeID() {
+            let el = fv as! AXUIElement
+            if editable(el) || attr(el, "AXEditableAncestor") != nil {
+                var target = el
+                if !editable(el), let a = attr(el, "AXEditableAncestor"), CFGetTypeID(a) == AXUIElementGetTypeID() { target = a as! AXUIElement }
+                return (target, rect(target) ?? .zero, true)
+            }
+        }
+        guard let wv = attr(app, kAXFocusedWindowAttribute as String), CFGetTypeID(wv) == AXUIElementGetTypeID() else { return nil }
+        let hints = ["回覆", "回复", "reply", "返信", "답글"]
+        var stack: [AXUIElement] = [wv as! AXUIElement]
+        var n = 0
+        let start = Date()
+        while let e = stack.popLast(), n < 6000, Date().timeIntervalSince(start) < 0.8 {
+            n += 1
+            if editable(e) {
+                let h = [str(e, "AXPlaceholderValue"), str(e, kAXDescriptionAttribute as String), str(e, kAXTitleAttribute as String)]
+                    .compactMap { $0 }.joined(separator: " ").lowercased()
+                if hints.contains(where: { h.contains($0) }), let r = rect(e), r.width > 40 { return (e, r, false) }
+            }
+            for c in children(e).reversed() { stack.append(c) }
+        }
+        return nil
+    }
+
+    /// The text now in an editor (only the reply box we just filled).
+    func editorText(_ el: AXUIElement) -> String {
+        if let v = str(el, kAXValueAttribute as String), !v.isEmpty { return v }
+        // Rich editors keep the text in child nodes.
+        var out = ""
+        var stack = [el]
+        var n = 0
+        while let e = stack.popLast(), n < 300 {
+            n += 1
+            if let v = str(e, kAXValueAttribute as String) { out += v }
+            for c in children(e).reversed() { stack.append(c) }
+        }
+        return out
+    }
+
+    /// Focus an editor; returns true when it took focus.
+    func focus(_ el: AXUIElement) -> Bool {
+        AXUIElementSetAttributeValue(el, kAXFocusedAttribute as CFString, kCFBooleanTrue) == .success
+    }
+
+    /// Insert text at the cursor of a focused editor (accessibility path, no keystrokes).
+    func insert(_ text: String, into el: AXUIElement) -> Bool {
+        AXUIElementSetAttributeValue(el, kAXSelectedTextAttribute as CFString, text as CFString) == .success
+    }
+
     func readAX(pid: pid_t, maxNodes: Int = 1600, budget: TimeInterval = 0.25,
                 root: AXUIElement? = nil) -> (title: String, frame: CGRect, elements: [ScreenElement]) {
         let app = AXUIElementCreateApplication(pid)

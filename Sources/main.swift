@@ -3625,25 +3625,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             done("已复制第 \(index) 条 ✂️ 在回复框里按 ⌘V，改一改再自己发～")
             return
         }
-        let field = hub.reader.focusedField(pid: app.processIdentifier)
-        // X's reply box is a rich editor (reported as a text area); the address bar is a text field: never paste there.
-        let isBox = field?.role == "AXTextArea"
-        guard isBox else {
-            done("已复制第 \(index) 条 ✂️ 点开 X 的回复框按 ⌘V 就行（框开着时点一条我会直接帮你填）")
+        let pid = app.processIdentifier
+        let reader = hub.reader
+        let probe = String(d.trimmingCharacters(in: .whitespacesAndNewlines).prefix(12))
+        // 1. Find X's reply box: the focused one, or the page's「发布你的回复」box.
+        DispatchQueue.global(qos: .userInitiated).async {
+            let box = reader.replyEditor(pid: pid)
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                guard let box = box else {
+                    done("已复制第 \(index) 条 ✂️ 没找到回复框：点一下 X 的「发布你的回复」再按 ⌘V～")
+                    return
+                }
+                // 2. Bring the browser forward and put the cursor in the box.
+                app.activate(options: [.activateIgnoringOtherApps])
+                self.waitFront(app, tries: 0) {
+                    if !box.focused && !reader.focus(box.el) {
+                        // The page ignored the focus request: click inside the box (a click only focuses it).
+                        let p = CGPoint(x: box.rect.midX, y: box.rect.midY)
+                        let src = CGEventSource(stateID: .hidSystemState)
+                        CGEvent(mouseEventSource: src, mouseType: .leftMouseDown, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+                        CGEvent(mouseEventSource: src, mouseType: .leftMouseUp, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        // 3. Paste: ⌘V only, nothing is ever sent.
+                        self.pressPaste()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            DispatchQueue.global(qos: .userInitiated).async {
+                                let target = reader.replyEditor(pid: pid)?.el ?? box.el
+                                var ok = reader.editorText(target).contains(probe)
+                                // 4. Paste didn't land: insert through accessibility instead.
+                                if !ok, reader.insert(d, into: target) {
+                                    Thread.sleep(forTimeInterval: 0.2)
+                                    ok = reader.editorText(target).contains(probe)
+                                }
+                                DispatchQueue.main.async {
+                                    done(ok ? "✅ 第 \(index) 条已填进回复框，改一改再自己点「回复」～"
+                                            : "已复制第 \(index) 条 ✂️ 回复框没接住，点一下框再按 ⌘V 就好")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Wait (up to ~1 s) until the app is really in front, then continue.
+    private func waitFront(_ app: NSRunningApplication, tries: Int, _ then: @escaping () -> Void) {
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier || tries >= 20 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: then)
             return
         }
-        // Give the keyboard back to the browser, then paste. Only ⌘V: nothing is ever sent.
-        app.activate(options: [])
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            let src = CGEventSource(stateID: .combinedSessionState)
-            let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
-            let up = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
-            down?.flags = .maskCommand
-            up?.flags = .maskCommand
-            down?.post(tap: .cghidEventTap)
-            up?.post(tap: .cghidEventTap)
-            done("✅ 第 \(index) 条已填进回复框，改一改再自己点「回复」～")
-        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.waitFront(app, tries: tries + 1, then) }
+    }
+
+    /// ⌘V with a real Command key press around it (some pages ignore a bare flagged V).
+    private func pressPaste() {
+        let src = CGEventSource(stateID: .hidSystemState)
+        let cmdDown = CGEvent(keyboardEventSource: src, virtualKey: 0x37, keyDown: true)
+        let vDown = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
+        let vUp = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
+        let cmdUp = CGEvent(keyboardEventSource: src, virtualKey: 0x37, keyDown: false)
+        cmdDown?.flags = .maskCommand
+        vDown?.flags = .maskCommand
+        vUp?.flags = .maskCommand
+        for e in [cmdDown, vDown, vUp, cmdUp] { e?.post(tap: .cghidEventTap) }
     }
 
     private func xExtra() -> String? {
