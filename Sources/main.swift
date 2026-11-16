@@ -1862,18 +1862,18 @@ final class SettingsController: NSObject, NSWindowDelegate {
         let root = NSView(frame: w.contentRect(forFrameRect: w.frame))
         w.contentView = root
         // Clear, large section switcher instead of the small built-in tab strip.
-        let seg = NSSegmentedControl(labels: ["模型", "小猫", "感知与记忆", "声音", "技能", "关于"],
+        let topSeg = NSSegmentedControl(labels: ["模型", "小猫", "感知与记忆", "声音", "技能", "关于"],
                                      trackingMode: .selectOne, target: self, action: #selector(segChanged(_:)))
-        seg.font = .systemFont(ofSize: 13, weight: .medium)
-        seg.controlSize = .large
-        seg.sizeToFit()
-        seg.frame.origin = NSPoint(x: (root.bounds.width - seg.frame.width) / 2, y: root.bounds.height - seg.frame.height - 12)
-        seg.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin]
-        seg.selectedSegment = 0
-        root.addSubview(seg)
-        segControl = seg
+        topSeg.font = .systemFont(ofSize: 13, weight: .medium)
+        topSeg.controlSize = .large
+        topSeg.sizeToFit()
+        topSeg.frame.origin = NSPoint(x: (root.bounds.width - topSeg.frame.width) / 2, y: root.bounds.height - topSeg.frame.height - 12)
+        topSeg.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin]
+        topSeg.selectedSegment = 0
+        root.addSubview(topSeg)
+        segControl = topSeg
         let tabs = NSTabView(frame: NSRect(x: 8, y: 40, width: root.bounds.width - 16,
-                                           height: root.bounds.height - seg.frame.height - 60))
+                                           height: root.bounds.height - topSeg.frame.height - 60))
         tabs.tabViewType = .noTabsNoBorder
         tabsView = tabs
         tabs.autoresizingMask = [.width, .height]
