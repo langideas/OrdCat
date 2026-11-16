@@ -217,6 +217,9 @@ final class RemoteConfig {
                 ud.set(obj["systemPrompt"] as? String ?? "", forKey: "remoteSystemPrompt")
                 Billing.applyRemote(obj["billing"] as? [String: Any])
                 Billing.refresh("x")
+                Billing.refresh("agent")
+                Account.applyRemote(obj["account"] as? [String: Any])
+                Account.shared.pull()
                 if let a = obj["announcement"] as? [String: Any], let id = a["id"] as? String,
                    let text = a["text"] as? String, !text.isEmpty, ud.string(forKey: "lastAnnouncement") != id {
                     ud.set(id, forKey: "lastAnnouncement")

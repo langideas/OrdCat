@@ -11,8 +11,16 @@
       "x": {
         "price": "¥39/月",
         "checkout": ""
+      },
+      "agent": {
+        "price": "¥39/月",
+        "checkout": ""
       }
     },
     "validate": "https://api.lemonsqueezy.com/v1/licenses/validate"
+  },
+  "account": {
+    "supabaseURL": "",
+    "anonKey": ""
   }
 }

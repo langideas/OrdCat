@@ -183,6 +183,16 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
                       if on { Prefs.xOffered = true; _ = SelectionWatcher.trusted(prompt: true) }
                   },
                   settings: { [weak self] f in self?.xSettings(f) ?? NSView(frame: f) })
+,
+            Skill(id: "agent", emoji: "🤖", name: "帮我操作电脑",
+                  summary: "说「帮我……」，小猫一步步替你点、输入、打开应用",
+                  paid: true,
+                  isOn: { Prefs.agentOn },
+                  setOn: { on in
+                      Prefs.agentOn = on
+                      if on { _ = SelectionWatcher.trusted(prompt: true) }
+                  },
+                  settings: { [weak self] f in self?.agentSettings(f) ?? NSView(frame: f) })
             // 以后的新技能加在这里。
         ]
     }
@@ -246,6 +256,29 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
         refresh()
         return v
     }
+
+    private func agentSettings(_ f: NSRect) -> NSView {
+        let v = NSView(frame: f)
+        let c = NSButton(checkboxWithTitle: "每一步都先问我（推荐）", target: self, action: #selector(agentConfirmToggled(_:)))
+        c.state = Prefs.agentConfirm ? .on : .off
+        c.frame = NSRect(x: 16, y: 208, width: 400, height: 20)
+        v.addSubview(c)
+        let info = NSTextField(wrappingLabelWithString: """
+        怎么用：在聊天里说「帮我……」，比如「帮我在备忘录里新建一条：明天买猫粮」「帮我打开 Safari 搜索今天的天气」。也可以用「/做 」开头。
+
+        小猫会看当前应用里能点的按钮和输入框，一次走一步。
+        • 按 Esc 或点「停止」随时停下
+        • 发送、发布、付款、删除这类步骤，就算选了自动也一定先问你
+        • 密码框一律不碰
+        • 需要「辅助功能」权限
+        """)
+        info.font = .systemFont(ofSize: 11)
+        info.textColor = .secondaryLabelColor
+        info.frame = NSRect(x: 16, y: 40, width: 420, height: 160)
+        v.addSubview(info)
+        return v
+    }
+    @objc private func agentConfirmToggled(_ b: NSButton) { Prefs.agentConfirm = b.state == .on }
 
     @objc private func xAlertToggled(_ b: NSButton) {
         Prefs.setXAlert(b.identifier?.rawValue ?? "", b.state == .on)

@@ -62,6 +62,7 @@ enum Billing {
     static func licenseKey(_ id: String) -> String { Keychain.get(service: "app.ordcat.license.\(id)") }
 
     static func isSubscribed(_ id: String) -> Bool {
+        if let a = Account.shared.subscribedUntil(id), a > Date() { return true }   // bound to the account
         guard let u = paidUntil(id) else { return false }
         return u > Date()
     }
@@ -78,7 +79,8 @@ enum Billing {
         if !enabled { return "公测期免费（正式开启后 \(price(id))）" }
         if isSubscribed(id) {
             let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
-            return "✅ 已订阅（有效期到 \(df.string(from: paidUntil(id)!))）"
+            let until = [Account.shared.subscribedUntil(id), paidUntil(id)].compactMap { $0 }.max() ?? Date()
+            return "✅ 已订阅（有效期到 \(df.string(from: until))）"
         }
         if trialStart(id) != nil {
             return trialLeft(id) > 0 ? "免费试用中，还剩 \(trialLeft(id)) 天 · \(price(id))" : "🔒 试用已结束 · \(price(id))"
@@ -171,7 +173,17 @@ enum Billing {
                 onChange()
             }
         case .alertSecondButtonReturn:
-            if let u = checkoutURL(id) { NSWorkspace.shared.open(u) }
+            if let u = checkoutURL(id) {
+                if Account.shared.configured && !Account.shared.signedIn {
+                    let b = NSAlert()
+                    b.messageText = "先登录账号再付款？"
+                    b.informativeText = "登录后订阅会绑定到你的账号，换电脑也能用。也可以不登录，付款后用邮件里的订阅码激活。"
+                    b.addButton(withTitle: "继续付款")
+                    b.addButton(withTitle: "取消")
+                    if b.runModal() != .alertFirstButtonReturn { return }
+                }
+                NSWorkspace.shared.open(Account.shared.checkoutURL(u))
+            }
             else {
                 let b = NSAlert()
                 b.messageText = "付款页面还在准备中"

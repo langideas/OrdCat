@@ -371,7 +371,26 @@ final class ChatSidebar: NSObject, NSTableViewDataSource, NSTableViewDelegate, N
         search.action = #selector(searchChanged)
         view.addSubview(search)
 
-        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 240, height: 600 - 88))
+        // Bottom-left: the account (avatar + name) → 设置 → 账号.
+        accountButton.frame = NSRect(x: 8, y: 6, width: 224, height: 36)
+        accountButton.autoresizingMask = [.width, .maxYMargin]
+        accountButton.isBordered = false
+        accountButton.alignment = .left
+        accountButton.imagePosition = .imageLeading
+        accountButton.imageScaling = .scaleProportionallyDown
+        accountButton.font = .systemFont(ofSize: 13, weight: .medium)
+        accountButton.target = self
+        accountButton.action = #selector(openAccount)
+        accountButton.toolTip = "账号与设置"
+        view.addSubview(accountButton)
+        let sep = NSBox(frame: NSRect(x: 8, y: 46, width: 224, height: 1))
+        sep.boxType = .separator
+        sep.autoresizingMask = [.width, .maxYMargin]
+        view.addSubview(sep)
+        refreshAccount()
+        Account.shared.observe { [weak self] in self?.refreshAccount() }
+
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 50, width: 240, height: 600 - 88 - 50))
         scroll.autoresizingMask = [.width, .height]
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
@@ -743,4 +762,20 @@ final class ChatSidebar: NSObject, NSTableViewDataSource, NSTableViewDelegate, N
     }
     var onClearAll: (() -> Void)?
     @objc private func clearAll() { onClearAll?() }
+    let accountButton = NSButton(title: "", target: nil, action: nil)
+    var onAccount: (() -> Void)?
+    @objc private func openAccount() { onAccount?() }
+    func refreshAccount() {
+        let a = Account.shared
+        let img = a.avatarImage(size: 56)
+        let side: CGFloat = 26
+        let round = NSImage(size: NSSize(width: side, height: side), flipped: false) { r in
+            NSBezierPath(ovalIn: r).addClip()
+            img.draw(in: r)
+            return true
+        }
+        accountButton.image = round
+        let sub = a.signedIn ? "" : (a.configured ? "  · 未登录" : "")
+        accountButton.title = "  " + a.profile.displayName + sub + "   ⚙︎"
+    }
 }

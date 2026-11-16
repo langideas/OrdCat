@@ -1342,6 +1342,7 @@ final class ChatWindowController: NSObject, NSWindowDelegate, NSSplitViewDelegat
     var onSend: ((String, [Data]) -> Void)?
     var onMic: (() -> Void)?
     var onClear: (() -> Void)?
+    var onOpenAccount: (() -> Void)?
 
     var isVisible: Bool { window?.isVisible ?? false }
 
@@ -1433,6 +1434,7 @@ final class ChatWindowController: NSObject, NSWindowDelegate, NSSplitViewDelegat
         sidebar = ChatSidebar(store: store)
         sidebar.window = w
         sidebar.onClearAll = { [weak self] in self?.clearHistory() }
+        sidebar.onAccount = { [weak self] in self?.onOpenAccount?() }
         let side = sidebar.view
         side.frame = NSRect(x: 0, y: 0, width: 240, height: root.bounds.height)
         let v = NSView(frame: NSRect(x: 241, y: 0, width: root.bounds.width - 241, height: root.bounds.height))
@@ -1732,6 +1734,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     var voice: Voice?
     var xbuddy: XCompanion?
     let skillsPane = SkillsPane()
+    let accountPane = AccountPane()
     private let enginePopup = NSPopUpButton()
     private let sysVoicePopup = NSPopUpButton()
     private let rateSlider = NSSlider(value: 0.5, minValue: 0.35, maxValue: 0.65, target: nil, action: nil)
@@ -1751,6 +1754,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     func show(tab: Int = 0) {
         if window == nil { build() }
         skillsPane.refresh()
+        accountPane.refresh()
         base.stringValue = Prefs.base
         model.stringValue = Prefs.model
         key.stringValue = Keychain.get()
@@ -1862,7 +1866,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         let root = NSView(frame: w.contentRect(forFrameRect: w.frame))
         w.contentView = root
         // Clear, large section switcher instead of the small built-in tab strip.
-        let topSeg = NSSegmentedControl(labels: ["模型", "小猫", "感知与记忆", "声音", "技能", "关于"],
+        let topSeg = NSSegmentedControl(labels: ["模型", "小猫", "感知与记忆", "声音", "技能", "关于", "账号"],
                                      trackingMode: .selectOne, target: self, action: #selector(segChanged(_:)))
         topSeg.font = .systemFont(ofSize: 13, weight: .medium)
         topSeg.controlSize = .large
@@ -2165,6 +2169,14 @@ final class SettingsController: NSObject, NSWindowDelegate {
         v4.addSubview(notesLabel)
         t4.view = v4
         tabs.addTabViewItem(t4)
+
+        let tAcc = NSTabViewItem(identifier: "account")
+        tAcc.label = "账号"
+        accountPane.onOpenSkills = { [weak self] in
+            self?.tabsView?.selectTabViewItem(at: 4); self?.segControl?.selectedSegment = 4
+        }
+        tAcc.view = accountPane.view
+        tabs.addTabViewItem(tAcc)
 
         // Every page scrolls both ways and follows the interface size.
         for item in tabs.tabViewItems {
@@ -2527,6 +2539,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let perceptionKey = HotKey(id: 2)
     private lazy var hub = ContextHub(dir: store.dir)
     private lazy var xbuddy = XCompanion(dir: store.dir, hub: hub)
+    private let agent = DesktopAgent()
+
+    /// A message next to the cat: inside the open chat bubble when it is up, as a light popup otherwise.
+    private func catPopup(_ text: String, _ acts: [(String, () -> Void)], hold: Double) {
+        if bubble.chatMode && bubble.isShown {
+            bubble.setText(text)
+            bubble.setActions(acts)
+            bubble.layout()
+        } else {
+            bubble.notify(text, actions: acts, hold: hold)
+        }
+    }
     private var lastXReact = Date.distantPast
     private let xllm = LLM()
     /// The X greeting card is still what the bubble shows (no question asked yet): follow page changes live.
@@ -2575,6 +2599,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chatWindow.onSend = { [weak self] text, imgs in self?.ask(text, images: imgs, inBubble: false) }
         chatWindow.onMic = { [weak self] in self?.toggleVoice(fromWindow: true) }
         chatWindow.onClear = { [weak self] in self?.store.clear() }
+        chatWindow.onOpenAccount = { [weak self] in self?.settings.show(tab: 6) }
         bubble.anchor = { [weak self] in self?.catView.headScreenPoint() ?? .zero }
         bubble.onSend = { [weak self] text in self?.ask(text) }
         bubble.onExpand = { [weak self] in self?.bubble.hide(); self?.chatWindow.show() }
@@ -2627,8 +2652,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         xbuddy.onAlerts = { [weak self] a in self?.queueXAlerts(a) }
         xbuddy.onReplyComposer = { [weak self] post in self?.xReplyAssist(post) }
         xbuddy.onPageChanged = { [weak self] in self?.xPageChanged() }
+        agent.present = { [weak self] text, acts in self?.catPopup(text, acts, hold: acts.isEmpty ? 8 : 120) }
+        agent.onFinish = { [weak self] log in
+            guard let self = self else { return }
+            self.store.updateLast(log)
+            self.store.save()
+        }
         settings.skillsPane.onChanged = { [weak self] id, on in
-            guard let self = self, id == "x" else { return }
+            guard let self = self else { return }
+            if id == "agent" {
+                self.bubble.notify(on ? "「帮我操作电脑」开啦 🤖 跟我说「帮我……」试试，每一步我都会先问你。" : "「帮我操作电脑」关掉啦。", hold: 5)
+                return
+            }
+            guard id == "x" else { return }
             self.bubble.notify(on ? "「陪你刷推」开啦 🐾 去 x.com 刷一刷，我在旁边看着。" : "「陪你刷推」关掉啦，我不看 X 了。", hold: 4)
         }
         xbuddy.start()
@@ -3354,6 +3390,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func ask(_ text: String, images: [Data] = [], spoken: Bool = false, inBubble: Bool = true,
                      pageOverride: String? = nil, extra: String? = nil, after: ((String) -> String?)? = nil) {
         xGreetingLive = false
+        // 技能「帮我操作电脑」: "帮我……" runs the desktop agent instead of a plain chat answer.
+        if images.isEmpty && pageOverride == nil && Prefs.agentOn && DesktopAgent.isTask(text) {
+            if Billing.isUnlocked("agent") {
+                store.append(ChatMessage(role: "user", text: text, imageNames: [], date: Date()))
+                store.append(ChatMessage(role: "assistant", text: "🤖 正在帮你操作…", imageNames: [], date: Date()))
+                agent.start(goal: text)
+                return
+            } else {
+                catPopup("🤖 「帮我操作电脑」是订阅技能，去 设置 → 技能 可以试用或订阅。",
+                         [("打开技能", { [weak self] in self?.settings.show(tab: 4) })], hold: 8)
+                return
+            }
+        }
         voice.stop()
         highlighter.clear()
         // Decide which earlier turns this question may see (default: only the current page's topic).
