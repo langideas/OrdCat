@@ -19,7 +19,20 @@ extension Prefs {
     static var xSignalAccounts: String { get { d.string(forKey: "xSignalAccounts") ?? "" } set { d.set(newValue, forKey: "xSignalAccounts") } }
     /// Seconds between two popups (signals may cut in after 3 s).
     static var xAlertGap: Double { get { d.object(forKey: "xAlertGap") as? Double ?? 8 } set { d.set(newValue, forKey: "xAlertGap") } }
-    static let xAlertDefaults: [String: Bool] = ["signal": true, "spam": true, "water": true, "known": true, "follow": false, "reply": true]
+    static let xAlertDefaults: [String: Bool] = ["signal": true, "spam": true, "water": true, "known": true, "follow": false, "reply": true,
+                                                  "autopost": true]
+    // 回复建议的自定义设置
+    static var xReplyCount: Int { get { max(1, min(5, d.object(forKey: "xReplyCount") as? Int ?? 3)) } set { d.set(newValue, forKey: "xReplyCount") } }
+    static let xReplyTones = ["混搭（每条一个角度）", "自然随意", "专业有料", "幽默轻松", "犀利有观点", "温和友善"]
+    static var xReplyTone: Int { get { min(xReplyTones.count - 1, d.object(forKey: "xReplyTone") as? Int ?? 0) } set { d.set(newValue, forKey: "xReplyTone") } }
+    static let xReplyLengths: [(String, Int)] = [("短：30 字以内", 30), ("中：60 字以内", 60), ("长：120 字以内", 120)]
+    static var xReplyLength: Int { get { min(xReplyLengths.count - 1, d.object(forKey: "xReplyLength") as? Int ?? 1) } set { d.set(newValue, forKey: "xReplyLength") } }
+    static let xReplyLangs = ["跟帖子同一种语言", "中文", "English"]
+    static var xReplyLang: Int { get { min(xReplyLangs.count - 1, d.object(forKey: "xReplyLang") as? Int ?? 0) } set { d.set(newValue, forKey: "xReplyLang") } }
+    /// Who I am / extra wishes for every reply ("我做量化交易，第一人称，别用 emoji").
+    static var xReplyPersona: String { get { d.string(forKey: "xReplyPersona") ?? "" } set { d.set(newValue, forKey: "xReplyPersona") } }
+    /// Clicking a reply idea pastes it into X's reply box (never sends).
+    static var xReplyFill: Bool { get { d.object(forKey: "xReplyFill") as? Bool ?? true } set { d.set(newValue, forKey: "xReplyFill") } }
     static func xAlert(_ k: String) -> Bool { d.object(forKey: "xAlert." + k) as? Bool ?? (xAlertDefaults[k] ?? false) }
     static func setXAlert(_ k: String, _ on: Bool) { d.set(on, forKey: "xAlert." + k) }
 
@@ -101,8 +114,18 @@ final class XCompanion {
     var onAlerts: (([XAlert]) -> Void)?
     /// You focused the reply box: the post you are replying to (nil when unclear).
     var onReplyComposer: ((XPost?) -> Void)?
-    /// The X page in front changed (new profile, new post, back to the timeline).
+    /// The X page in front changed (new profile, new post, back to the timeline), and its content is read.
     var onPageChanged: (() -> Void)?
+    /// You just opened a single post (fires the moment the address changes, before the page is read): the author's handle.
+    var onPostOpening: ((String) -> Void)?
+    /// The same post page, but its text finished loading: refresh the card if it is still up.
+    var onPostUpdated: (() -> Void)?
+    /// Bumped on every page change; scans started for an older page don't announce anything.
+    private(set) var pageGen = 0
+    private var pageChangedAt = Date.distantPast
+    /// A post page whose main post we are still waiting to see (the page loads after the address changes).
+    private var waitingPost = false
+    private var announcedPostKey = ""
     private var seenKeys = Set<String>()
     private var seenOrder: [String] = []
     private var replyKey = ""
@@ -120,8 +143,8 @@ final class XCompanion {
 
     func start() {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
-        timer?.tolerance = 0.3
+        timer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in self?.tick() }
+        timer?.tolerance = 0.1
     }
 
     func save() {
@@ -236,6 +259,14 @@ final class XCompanion {
         if forceProbe || key != probeKey || Date().timeIntervalSince(probeAt) > 15 {
             probe = hub.reader.webPage(pid: app.processIdentifier)
             probeKey = key; probeAt = Date()
+        } else if let web = probe.web {
+            // X changes pages without reloading: re-read just the address (one cheap call) every tick.
+            if let u = hub.reader.url(of: web) {
+                if !u.isEmpty { probe.url = u }
+            } else {
+                probe = hub.reader.webPage(pid: app.processIdentifier)
+                probeAt = Date()
+            }
         }
         let urlHit = XCompanion.isXURL(probe.url)
         guard urlHit || titleHit else {
@@ -292,8 +323,19 @@ final class XCompanion {
     /// A single post page (x.com/<user>/status/<id>).
     var onStatusPage: Bool { probe.url.contains("/status/") || XCompanion.titleName(lastTitleText) != nil }
     private var lastTitleText = ""
-    /// The post a status page is about (the first one at the top).
-    var mainPost: XPost? { onStatusPage ? lastPosts.first : nil }
+    /// x.com/<handle>/status/<id> → handle.
+    static func statusAuthor(_ url: String) -> String? {
+        let parts = hostPath(url).path.split(separator: "/").map(String.init)
+        guard parts.count >= 3, parts[1] == "status" else { return nil }
+        return parts[0]
+    }
+    /// The post a status page is about: the author's post near the top (the first post as a fallback).
+    var mainPost: XPost? {
+        guard onStatusPage else { return nil }
+        if let h = XCompanion.statusAuthor(probe.url)?.lowercased(),
+           let p = lastPosts.prefix(4).first(where: { $0.handle.lowercased() == h }) { return p }
+        return waitingPost ? nil : lastPosts.first
+    }
     /// Replies on a status page, and how many of them look like 水评 / spam.
     var replyStats: (total: Int, water: Int, spam: Int) {
         guard onStatusPage, lastPosts.count > 1 else { return (0, 0, 0) }
@@ -323,23 +365,73 @@ final class XCompanion {
             if !Prefs.xOffered { Prefs.xOffered = true; onFirstVisit?() }
             return
         }
-        let key = pg.url.isEmpty ? pg.title : pg.url
-        let changed = key != lastTitle
+        // The address is the page (the title lags behind and carries unread counts like "(3)").
+        let key = pg.url.isEmpty ? XCompanion.stripCount(pg.title) : XCompanion.pageKey(pg.url)
+        if key != lastTitle {
+            lastTitle = key
+            pageGen += 1
+            pageChangedAt = Date()
+            announcedPostKey = ""
+            if let h = XCompanion.statusAuthor(pg.url) {
+                waitingPost = true
+                lastPosts = []
+                onPostOpening?(h)
+            } else {
+                waitingPost = false
+            }
+            needsAnnounce = true
+        }
         checkComposer(pg)
-        guard !scanning, changed || (Date().timeIntervalSince(lastScan) > 2.5 && hub.idleSeconds() < 30) else { return }
-        lastTitle = key
+        // Right after a page change, read again quickly until the page has loaded; otherwise every 2.5 s.
+        let fresh = Date().timeIntervalSince(pageChangedAt) < 6 && (waitingPost || needsAnnounce)
+        guard !scanning, fresh || (Date().timeIntervalSince(lastScan) > 2.5 && hub.idleSeconds() < 30) else { return }
         lastScan = Date()
         scanning = true
         // Reading a big X page can take a second: do it off the main thread so the cat never stutters.
-        let pid = pg.app.processIdentifier, web = pg.web, title = pg.title, app = pg.app
+        let pid = pg.app.processIdentifier, web = pg.web, title = pg.title, app = pg.app, gen = pageGen
         axQueue.async { [weak self] in
             guard let self = self else { return }
             let ax = self.hub.reader.readAX(pid: pid, maxNodes: 5000, budget: 1.5, root: web)
             DispatchQueue.main.async {
                 self.scanning = false
-                self.apply(ax.elements, app: app, title: title, newPage: changed)
+                // The user already moved on to another page: drop this read, the next tick reads the new one.
+                guard gen == self.pageGen else { return }
+                self.apply(ax.elements, app: app, title: title, newPage: false)
+                self.announceIfReady()
             }
         }
+    }
+    private var needsAnnounce = false
+
+    /// Tell the app the page is ready: a post page once its main post is on screen (or after 5 s), other pages at once.
+    private func announceIfReady() {
+        guard needsAnnounce else {
+            // Same post page, but the post text only now loaded fully: refresh the card once.
+            if let p = mainPost, onStatusPage {
+                let k = "\(p.handle)|\(p.text.prefix(60))"
+                if k != announcedPostKey, !announcedPostKey.isEmpty { announcedPostKey = k; onPostUpdated?() }
+            }
+            return
+        }
+        if waitingPost {
+            let author = XCompanion.statusAuthor(probe.url)?.lowercased() ?? ""
+            let found = lastPosts.prefix(4).contains { $0.handle.lowercased() == author && !$0.text.isEmpty }
+            if !found && Date().timeIntervalSince(pageChangedAt) < 5 { return }
+            waitingPost = false
+        }
+        needsAnnounce = false
+        if let p = mainPost { announcedPostKey = "\(p.handle)|\(p.text.prefix(60))" }
+        onPageChanged?()
+    }
+
+    /// host + path without query / fragment (x.com/a/status/1?s=20 and x.com/a/status/1 are the same page; photo overlays too).
+    static func pageKey(_ url: String) -> String {
+        let hp = hostPath(url)
+        var path = String(hp.path.prefix { $0 != "?" && $0 != "#" })
+        if let r = path.range(of: #"/(photo|video|analytics|quotes|retweets|likes)(/\d+)?$"#, options: .regularExpression) {
+            path.removeSubrange(r)
+        }
+        return hp.host + path
     }
 
     /// Read the X page now (also used right before filtering replies or drafting).
@@ -355,12 +447,11 @@ final class XCompanion {
     private func apply(_ elements: [ScreenElement], app: NSRunningApplication, title: String, newPage: Bool) {
         lastTitleText = title
         let parsed = XCompanion.parse(elements, title: title)
-        initialScanOfPage = newPage
+        initialScanOfPage = newPage || needsAnnounce
         lastPosts = parsed.posts
         lastReadCount = parsed.posts.count
         defer {
             onRead?(parsed.posts.count)
-            if newPage { onPageChanged?() }
             let alerts = findAlerts(parsed.posts, title: title)
             if !alerts.isEmpty { onAlerts?(alerts) }
         }
@@ -399,7 +490,7 @@ final class XCompanion {
             if people[h.lowercased()]?.following != f { people[h.lowercased()]?.following = f; dirty = true }
         }
         focus = parsed.focus
-        if newPage, let f = parsed.focus, people[f.lowercased()] != nil {
+        if newPage || needsAnnounce, let f = parsed.focus, people[f.lowercased()] != nil {
             people[f.lowercased()]?.visits += 1
             dirty = true
             if let p = people[f.lowercased()], p.known, announcedTitle != title {
@@ -667,8 +758,11 @@ final class XCompanion {
             if seenOrder.count > 3000 { seenKeys.remove(seenOrder.removeFirst()) }
             let c = XCompanion.classify(p, isReply: isStatus && i > 0, words: words, accounts: accounts)
             if let sg = c.signal, Prefs.xAlert("signal") { out.append(XAlert(kind: .signal, post: p, reason: sg)); continue }
-            if let sp = c.spam, Prefs.xAlert("spam") { out.append(XAlert(kind: .spam, post: p, reason: sp)); continue }
-            if c.water, Prefs.xAlert("water") { out.append(XAlert(kind: .water, post: p, reason: "水评")); continue }
+            // On a post page the post card already counts 水评 / 营销号: no extra popup on top of it.
+            let cardCovers = isStatus && i > 0 && Prefs.xAlert("autopost")
+            if let sp = c.spam, Prefs.xAlert("spam"), !cardCovers { out.append(XAlert(kind: .spam, post: p, reason: sp)); continue }
+            if c.water, Prefs.xAlert("water"), !cardCovers { out.append(XAlert(kind: .water, post: p, reason: "水评")); continue }
+            if cardCovers && (c.spam != nil || c.water) { continue }
             if let who = person(p.handle) {
                 let n = who.interactions.count
                 if n >= 2, Prefs.xAlert("known") {

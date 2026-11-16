@@ -251,13 +251,55 @@ let kTTSPresets: [TTSPreset] = [
     TTSPreset(name: "自定义（OpenAI 兼容 /audio/speech）", base: "", model: "", voices: [])
 ]
 
-final class Voice {
+final class Voice: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     private let synth = AVSpeechSynthesizer()
     private var player: AVAudioPlayer?
     private var cloudTask: URLSessionDataTask?
     private var gen = 0
     /// Reports cloud problems (shown in settings when testing).
     var onStatus: ((String) -> Void)?
+    /// 0 idle, 1 speaking (or fetching the cloud voice), 2 paused.
+    private(set) var state = 0 { didSet { if state != oldValue { onState?(state) } } }
+    var onState: ((Int) -> Void)?
+    private var pending = Set<ObjectIdentifier>()
+
+    override init() {
+        super.init()
+        synth.delegate = self
+    }
+
+    var isActive: Bool { state != 0 }
+
+    /// Pause / continue whatever is being read aloud.
+    func togglePause() {
+        if state == 1 {
+            if let p = player, p.isPlaying { p.pause() } else if synth.isSpeaking { synth.pauseSpeaking(at: .word) }
+            state = 2
+        } else if state == 2 {
+            if let p = player { p.play() } else { synth.continueSpeaking() }
+            state = 1
+        }
+    }
+
+    func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish u: AVSpeechUtterance) {
+        let id = ObjectIdentifier(u)
+        DispatchQueue.main.async {
+            guard self.pending.remove(id) != nil else { return }
+            if self.pending.isEmpty && self.player == nil && self.cloudTask == nil { self.state = 0 }
+        }
+    }
+    func speechSynthesizer(_ s: AVSpeechSynthesizer, didCancel u: AVSpeechUtterance) {
+        let id = ObjectIdentifier(u)
+        DispatchQueue.main.async {
+            guard self.pending.remove(id) != nil else { return }
+            if self.pending.isEmpty && self.player == nil && self.cloudTask == nil { self.state = 0 }
+        }
+    }
+    func audioPlayerDidFinishPlaying(_ p: AVAudioPlayer, successfully flag: Bool) {
+        DispatchQueue.main.async {
+            if self.player === p { self.player = nil; if self.pending.isEmpty { self.state = 0 } }
+        }
+    }
 
     /// Chinese system voices, best quality first, novelty voices removed.
     static func systemVoices() -> [AVSpeechSynthesisVoice] {
@@ -338,12 +380,16 @@ final class Voice {
 
     private func speakSystem(_ clean: String) {
         let v = Voice.chosenSystemVoice()
-        for sentence in Voice.sentences(clean) {
+        let parts = Voice.sentences(clean)
+        guard !parts.isEmpty else { return }
+        state = 1
+        for sentence in parts {
             let u = AVSpeechUtterance(string: sentence)
             u.voice = v
             u.rate = Float(Prefs.ttsRate)
             u.pitchMultiplier = Float(Prefs.ttsPitch)
             u.postUtteranceDelay = 0.08
+            pending.insert(ObjectIdentifier(u))
             synth.speak(u)
         }
     }
@@ -375,14 +421,18 @@ final class Voice {
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
         gen += 1
         let g = gen
+        state = 1
         cloudTask = URLSession.shared.dataTask(with: req) { [weak self] data, resp, err in
             DispatchQueue.main.async {
                 guard let self = self, g == self.gen else { return }
+                self.cloudTask = nil
                 let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
                 if let d = data, code == 200, d.count > 512, let p = try? AVAudioPlayer(data: d) {
                     self.player = p
+                    p.delegate = self
                     p.prepareToPlay()
                     p.play()
+                    if self.state == 2 { p.pause() }   // paused while it was still loading
                     self.onStatus?("✅ 云端声音播放中")
                 } else {
                     let why = err?.localizedDescription
@@ -400,7 +450,9 @@ final class Voice {
         gen += 1
         cloudTask?.cancel(); cloudTask = nil
         player?.stop(); player = nil
+        pending.removeAll()
         synth.stopSpeaking(at: .immediate)
+        state = 0
     }
 }
 
@@ -1005,6 +1057,30 @@ func iconButton(_ title: String, _ target: AnyObject, _ action: Selector, tip: S
     return b
 }
 
+/// The voice button: a sound-wave symbol (a stop symbol while listening).
+func voiceIcon(listening: Bool) -> NSImage? {
+    let name = listening ? "stop.circle.fill" : "waveform"
+    let img = NSImage(systemSymbolName: name, accessibilityDescription: listening ? "停止" : "语音对话")
+    return img?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold))
+}
+func styleVoiceButton(_ b: NSButton, listening: Bool) {
+    if let img = voiceIcon(listening: listening) {
+        b.title = ""
+        b.image = img
+        b.imagePosition = .imageOnly
+        b.contentTintColor = listening ? .systemRed : nil
+    } else {
+        b.title = listening ? "⏹" : "🎙"
+    }
+    b.toolTip = voiceTip(listening: listening)
+}
+/// Hover text for the voice button: what it does and its shortcut.
+func voiceTip(listening: Bool = false) -> String {
+    if listening { return "结束语音（再按一次快捷键也可以）" }
+    guard Prefs.voiceChat else { return "语音对话 · 快捷键没开（右键小猫 → 设置 → 小猫 里打开）" }
+    return "语音对话 · 快捷键 \(kHotKeys[Prefs.hotKeyIndex].title)"
+}
+
 // MARK: - Bubble (non-activating, sits to the left of the cat)
 
 final class Bubble: NSObject {
@@ -1016,6 +1092,17 @@ final class Bubble: NSObject {
     private let textView = NSTextView()
     private var actionButtons: [NSButton] = []
     private var actions: [() -> Void] = []
+    /// Tappable full-width rows (reply ideas): click one to use it.
+    private var choiceButtons: [NSButton] = []
+    private var choiceActions: [() -> Void] = []
+    /// What the bubble shows right now, set by the caller ("xcard"); any new notify/openChat clears it.
+    var tag: String?
+    /// Read-aloud controls in the header, shown while the cat is speaking.
+    private var speakPause: NSButton!
+    private var speakStop: NSButton!
+    private(set) var speakState = 0   // 0 idle, 1 speaking, 2 paused
+    var onSpeakPause: (() -> Void)?
+    var onSpeakStop: (() -> Void)?
     private let input = NSTextField()
     private var micButton: NSButton!
     private var sendButton: NSButton!
@@ -1104,8 +1191,23 @@ final class Bubble: NSObject {
         input.action = #selector(doSend)
         card.addSubview(input)
 
-        micButton = iconButton("🎤", self, #selector(doMic), tip: "语音对话")
+        micButton = iconButton("", self, #selector(doMic), tip: voiceTip())
+        styleVoiceButton(micButton, listening: false)
         card.addSubview(micButton)
+
+        speakPause = NSButton(title: "", target: self, action: #selector(doSpeakPause))
+        speakStop = NSButton(title: "", target: self, action: #selector(doSpeakStop))
+        for (b, sym, tip) in [(speakPause!, "pause.fill", "暂停朗读"), (speakStop!, "stop.fill", "停止朗读（Esc 也可以）")] {
+            b.isBordered = false
+            b.image = NSImage(systemSymbolName: sym, accessibilityDescription: tip)?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold))
+            if b.image == nil { b.title = sym == "stop.fill" ? "⏹" : "⏸" }
+            b.imagePosition = .imageOnly
+            b.contentTintColor = kAmber
+            b.toolTip = tip
+            b.isHidden = true
+            card.addSubview(b)
+        }
         sendButton = iconButton("发送", self, #selector(doSend), tip: "发送")
         card.addSubview(sendButton)
 
@@ -1158,6 +1260,53 @@ final class Bubble: NSObject {
     @objc private func doExpand() { onExpand?() }
     @objc private func doTopics() { onTopics?(topicsButton) }
     @objc private func doMic() { onMic?() }
+    @objc private func doSpeakPause() { onSpeakPause?() }
+    @objc private func doSpeakStop() { onSpeakStop?() }
+
+    /// 0 idle, 1 speaking, 2 paused: show / hide the pause and stop buttons next to the title.
+    func setSpeaking(_ st: Int) {
+        speakState = st
+        let sym = st == 2 ? "play.fill" : "pause.fill"
+        speakPause.image = NSImage(systemSymbolName: sym, accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold))
+        speakPause.toolTip = st == 2 ? "继续朗读" : "暂停朗读"
+        if speakPause.image == nil { speakPause.title = st == 2 ? "▶︎" : "⏸" }
+        if isShown { layout() }
+    }
+    @objc private func doChoice(_ sender: NSButton) {
+        let i = sender.tag
+        guard i < choiceActions.count else { return }
+        choiceActions[i]()
+    }
+
+    /// Full-width tappable rows under the text (reply ideas). Pass [] to remove them.
+    func setChoices(_ list: [(String, () -> Void)], tip: String = "") {
+        for b in choiceButtons { b.removeFromSuperview() }
+        choiceButtons = []
+        choiceActions = list.map { $0.1 }
+        let para = NSMutableParagraphStyle()
+        para.lineBreakMode = .byWordWrapping
+        para.alignment = .left
+        for (i, item) in list.enumerated() {
+            let b = NSButton(title: "", target: self, action: #selector(doChoice(_:)))
+            b.isBordered = false
+            b.wantsLayer = true
+            b.layer?.cornerRadius = 9
+            b.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.09).cgColor
+            b.layer?.borderWidth = 1
+            b.layer?.borderColor = kAmber.withAlphaComponent(0.35).cgColor
+            b.attributedTitle = NSAttributedString(string: item.0, attributes: [
+                .font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.white, .paragraphStyle: para])
+            b.cell?.wraps = true
+            b.cell?.lineBreakMode = .byWordWrapping
+            (b.cell as? NSButtonCell)?.imageScaling = .scaleNone
+            b.toolTip = tip
+            b.tag = i
+            card.addSubview(b)
+            choiceButtons.append(b)
+        }
+        if isShown { layout() }
+    }
     @objc private func doAction(_ sender: NSButton) {
         let i = sender.tag
         guard i < actions.count else { return }
@@ -1188,6 +1337,8 @@ final class Bubble: NSObject {
     /// A short note that retracts by itself.
     func notify(_ text: String, actions list: [(String, () -> Void)] = [], hold: Double? = nil) {
         chatMode = false
+        tag = nil
+        setChoices([])
         setActions(list)
         textView.textStorage?.setAttributedString(bubbleAttributed(text))
         if isShown {
@@ -1204,6 +1355,8 @@ final class Bubble: NSObject {
     /// Open the quick-chat box.
     func openChat(greeting: String?) {
         chatMode = true
+        tag = nil
+        setChoices([])
         setActions([])
         hideTimer?.invalidate()
         if let g = greeting { textView.textStorage?.setAttributedString(bubbleAttributed(g)) }
@@ -1216,7 +1369,7 @@ final class Bubble: NSObject {
         if isShown { layout() }
     }
 
-    func setListening(_ on: Bool) { micButton?.title = on ? "⏹" : "🎤" }
+    func setListening(_ on: Bool) { if let b = micButton { styleVoiceButton(b, listening: on) } }
 
     func hide() {
         hideTimer?.invalidate()
@@ -1262,10 +1415,18 @@ final class Bubble: NSObject {
         }
         let textH = min(max(used, 18), 300)
         let actionH: CGFloat = actionButtons.isEmpty ? 0 : 36
+        let choiceW = inner
+        var choiceHs: [CGFloat] = []
+        for b in choiceButtons {
+            let r = b.attributedTitle.boundingRect(with: NSSize(width: choiceW - 20, height: 1000),
+                                                    options: [.usesLineFragmentOrigin, .usesFontLeading])
+            choiceHs.append(ceil(r.height) + 14)
+        }
+        let choicesH: CGFloat = choiceHs.reduce(0) { $0 + $1 + 6 } + (choiceHs.isEmpty ? 0 : 4)
         let chatH: CGFloat = chatMode ? 40 : 0
         let showChip = chatMode && shareTitle != nil
         let chipH: CGFloat = showChip ? 30 : 0
-        let h = pad + 18 + 6 + textH + actionH + chipH + chatH + pad
+        let h = pad + 18 + 6 + textH + choicesH + actionH + chipH + chatH + pad
 
         var y = h - pad - 16
         title.frame = NSRect(x: pad, y: y, width: 120, height: 16)
@@ -1273,9 +1434,24 @@ final class Bubble: NSObject {
         expandButton.isHidden = !chatMode
         topicsButton.frame = NSRect(x: width - pad - 90 - 92, y: y - 2, width: 90, height: 20)
         topicsButton.isHidden = !chatMode
+        // Read-aloud controls sit right after the "OrdCat" title.
+        let speaking = speakState != 0
+        speakPause.isHidden = !speaking
+        speakStop.isHidden = !speaking
+        if speaking {
+            speakPause.frame = NSRect(x: pad + 58, y: y - 2, width: 22, height: 20)
+            speakStop.frame = NSRect(x: pad + 82, y: y - 2, width: 22, height: 20)
+        }
         y -= 6 + textH
         scroll.frame = NSRect(x: pad, y: y, width: inner, height: textH)
         textView.frame = NSRect(x: 0, y: 0, width: inner, height: max(used, textH))
+        if !choiceButtons.isEmpty {
+            y -= 4
+            for (i, b) in choiceButtons.enumerated() {
+                y -= choiceHs[i] + 6
+                b.frame = NSRect(x: pad, y: y + 3, width: choiceW, height: choiceHs[i])
+            }
+        }
         if !actionButtons.isEmpty {
             y -= actionH
             var x = pad - 4
@@ -1298,6 +1474,7 @@ final class Bubble: NSObject {
         input.isHidden = !chatMode
         sendButton.isHidden = !chatMode
         micButton.isHidden = !chatMode
+        if micButton.image != nil && micButton.contentTintColor == nil { micButton.toolTip = voiceTip() }
         if chatMode {
             y -= chatH
             input.frame = NSRect(x: pad, y: y + 6, width: inner - 104, height: 26)
@@ -1407,7 +1584,7 @@ final class ChatWindowController: NSObject, NSWindowDelegate, NSSplitViewDelegat
     }
 
     func setListening(_ on: Bool, partial: String? = nil) {
-        micButton?.title = on ? "⏹" : "🎤"
+        if let b = micButton { styleVoiceButton(b, listening: on) }
         if let p = partial, isVisible { input.stringValue = p }
         if !on && isVisible { input.stringValue = "" }
     }
@@ -1511,7 +1688,8 @@ final class ChatWindowController: NSObject, NSWindowDelegate, NSSplitViewDelegat
         attach.autoresizingMask = [.minXMargin, .maxYMargin]
         v.addSubview(attach)
 
-        micButton = iconButton("🎤", self, #selector(mic), tip: "语音对话")
+        micButton = iconButton("", self, #selector(mic), tip: voiceTip())
+        styleVoiceButton(micButton, listening: false)
         micButton.frame = NSRect(x: W - 108, y: 18, width: 42, height: 34)
         micButton.autoresizingMask = [.minXMargin, .maxYMargin]
         v.addSubview(micButton)
@@ -2633,6 +2811,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         xbuddy.onInteraction = { [weak self] handle, kind in
             guard let self = self, self.catPanel.isVisible, !self.bubble.chatMode,
                   Date().timeIntervalSince(self.lastXReact) > 20 else { return }
+            // The post card is up: just perk the ears, don't cover it.
+            if self.bubble.tag == "xcard" && self.bubble.isShown {
+                self.catView.perk(true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.catView.perk(false) }
+                return
+            }
             self.lastXReact = Date()
             let icon = kind == "bookmark" ? "🔖" : (kind == "repost" ? "🔁" : "❤️")
             self.catView.perk(true)
@@ -2640,7 +2824,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.catView.perk(false) }
         }
         xbuddy.onRead = { [weak self] n in
-            guard let self = self, n > 0, self.catPanel.isVisible, !self.bubble.chatMode else { return }
+            guard let self = self, n > 0, self.catPanel.isVisible, !self.bubble.chatMode,
+                  !(self.bubble.tag == "xcard" && self.bubble.isShown) else { return }
             let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
             let today = df.string(from: Date())
             guard UserDefaults.standard.string(forKey: "xHelloDay") != today else { return }
@@ -2652,6 +2837,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         xbuddy.onAlerts = { [weak self] a in self?.queueXAlerts(a) }
         xbuddy.onReplyComposer = { [weak self] post in self?.xReplyAssist(post) }
         xbuddy.onPageChanged = { [weak self] in self?.xPageChanged() }
+        xbuddy.onPostOpening = { [weak self] h in self?.xPostOpening(h) }
+        xbuddy.onPostUpdated = { [weak self] in
+            guard let self = self, self.bubble.isShown, !self.xReplyShowing else { return }
+            if self.bubble.chatMode && self.xGreetingLive { self.xShow(self.xGreeting(scan: false)) }
+            else if self.bubble.tag == "xcard" && !self.bubble.chatMode { self.showXCard(self.xGreeting(scan: false)) }
+        }
+        // Read-aloud: pause / continue / stop from the bubble header; Esc also stops.
+        voice.onState = { [weak self] st in self?.bubble.setSpeaking(st) }
+        bubble.onSpeakPause = { [weak self] in self?.voice.togglePause() }
+        bubble.onSpeakStop = { [weak self] in self?.voice.stop() }
+        bubble.panel.onEscape = { [weak self] in
+            guard let self = self else { return }
+            if self.voice.isActive { self.voice.stop() } else { self.bubble.hide() }
+        }
         agent.present = { [weak self] text, acts in self?.catPopup(text, acts, hold: acts.isEmpty ? 8 : 120) }
         agent.onFinish = { [weak self] log in
             guard let self = self else { return }
@@ -2868,7 +3067,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bubble.setShare(title: page?.title, on: page != nil)
         var greeting = page != nil ? "喵～我能看到你正在看的页面，想问点什么？" : (last ?? "喵～想聊点什么？")
         let onX = xbuddy.readablePage() != nil
-        if onX { greeting = xGreeting() }
+        if onX { greeting = xGreeting(scan: xbuddy.lastPosts.isEmpty) }   // the page is read in the background already
         bubble.openChat(greeting: greeting)
         xGreetingLive = onX
         if onX { bubble.setActions(xQuickActions()); bubble.layout() }
@@ -3021,6 +3220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func xShow(_ text: String) {
+        bubble.setChoices([])
         bubble.setText(text)
         bubble.setActions(xQuickActions())
         bubble.layout()
@@ -3080,9 +3280,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard err == nil, let t = t?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return }
             self.gists[key] = String(t.prefix(80))
             if self.gists.count > 200 { self.gists.removeAll() }
-            if self.xGreetingLive, self.bubble.isShown, self.bubble.chatMode,
-               let m = self.xbuddy.mainPost, "\(m.handle)|\(m.text.prefix(80))" == key {
+            guard let m = self.xbuddy.mainPost, "\(m.handle)|\(m.text.prefix(80))" == key, self.bubble.isShown else { return }
+            if self.xGreetingLive && self.bubble.chatMode {
                 self.xShow(self.xGreeting(scan: false))
+            } else if self.bubble.tag == "xcard" && !self.bubble.chatMode {
+                self.showXCard(self.xGreeting(scan: false))
             }
         })
     }
@@ -3096,6 +3298,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.xGreetingLive = true
                 self.xShow(self.xGreeting(scan: false))
             }))
+            bubble.setChoices([])
             bubble.setText(text)
             bubble.setActions(a)
             bubble.layout()
@@ -3104,11 +3307,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// You moved to another X page while the bubble shows the X card: switch the card right away.
+    // MARK: post card that follows you around X
+
+    /// When the post card last appeared (other popups wait a moment so they don't cover it).
+    private var xCardAt = Date.distantPast
+    /// A chat answer is being written into the bubble right now.
+    private var bubbleAnswering = false
+
+    /// May the post card take over the bubble now?
+    private func xCardMayShow() -> Bool {
+        guard catPanel.isVisible, !listener.isListening, !agent.running else { return false }
+        if bubble.isShown && bubble.chatMode {
+            if xGreetingLive { return true }
+            // You are in a conversation: switch only when nothing is being written or typed.
+            return Prefs.xAlert("autopost") && !bubbleAnswering && !bubble.hasDraft
+        }
+        return Prefs.xAlert("autopost")
+    }
+
+    /// Show the post card: in the open chat bubble, otherwise as a popup that stays while you read.
+    private func showXCard(_ text: String) {
+        xCardAt = Date()
+        xReplyShowing = false
+        if bubble.isShown && bubble.chatMode {
+            xGreetingLive = true
+            if let pg = xbuddy.readablePage() { bubble.setShare(title: pg.title, on: bubble.sharing) }
+            xShow(text)
+        } else {
+            bubble.notify(text, actions: xQuickActions(), hold: 25)
+            bubble.tag = "xcard"
+        }
+    }
+
+    /// The address just changed to a post: show the card at once, filled in when the page is read.
+    private func xPostOpening(_ handle: String) {
+        pendingXAlerts.removeAll()
+        guard xCardMayShow() else { return }
+        let who = xbuddy.person(handle)
+        var t = "📝 @\(handle) 的帖子\n正在读…"
+        if let w = who, w.known { t += "\n👤 " + (w.following == true ? "你关注了 TA" : "你认识 TA") }
+        showXCard(t)
+    }
+
+    /// The X page in front is read: switch the card right away.
     private func xPageChanged() {
-        guard xGreetingLive, bubble.isShown, bubble.chatMode else { return }
-        if let pg = xbuddy.readablePage() { bubble.setShare(title: pg.title, on: bubble.sharing) }
-        xShow(xGreeting(scan: false))
+        pendingXAlerts.removeAll()
+        let cardUp = bubble.isShown && ((bubble.chatMode && xGreetingLive) || bubble.tag == "xcard")
+        if xbuddy.mainPost != nil {
+            guard xCardMayShow() else { return }
+            showXCard(xGreeting(scan: false))
+        } else if cardUp {
+            // Left the post (back to the timeline or a profile).
+            if bubble.chatMode { xShow(xGreeting(scan: false)) } else { bubble.hide() }
+        }
     }
 
     // MARK: 刷推 popups
@@ -3129,6 +3380,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func flushXAlerts() {
         guard !pendingXAlerts.isEmpty else { return }
+        // The post card just appeared: give it a few seconds before any other popup.
+        let sinceCard = Date().timeIntervalSince(xCardAt)
+        if sinceCard < 5 {
+            xAlertTimer?.invalidate()
+            xAlertTimer = Timer.scheduledTimer(withTimeInterval: 5 - sinceCard, repeats: false) { [weak self] _ in
+                self?.xAlertTimer = nil; self?.flushXAlerts()
+            }
+            return
+        }
         // Never interrupt a chat, voice, or reply ideas you are reading.
         // Never interrupt a conversation, voice, or reply ideas you are reading; the open X card is fine.
         let chatBusy = bubble.chatMode && bubble.isShown && !xGreetingLive
@@ -3189,7 +3449,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var drafts: [String] = []
         for l in raw.components(separatedBy: "\n") {
             let t = l.trimmingCharacters(in: .whitespaces)
-            guard let f = t.first, ("1"..."3").contains(String(f)), t.count > 2 else { continue }
+            guard let f = t.first, ("1"..."9").contains(String(f)), t.count > 2 else { continue }
             var body = String(t.dropFirst())
             while let c = body.first, ".、)）:： ".contains(c) { body.removeFirst() }
             body = body.replacingOccurrences(of: "**", with: "").trimmingCharacters(in: CharacterSet(charactersIn: " \"“”"))
@@ -3198,10 +3458,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return drafts
     }
 
+    /// The reply-ideas prompt, built from 设置 → 技能 → 陪你刷推 → 回复建议设置.
+    private func replyPrompt(_ p: XPost) -> String {
+        let n = Prefs.xReplyCount
+        let len = Prefs.xReplyLengths[Prefs.xReplyLength].1
+        let tone = Prefs.xReplyTones[Prefs.xReplyTone]
+        let lang = Prefs.xReplyLangs[Prefs.xReplyLang]
+        var rules = "帮我想 \(n) 条回复草稿：自然、像真人说话、别营销腔，每条不超过 \(len) 字，语言：\(lang)。"
+        if Prefs.xReplyTone == 0 {
+            rules += "每条换一个角度（比如接住观点、提个好问题、轻松幽默、补充信息、表达不同看法），别重复。"
+        } else {
+            rules += "语气：\(tone)。每条说法不一样。"
+        }
+        let me = Prefs.xReplyPersona.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !me.isEmpty { rules += "\n关于我 / 我的要求（一定照做）：\(me)" }
+        let nums = (1...n).map { "\($0)." }.joined(separator: " ")
+        return """
+        ## 我想回复的帖子
+        @\(p.handle)\(p.name.isEmpty ? "" : "（\(p.name)）")：\(p.text.prefix(1200))
+
+        \(rules)
+        只按「\(nums)」一行一条列出来，不要别的话。
+        """
+    }
+
     private func xReplyAssist(_ post: XPost?) {
         guard catPanel.isVisible, !listener.isListening else { return }
         guard let p = post, !p.text.isEmpty else {
-            xPopup("✍️ 想回复呀～这条我没读到文字，点「想回复」再试试。", [], hold: 4)
+            xPopup("✍️ 想回复呀～这条我没读到文字，等页面加载完再点「想回复」试试。", [], hold: 4)
             return
         }
         xReplyShowing = true
@@ -3211,38 +3495,88 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let who = xbuddy.person(p.handle) {
             ctx.append("[作者 @\(who.handle)：\(who.following == true ? "我已关注" : "我没关注")，我们互动过 \(who.interactions.count) 次]")
         }
-        let prompt = """
-        ## 我想回复的帖子
-        @\(p.handle)\(p.name.isEmpty ? "" : "（\(p.name)）")：\(p.text.prefix(1200))
-
-        帮我想 3 条回复草稿：自然、像真人说话、别营销腔，用帖子的语言，每条不超过 60 字。
-        第 1 条接住观点，第 2 条提个好问题，第 3 条轻松幽默。只按「1. 2. 3.」列出来。
-        """
-        xllm.stream([["role": "user", "content": prompt]], context: ctx.filter { !$0.isEmpty }.joined(separator: "\n"),
+        let want = Prefs.xReplyCount
+        xllm.stream([["role": "user", "content": replyPrompt(p)]], context: ctx.filter { !$0.isEmpty }.joined(separator: "\n"),
                     onDelta: { _ in }, onDone: { [weak self] full, err in
             guard let self = self else { return }
             self.catView.perk(false)
             if let e = err { self.xReplyShowing = false; self.xPopup("✍️ " + e, [], hold: 6); return }
-            let drafts = self.parseDrafts(full ?? "")
-            guard !drafts.isEmpty else { self.xReplyShowing = false; return }
-            var text = "✍️ 回复 @\(p.handle) 可以这样说：\n"
-            for (i, d) in drafts.prefix(3).enumerated() { text += "\n\(i + 1). \(d)" }
-            var acts: [(String, () -> Void)] = []
-            for (i, d) in drafts.prefix(3).enumerated() {
-                acts.append(("复制 \(i + 1)", { [weak self] in
-                    guard let self = self else { return }
-                    let pb = NSPasteboard.general
-                    pb.clearContents(); pb.setString(d, forType: .string)
-                    self.selection.ignoreChangeCount = pb.changeCount
-                    self.lastChange = pb.changeCount
-                    self.xReplyShowing = false
-                    self.xPopup("已复制第 \(i + 1) 条 ✂️ 在回复框里按 ⌘V，改一改再发～\n\n\(d)", [], hold: 3)
-                }))
+            let drafts = Array(self.parseDrafts(full ?? "").prefix(want))
+            guard !drafts.isEmpty else {
+                self.xReplyShowing = false
+                self.xPopup("✍️ 这次没想出来，点「换一批」再试试～", [("换一批", { [weak self] in self?.xReplyAssist(p) })], hold: 8)
+                return
             }
-            acts.append(("换一批", { [weak self] in self?.xReplyAssist(p) }))
-            self.xPopup(text, acts, hold: 40)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 40) { [weak self] in self?.xReplyShowing = false }
+            self.showDrafts(drafts, for: p)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in self?.xReplyShowing = false }
         })
+    }
+
+    /// Reply ideas as tappable rows: one click puts it into X's reply box (or copies it). Never sends.
+    private func showDrafts(_ drafts: [String], for p: XPost) {
+        let how = Prefs.xReplyFill ? "点一条，我帮你填进回复框" : "点一条就复制"
+        let text = "✍️ 回复 @\(p.handle)：\(how)（不会替你发）"
+        let choices: [(String, () -> Void)] = drafts.enumerated().map { (i, d) in
+            ("\(i + 1). \(d)", { [weak self] in self?.useDraft(d, index: i + 1, post: p) })
+        }
+        let acts: [(String, () -> Void)] = [
+            ("换一批", { [weak self] in self?.xReplyAssist(p) }),
+            ("回复设置", { [weak self] in self?.settings.show(tab: 4) })
+        ]
+        if bubble.chatMode && bubble.isShown {
+            var a = acts
+            a.append(("返回", { [weak self] in
+                guard let self = self else { return }
+                self.xGreetingLive = true
+                self.xShow(self.xGreeting(scan: false))
+            }))
+            bubble.setText(text)
+            bubble.setActions(a)
+        } else {
+            bubble.notify(text, actions: acts, hold: 60)
+        }
+        bubble.setChoices(choices, tip: Prefs.xReplyFill ? "点击填进 X 的回复框（只填不发）" : "点击复制")
+        bubble.layout()
+    }
+
+    /// Copy a reply idea; when X's reply box is open, paste it in (⌘V) — the user still presses 回复 themselves.
+    private func useDraft(_ d: String, index: Int, post: XPost) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(d, forType: .string)
+        selection.ignoreChangeCount = pb.changeCount
+        lastChange = pb.changeCount
+        xReplyShowing = false
+        let done: (String) -> Void = { [weak self] msg in
+            guard let self = self else { return }
+            let back: [(String, () -> Void)] = [("换一批", { [weak self] in self?.xReplyAssist(post) })]
+            if self.bubble.chatMode && self.bubble.isShown { self.bubble.setChoices([]); self.bubble.setText(msg); self.bubble.setActions(back); self.bubble.layout() }
+            else { self.bubble.notify(msg, actions: back, hold: 5) }
+        }
+        guard Prefs.xReplyFill, AXIsProcessTrusted(), let app = hub.lastExternalApp, !app.isTerminated,
+              XCompanion.browsers.contains(app.bundleIdentifier ?? "") else {
+            done("已复制第 \(index) 条 ✂️ 在回复框里按 ⌘V，改一改再自己发～")
+            return
+        }
+        let field = hub.reader.focusedField(pid: app.processIdentifier)
+        // X's reply box is a rich editor (reported as a text area); the address bar is a text field: never paste there.
+        let isBox = field?.role == "AXTextArea"
+        guard isBox else {
+            done("已复制第 \(index) 条 ✂️ 点开 X 的回复框按 ⌘V 就行（框开着时点一条我会直接帮你填）")
+            return
+        }
+        // Give the keyboard back to the browser, then paste. Only ⌘V: nothing is ever sent.
+        app.activate(options: [])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            let src = CGEventSource(stateID: .combinedSessionState)
+            let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
+            let up = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
+            down?.flags = .maskCommand
+            up?.flags = .maskCommand
+            down?.post(tap: .cghidEventTap)
+            up?.post(tap: .cghidEventTap)
+            done("✅ 第 \(index) 条已填进回复框，改一改再自己点「回复」～")
+        }
     }
 
     private func xExtra() -> String? {
@@ -3303,42 +3637,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func xDraft() {
         let posts = xbuddy.scanNow()
-        var page: String? = nil
-        if let p = posts.first, !p.text.isEmpty {
-            page = "## 我想回复的帖子\n@\(p.handle)\(p.name.isEmpty ? "" : "（\(p.name)）")：\(p.text.prefix(1200))"
-        } else if bubble.shareTitle != nil && !bubble.sharing {
-            bubble.setShare(title: bubble.shareTitle, on: true)
-        }
-        ask("帮我想 3 条回复这条帖子的草稿：自然、像真人说话、别营销腔，每条不超过 60 字。只按「1. 2. 3.」列出来，我自己决定发不发。",
-            pageOverride: page, extra: xExtra(), after: { [weak self] raw in
-                guard let self = self else { return nil }
-                var drafts: [String] = []
-                for l in raw.components(separatedBy: "\n") {
-                    let t = l.trimmingCharacters(in: .whitespaces)
-                    guard let f = t.first, ("1"..."3").contains(String(f)), t.count > 2 else { continue }
-                    var body = String(t.dropFirst())
-                    while let c = body.first, ".、)）:： ".contains(c) { body.removeFirst() }
-                    body = body.replacingOccurrences(of: "**", with: "").trimmingCharacters(in: CharacterSet(charactersIn: " \"“”"))
-                    if !body.isEmpty { drafts.append(body) }
-                }
-                var acts: [(String, () -> Void)] = []
-                for (i, d) in drafts.prefix(3).enumerated() {
-                    acts.append(("复制 \(i + 1)", { [weak self] in self?.copyDraft(d, index: i + 1) }))
-                }
-                acts.append(("换一批", { [weak self] in self?.xDraft() }))
-                self.bubble.setActions(acts)
-                self.bubble.layout()
-                return nil
-            })
-    }
-
-    private func copyDraft(_ d: String, index: Int) {
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(d, forType: .string)
-        selection.ignoreChangeCount = pb.changeCount
-        lastChange = pb.changeCount
-        bubble.setText("已复制第 \(index) 条 ✂️ 去 X 的回复框里粘贴，改一改再发～我不会替你发。\n\n" + d)
+        xReplyAssist(xbuddy.mainPost ?? posts.first)
     }
 
     /// While the chat bubble is open, keep the share chip pointed at whatever page is in front.
@@ -3405,6 +3704,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         voice.stop()
         highlighter.clear()
+        bubble.setChoices([])
+        bubble.tag = nil
+        if inBubble { bubbleAnswering = true }
         // Decide which earlier turns this question may see (default: only the current page's topic).
         let chipOffPre = inBubble && bubble.chatMode && bubble.shareTitle != nil && !bubble.sharing
         let pageTopic = inBubble && bubble.chatMode && bubble.sharing && Prefs.pageShare ? bubble.shareTitle : nil
@@ -3507,6 +3809,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if inBubble && self.bubble.isShown && gen == self.bubbleGen { self.bubble.setText(shown) }
             }, onDone: { [weak self] t, err in
                 guard let self = self else { return }
+                if inBubble { self.bubbleAnswering = false }
                 let raw = t ?? ""
                 let final = err.map { "⚠️ " + $0 } ?? ContextHub.stripTags(raw)
                 self.store.updateLast(final)
@@ -3616,6 +3919,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if s == lastPrompted && bubble.isShown && !bubble.chatMode { return }
         guard catPanel.isVisible, !listener.isListening else { return }
         if bubble.chatMode && bubble.hasDraft { return }   // don't interrupt typing
+        // Clicking into a post can look like a selection: never let it replace the fresh post card.
+        if Date().timeIntervalSince(xCardAt) < 4 && bubble.isShown { return }
         lastPrompted = s
         bubbleGen += 1   // older streaming answers stop writing into the bubble
         catView.perk(true)

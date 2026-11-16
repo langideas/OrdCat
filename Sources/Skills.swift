@@ -201,12 +201,13 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
         let v = NSView(frame: f)
         let head = NSTextField(labelWithString: "有这些情况时弹窗提醒我：")
         head.font = .systemFont(ofSize: 12, weight: .medium)
-        head.frame = NSRect(x: 16, y: 214, width: 300, height: 18)
+        head.frame = NSRect(x: 16, y: 216, width: 300, height: 18)
         v.addSubview(head)
         let items: [(String, String, CGFloat, CGFloat)] = [
-            ("signal", "📡 命中我的信号", 20, 190), ("spam", "🚫 营销号 / 广告", 240, 190),
-            ("water", "🗑 帖子下的水评", 20, 166), ("known", "👋 互动过的人出现", 240, 166),
-            ("follow", "🆕 我关注的人发帖", 20, 142), ("reply", "✍️ 点回复时给回复建议", 240, 142)
+            ("autopost", "📝 点进帖子自动弹分析", 20, 194), ("reply", "✍️ 点回复时给回复建议", 240, 194),
+            ("signal", "📡 命中我的信号", 20, 172), ("spam", "🚫 营销号 / 广告", 240, 172),
+            ("water", "🗑 帖子下的水评", 20, 150), ("known", "👋 互动过的人出现", 240, 150),
+            ("follow", "🆕 我关注的人发帖", 20, 128)
         ]
         for (k, t, x, y) in items {
             let b = NSButton(checkboxWithTitle: t, target: self, action: #selector(xAlertToggled(_:)))
@@ -222,30 +223,35 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
             l.frame = NSRect(x: 4, y: y + 3, width: 84, height: 18)
             v.addSubview(l)
         }
-        lab("关键词信号", 108)
-        xWords.frame = NSRect(x: 94, y: 108, width: 356, height: 24)
+        let rs = NSButton(title: "回复建议设置…", target: self, action: #selector(replySettings))
+        rs.bezelStyle = .rounded
+        rs.controlSize = .small
+        rs.frame = NSRect(x: 236, y: 124, width: 140, height: 24)
+        v.addSubview(rs)
+        lab("关键词信号", 98)
+        xWords.frame = NSRect(x: 94, y: 98, width: 356, height: 24)
         xWords.placeholderString = "例如：AI, 融资, 空投, OpenAI（逗号分隔）"
         xWords.stringValue = Prefs.xSignalWords
         xWords.delegate = self
         v.addSubview(xWords)
-        lab("特别关注", 78)
-        xAccounts.frame = NSRect(x: 94, y: 78, width: 356, height: 24)
+        lab("特别关注", 70)
+        xAccounts.frame = NSRect(x: 94, y: 70, width: 356, height: 24)
         xAccounts.placeholderString = "例如：@elonmusk, @sama（TA 们一出现就提醒）"
         xAccounts.stringValue = Prefs.xSignalAccounts
         xAccounts.delegate = self
         v.addSubview(xAccounts)
-        lab("提醒频率", 46)
+        lab("提醒频率", 40)
         xGap.removeAllItems()
         for g in gapOptions { xGap.addItem(withTitle: g.0) }
         let cur = gapOptions.enumerated().min { abs($0.element.1 - Prefs.xAlertGap) < abs($1.element.1 - Prefs.xAlertGap) }?.offset ?? 1
         xGap.selectItem(at: cur)
         xGap.target = self
         xGap.action = #selector(gapChanged)
-        xGap.frame = NSRect(x: 92, y: 44, width: 220, height: 26)
+        xGap.frame = NSRect(x: 92, y: 38, width: 220, height: 26)
         v.addSubview(xGap)
         xStats.font = .systemFont(ofSize: 10.5)
         xStats.textColor = .secondaryLabelColor
-        xStats.frame = NSRect(x: 16, y: 6, width: 220, height: 34)
+        xStats.frame = NSRect(x: 16, y: 4, width: 220, height: 32)
         v.addSubview(xStats)
         let check = NSButton(title: "检查刷推", target: self, action: #selector(checkX))
         check.frame = NSRect(x: 240, y: 6, width: 104, height: 30)
@@ -282,6 +288,53 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
 
     @objc private func xAlertToggled(_ b: NSButton) {
         Prefs.setXAlert(b.identifier?.rawValue ?? "", b.state == .on)
+    }
+
+    /// 回复建议的自定义：几条、语气、长度、语言、关于我，以及点一条后是否直接填进回复框。
+    @objc private func replySettings() {
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 236))
+        func lab(_ t: String, _ y: CGFloat) {
+            let l = NSTextField(labelWithString: t)
+            l.alignment = .right
+            l.frame = NSRect(x: 0, y: y + 3, width: 70, height: 18)
+            v.addSubview(l)
+        }
+        func pop(_ items: [String], _ sel: Int, _ y: CGFloat) -> NSPopUpButton {
+            let p = NSPopUpButton(frame: NSRect(x: 76, y: y, width: 220, height: 26))
+            p.addItems(withTitles: items)
+            p.selectItem(at: sel)
+            v.addSubview(p)
+            return p
+        }
+        lab("几条", 206); let count = pop(["1 条", "2 条", "3 条", "4 条", "5 条"], Prefs.xReplyCount - 1, 204)
+        lab("语气", 174); let tone = pop(Prefs.xReplyTones, Prefs.xReplyTone, 172)
+        lab("长度", 142); let len = pop(Prefs.xReplyLengths.map { $0.0 }, Prefs.xReplyLength, 140)
+        lab("语言", 110); let lang = pop(Prefs.xReplyLangs, Prefs.xReplyLang, 108)
+        lab("关于我", 76)
+        let me = NSTextField(frame: NSRect(x: 78, y: 48, width: 296, height: 52))
+        me.placeholderString = "比如：我做量化交易，用第一人称，别用 emoji，多给干货"
+        me.stringValue = Prefs.xReplyPersona
+        me.cell?.wraps = true
+        me.cell?.isScrollable = false
+        me.usesSingleLineMode = false
+        v.addSubview(me)
+        let fill = NSButton(checkboxWithTitle: "点一条直接填进 X 的回复框（只填不发，你自己点回复）", target: nil, action: nil)
+        fill.state = Prefs.xReplyFill ? .on : .off
+        fill.frame = NSRect(x: 0, y: 14, width: 380, height: 20)
+        v.addSubview(fill)
+        let a = NSAlert()
+        a.messageText = "回复建议设置"
+        a.informativeText = "点回复框或「想回复」时，小猫按这里的要求给你想回复。"
+        a.accessoryView = v
+        a.addButton(withTitle: "保存")
+        a.addButton(withTitle: "取消")
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        Prefs.xReplyCount = count.indexOfSelectedItem + 1
+        Prefs.xReplyTone = max(0, tone.indexOfSelectedItem)
+        Prefs.xReplyLength = max(0, len.indexOfSelectedItem)
+        Prefs.xReplyLang = max(0, lang.indexOfSelectedItem)
+        Prefs.xReplyPersona = me.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        Prefs.xReplyFill = fill.state == .on
     }
 
     @objc private func gapChanged() {

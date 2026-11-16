@@ -189,6 +189,16 @@ final class ScreenReader {
         return (nil, barURL)
     }
 
+    /// Cheap re-read of a web area's address (one AX call), so page changes inside X are noticed at once.
+    /// Returns nil when the element went stale (tab closed, page replaced): then probe again.
+    func url(of web: AXUIElement) -> String? {
+        AXUIElementSetMessagingTimeout(web, 0.12)
+        guard let role = str(web, kAXRoleAttribute as String), role == "AXWebArea" else { return nil }
+        guard let v = attr(web, "AXURL") else { return "" }
+        if let u = v as? URL { return u.absoluteString }
+        return v as? String ?? ""
+    }
+
     /// The text box that has keyboard focus in an app (role, label/placeholder, screen rect). Never reads its content.
     func focusedField(pid: pid_t) -> (role: String, hint: String, rect: CGRect)? {
         let app = AXUIElementCreateApplication(pid)
