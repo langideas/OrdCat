@@ -60,9 +60,40 @@ enum Keychain {
     /// Read once per launch: every Keychain read can make macOS ask for the login password.
     private static var cache: [String: String] = [:]
     private static let lock = NSLock()
+    /// Services being read in the background right now (see prefetch()).
+    private static var inFlight = Set<String>()
+    static let allServices = ["app.ordcat.apikey", "app.ordcat.ttskey", "app.ordcat.visionkey",
+                              "app.ordcat.sttkey", "app.ordcat.session"]
+    /// Read every key on a background queue at launch. If macOS asks for the keychain password
+    /// (it can after an update), the cat still starts and stays responsive while the prompt waits.
+    static func prefetch() {
+        lock.lock()
+        let todo = allServices.filter { cache[$0] == nil && !inFlight.contains($0) }
+        inFlight.formUnion(todo)
+        lock.unlock()
+        guard !todo.isEmpty else { return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            for svc in todo {
+                let v = read(svc)
+                lock.lock(); if cache[svc] == nil { cache[svc] = v }; inFlight.remove(svc); lock.unlock()
+            }
+            DispatchQueue.main.async { NotificationCenter.default.post(name: Keychain.loaded, object: nil) }
+        }
+    }
+    static let loaded = Notification.Name("OrdCatKeychainLoaded")
     static func get(service: String = Keychain.service) -> String {
-        lock.lock(); let hit = cache[service]; lock.unlock()
+        lock.lock(); let hit = cache[service]; let waiting = inFlight.contains(service); lock.unlock()
         if let h = hit { return h }
+        // Never freeze the UI on a keychain prompt: the background read fills it in shortly.
+        if waiting && Thread.isMainThread { return "" }
+        if waiting {
+            for _ in 0..<600 {   // up to 60 s on a background thread
+                Thread.sleep(forTimeInterval: 0.1)
+                lock.lock(); let h = cache[service]; lock.unlock()
+                if let h = h { return h }
+            }
+            return ""
+        }
         let v = read(service)
         lock.lock(); cache[service] = v; lock.unlock()
         return v
@@ -2776,6 +2807,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let catSize = NSSize(width: 300, height: 330)
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        Keychain.prefetch()
         // Only one cat at a time: quit any other (older) OrdCat that is still running.
         let me = ProcessInfo.processInfo.processIdentifier
         for other in NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "app.ordcat.OrdCat")
