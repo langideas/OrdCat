@@ -55,10 +55,19 @@ final class DesktopAgent {
 
     /// Does this chat message ask the cat to operate the computer?
     static func isTask(_ text: String) -> Bool {
-        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if t.hasPrefix("/做") || t.hasPrefix("帮我操作") { return true }
-        return t.range(of: "^(请)?(帮我|替我|给我)(在|用|打开|点|点击|新建|关闭|切换|输入|填|搜索|操作|把)",
-                       options: .regularExpression) != nil
+        guard t.count <= 80, !t.contains("？") || t.count < 30 else { return false }
+        // Drop polite openers: 你/小猫/能不能/可以/麻烦/请 … so「你能帮我打开备忘录吗」counts too.
+        t = t.replacingOccurrences(of: "^(小猫|喵)?[，, ]*(你)?(能不能|能|可以|可不可以|麻烦|请)?(你)?", with: "", options: .regularExpression)
+        t = t.replacingOccurrences(of: "(吗|嘛|呀|吧|好吗|好不好)?[？?！!。.～~]*$", with: "", options: .regularExpression)
+        let verbs = "(打开|开一下|点开|启动|运行|新建|写一条|记一条|关闭|关掉|切换到|切到|在.{1,10}里输入|填写|搜索|搜一下|点击|点一下|操作)"
+        let lead = "^(帮我|替我|给我|帮忙|你去|去)?"
+        let hit = t.range(of: lead + verbs, options: .regularExpression) != nil
+            || t.range(of: "^(帮我|替我|给我|帮忙)(在|用).{1,12}?" + verbs, options: .regularExpression) != nil
+        // Not a question about ideas or the page ("帮我打开思路", "打开方式是什么").
+        if hit && t.range(of: "(思路|脑洞|方式是|怎么打开|为什么|是什么|心扉)", options: .regularExpression) == nil { return true }
+        return false
     }
 
     // MARK: run

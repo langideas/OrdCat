@@ -3888,6 +3888,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                      pageOverride: String? = nil, extra: String? = nil, after: ((String) -> String?)? = nil) {
         xGreetingLive = false
         // 技能「帮我操作电脑」: "帮我……" runs the desktop agent instead of a plain chat answer.
+        if images.isEmpty && pageOverride == nil && !Prefs.agentOn && DesktopAgent.isTask(text) {
+            catPopup("🤖 这件事要「帮我操作电脑」技能来做，它现在是关着的。去 设置 → 技能 打开开关，我就能替你动手。",
+                     [("打开技能", { [weak self] in self?.settings.show(tab: 4) })], hold: 8)
+            return
+        }
         if images.isEmpty && pageOverride == nil && Prefs.agentOn && DesktopAgent.isTask(text) {
             if Billing.isUnlocked("agent") {
                 store.append(ChatMessage(role: "user", text: text, imageNames: [], date: Date()))
