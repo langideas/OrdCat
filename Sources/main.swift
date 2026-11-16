@@ -196,7 +196,31 @@ final class LLM {
     private var task: Task<Void, Never>?
     func cancel() { task?.cancel(); task = nil }
 
-    func stream(_ history: [[String: Any]], context: String? = nil,
+    /// Seconds the provider asks us to wait ("try again in 1.53s" / "in 2m3s" / Retry-After header).
+    static func retryDelay(_ text: String, header: String?) -> Double {
+        if let h = header, let v = Double(h.trimmingCharacters(in: .whitespaces)) { return max(1, v) }
+        if let r = text.range(of: #"try again in\s*(?:(\d+)m)?\s*([\d.]+)\s*(ms|s)"#, options: [.regularExpression, .caseInsensitive]) {
+            let frag = String(text[r])
+            let nums = frag.split(whereSeparator: { !"0123456789.".contains($0) }).compactMap { Double($0) }
+            var sec = 0.0
+            if frag.contains("m") && nums.count >= 2 && !frag.hasSuffix("ms") { sec = nums[0] * 60 + nums[1] }
+            else if let n = nums.last { sec = frag.hasSuffix("ms") ? n / 1000 : n }
+            return max(1, sec + 0.5)
+        }
+        return 8
+    }
+
+    /// The request alone is larger than the per-minute limit, so waiting will not help without trimming.
+    static func requestTooBig(_ text: String) -> Bool {
+        func num(_ key: String) -> Int? {
+            guard let r = text.range(of: key + #"\s*(\d+)"#, options: .regularExpression) else { return nil }
+            return Int(text[r].filter(\.isNumber))
+        }
+        if let lim = num("Limit"), let req = num("Requested") { return req * 10 > lim * 8 }
+        return text.localizedCaseInsensitiveContains("too large")
+    }
+
+    func stream(_ history: [[String: Any]], context: String? = nil, attempt: Int = 0,
                 onDelta: @escaping (String) -> Void,
                 onDone: @escaping (String?, String?) -> Void) {
         cancel()
@@ -228,9 +252,30 @@ final class LLM {
                     var errText = ""
                     for try await line in bytes.lines {
                         errText += line
-                        if errText.count > 400 { break }
+                        if errText.count > 600 { break }
                     }
-                    let msg = "模型那边返回了错误（\(h.statusCode)）：\(errText.prefix(220))"
+                    // Per-minute token quota (e.g. Groq free tier: "Limit 8000, Used 4412, Requested 3671").
+                    // Wait the time the provider asks for and try again quietly, with a smaller context if needed.
+                    if h.statusCode == 429 || h.statusCode == 413, attempt < 2, !Task.isCancelled {
+                        let wait = LLM.retryDelay(errText, header: h.value(forHTTPHeaderField: "retry-after"))
+                        if wait <= 25 {
+                            let tooBig = LLM.requestTooBig(errText) || h.statusCode == 413
+                            DispatchQueue.main.async {
+                                onDelta("模型这分钟的额度用满了，小猫等 \(Int(wait.rounded(.up))) 秒自动再试…")
+                            }
+                            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                            if Task.isCancelled { return }
+                            let ctx = tooBig || attempt == 1 ? context.map { String($0.prefix($0.count / 2)) } : context
+                            let hist = tooBig ? Array(history.suffix(4)) : history
+                            DispatchQueue.main.async {
+                                self.stream(hist, context: ctx, attempt: attempt + 1, onDelta: onDelta, onDone: onDone)
+                            }
+                            return
+                        }
+                    }
+                    let msg = h.statusCode == 429
+                        ? "模型那边的免费额度暂时用满了（每分钟 token 上限），不是小猫坏了。等一分钟再问，或在 设置 → 模型 换一个额度更高的模型。"
+                        : "模型那边返回了错误（\(h.statusCode)）：\(errText.prefix(220))"
                     DispatchQueue.main.async { onDone(nil, msg) }
                     return
                 }
