@@ -20,7 +20,7 @@
     "validate": "https://api.lemonsqueezy.com/v1/licenses/validate"
   },
   "account": {
-    "supabaseURL": "",
+    "supabaseURL": "https://edmfdczdadfaafwkhohj.supabase.co",
     "anonKey": ""
   }
 }
