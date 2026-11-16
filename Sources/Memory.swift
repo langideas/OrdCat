@@ -418,7 +418,7 @@ final class ContextHub {
 
     /// Read the window the user shared, once, because they asked. Chat apps are rebuilt by position
     /// (so names are known); pictures and video frames go to a vision model only when useful.
-    func pageContext(question: String = "", budgetChars: Int = 9000,
+    func pageContext(question: String = "", budgetChars: Int = 6500,
                      progress: ((String) -> Void)? = nil) async -> PageContext? {
         guard let app = lastExternalApp, !app.isTerminated else { return nil }
         let bid = app.bundleIdentifier ?? ""
@@ -445,7 +445,15 @@ final class ContextHub {
         if isChat || (vision != nil && (wantsMedia || thin)) {
             shot = await reader.captureWindowImage(pid: pid, maxWidth: 1800)
         }
-        var body = c.plainText
+        // Numbered lines: what is on screen right now first (that is what "重点" is about), so the model can
+        // point at a line with [[el:N]] and OrdCat rings the exact spot.
+        let (numbered, els) = ContextHub.numberedLines(c, budgetChars: budgetChars)
+        var body = numbered.isEmpty ? c.plainText : numbered
+        await MainActor.run {
+            self.groundingElements = els
+            self.groundingShot = nil
+            self.groundingApp = app
+        }
         var layout = ""
         if isChat, let (img, frame) = shot {
             let o = reader.ocr(img, frame: frame, accurate: true)
@@ -493,7 +501,10 @@ final class ContextHub {
         窗口标题：\(c.windowTitle)
         """
         if !layout.isEmpty { text += "\n" + MediaHub.chatGuide + "\n聊天内容（从上到下）：\n" + body }
-        else { text += "\n页面文字（按从上到下顺序）：\n" + body }
+        else {
+            text += "\n页面文字（[编号] 内容；⭐ 表示此刻在屏幕上能看到的部分，用户问「这页/重点」时以 ⭐ 部分为主）：\n" + body
+            text += "\n\n提到页面上的某一处（比如每条重点）时，在那句话末尾写上它的编号，格式 [[el:编号]]，例如「价格涨了 [[el:12]]」。OrdCat 会在屏幕上把那里圈出来。只写真实存在的编号。"
+        }
         if !media.isEmpty { text += "\n\n" + media }
         if !sound.isEmpty { text += "\n\n" + sound }
         if !images.isEmpty { text += "\n\n（附上了这个窗口的截图\(images.count > 1 ? "，共 \(images.count) 帧" : "")，可以直接看图回答。）" }
@@ -594,8 +605,118 @@ final class ContextHub {
             self.lastAssembled = final
             self.groundingElements = elements
             self.groundingShot = shotGeo.map { (frame: $0.0, size: $0.1) }
+            self.groundingApp = self.lastExternalApp
         }
         return AssembledContext(text: final, image: image, tokens: estimateTokens(final))
+    }
+
+    /// The app the grounding elements came from (to re-find them after a scroll).
+    var groundingApp: NSRunningApplication?
+
+    /// Page text as "[n] line", visible-on-screen lines first and starred, within a character budget.
+    static func numberedLines(_ c: ContextCard, budgetChars: Int) -> (String, [ScreenElement]) {
+        let screens = NSScreen.screens.map { r -> CGRect in
+            let h = NSScreen.screens.first?.frame.height ?? 0
+            return CGRect(x: r.frame.minX, y: h - r.frame.maxY, width: r.frame.width, height: r.frame.height)
+        }
+        let win = c.windowRect
+        func visible(_ e: ScreenElement) -> Bool {
+            let r = e.rect
+            guard r.width > 2, r.height > 2 else { return false }
+            if win != .zero && !win.intersects(r) { return false }
+            return screens.contains { $0.intersects(r) }
+        }
+        var seen = Set<String>()
+        var vis: [ScreenElement] = [], rest: [ScreenElement] = []
+        for e in c.elements {
+            let t = e.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard t.count >= 2, seen.insert(t).inserted else { continue }
+            if visible(e) { vis.append(e) } else { rest.append(e) }
+        }
+        var out: [ScreenElement] = []
+        var lines: [String] = []
+        var used = 0
+        for (group, star) in [(vis, true), (rest, false)] {
+            for e in group {
+                var t = e.text.replacingOccurrences(of: "\n", with: " ")
+                if t.count > 300 { t = String(t.prefix(300)) + "…" }
+                let line = "[\(out.count + 1)]\(star ? "⭐" : "") \(t)"
+                if used + line.count > budgetChars { lines.append("…（其余内容省略）"); return (lines.joined(separator: "\n"), out) }
+                used += line.count + 1
+                lines.append(line)
+                out.append(e)
+            }
+        }
+        return (lines.joined(separator: "\n"), out)
+    }
+
+    /// Character-bigram overlap between two strings (0…1), for matching an answer line to page text.
+    static func similarity(_ a: String, _ b: String) -> Double {
+        func grams(_ s: String) -> Set<String> {
+            let c = Array(s.lowercased().filter { !$0.isWhitespace && !$0.isPunctuation && !$0.isSymbol })
+            guard c.count >= 2 else { return Set(c.map { String($0) }) }
+            return Set((0..<(c.count - 1)).map { String(c[$0]) + String(c[$0 + 1]) })
+        }
+        let ga = grams(a), gb = grams(b)
+        guard !ga.isEmpty, !gb.isEmpty else { return 0 }
+        return Double(ga.intersection(gb).count) / Double(min(ga.count, gb.count))
+    }
+
+    /// When the model gave no tags: match each point of the answer to the on-screen line it talks about.
+    func fallbackTargets(for reply: String, limit: Int = 4) -> [ScreenElement] {
+        let parts = reply.components(separatedBy: CharacterSet(charactersIn: "\n。；;"))
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " •-*·0123456789.、：:")) }
+            .filter { $0.count >= 6 }
+        var picked: [ScreenElement] = []
+        for p in parts {
+            var best: (Double, ScreenElement)?
+            for e in groundingElements where e.text.count >= 4 && !picked.contains(where: { $0.rect == e.rect }) {
+                let sc = ContextHub.similarity(p, e.text)
+                if sc > (best?.0 ?? 0.34) { best = (sc, e) }
+            }
+            if let b = best { picked.append(b.1) }
+            if picked.count >= limit { break }
+        }
+        return picked
+    }
+
+    /// Elements named by [[el:N]] tags.
+    func taggedElements(in reply: String) -> [ScreenElement] {
+        guard let re = try? NSRegularExpression(pattern: "\\[\\[el:\\s*([0-9]+)\\s*\\]\\]") else { return [] }
+        let ns = reply as NSString
+        var out: [ScreenElement] = []
+        for m in re.matches(in: reply, range: NSRange(location: 0, length: ns.length)) {
+            let i = (Int(ns.substring(with: m.range(at: 1))) ?? 0) - 1
+            if i >= 0 && i < groundingElements.count, !out.contains(where: { $0.rect == groundingElements[i].rect }) {
+                out.append(groundingElements[i])
+            }
+        }
+        return out
+    }
+
+    /// Re-read the page right before drawing, so rings land where the text is now (the user may have scrolled
+    /// while the answer was streaming). Elements that are no longer on screen are left out.
+    func relocate(_ targets: [ScreenElement]) async -> [CGRect] {
+        guard !targets.isEmpty else { return [] }
+        let screens = NSScreen.screens.map { r -> CGRect in
+            let h = NSScreen.screens.first?.frame.height ?? 0
+            return CGRect(x: r.frame.minX, y: h - r.frame.maxY, width: r.frame.width, height: r.frame.height)
+        }
+        func onScreen(_ r: CGRect, _ win: CGRect) -> Bool {
+            r.width > 2 && r.height > 2 && (win == .zero || win.intersects(r)) && screens.contains { $0.intersects(r) }
+        }
+        guard let app = groundingApp ?? lastExternalApp, !app.isTerminated,
+              let c = await reader.capture(app: app, deep: true, wantScreenshot: false, maxNodes: 4000, axBudget: 0.6) else {
+            return targets.map { $0.rect }
+        }
+        var out: [CGRect] = []
+        for t in targets {
+            let same = c.elements.filter { $0.text == t.text && onScreen($0.rect, c.windowRect) }
+            if let near = same.min(by: { hypot($0.rect.midY - t.rect.midY, $0.rect.midX - t.rect.midX) < hypot($1.rect.midY - t.rect.midY, $1.rect.midX - t.rect.midX) }) {
+                out.append(near.rect.intersection(c.windowRect == .zero ? near.rect : c.windowRect))
+            }
+        }
+        return out.filter { !$0.isNull && $0.height > 2 }
     }
 
     /// Resolve [[el:N]] / [[pt:x,y]] / [[img:x,y]] tags into global top-left rects.

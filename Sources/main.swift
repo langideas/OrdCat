@@ -4017,9 +4017,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard err == nil else { return }
                 self.hub.recordChat(user: text, reply: final)
                 self.autoTitle(user: text, reply: final)
-                if usePerception && Prefs.highlight {
-                    let rects = self.hub.resolveTargets(in: raw)
-                    if !rects.isEmpty { self.highlighter.show(rects, label: "在这里") }
+                if (usePerception || sharePage) && Prefs.highlight {
+                    // Rings go exactly on the lines the answer talks about: tagged lines first, otherwise the
+                    // on-screen line each point matches. Positions are re-read right before drawing.
+                    var targets = self.hub.taggedElements(in: raw)
+                    let pointish = ["重点", "关键", "在哪", "哪里", "哪儿", "标", "圈", "指", "找"].contains { text.contains($0) }
+                    if targets.isEmpty && (sharePage || pointish) { targets = self.hub.fallbackTargets(for: final) }
+                    let extraRects = self.hub.resolveTargets(in: raw.replacingOccurrences(of: "\\[\\[el:[^\\]]*\\]\\]", with: "", options: .regularExpression))
+                    Task { @MainActor in
+                        let rects = await self.hub.relocate(targets) + extraRects
+                        if !rects.isEmpty { self.highlighter.show(rects, label: "在这里", seconds: 10, limit: 6) }
+                    }
                 }
                 var said = final
                 if let a = after, let shown = a(raw) {
