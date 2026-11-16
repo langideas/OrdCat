@@ -112,7 +112,6 @@ enum Keychain {
 
 enum Prefs {
     static let d = UserDefaults.standard
-    static var settingsZoom: Double { get { d.object(forKey: "settingsZoom") as? Double ?? 1.0 } set { d.set(newValue, forKey: "settingsZoom") } }
     private static func bool(_ k: String, _ def: Bool) -> Bool { d.object(forKey: k) as? Bool ?? def }
     static var base: String {
         get { d.string(forKey: "base") ?? kPresets[0].base }
@@ -238,6 +237,7 @@ final class LLM {
         if !key.isEmpty { req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
         var system = RemoteConfig.shared.systemPrompt ?? kSystemPrompt
         if let c = context, !c.isEmpty { system += "\n\n" + c }
+        if L10n.english { system += "\n\nThe user's interface language is English: reply in English unless they write to you in another language or ask otherwise." }
         let messages: [[String: Any]] = [["role": "system", "content": system]] + history
         var body: [String: Any] = ["model": Prefs.model, "messages": messages, "stream": true, "max_tokens": 1500]
         // Reasoning models (e.g. gpt-oss on Groq) would otherwise spend the budget thinking.
@@ -1236,7 +1236,10 @@ final class Bubble: NSObject {
         card.material = .hudWindow
         card.state = .active
         card.blendingMode = .behindWindow
-        card.appearance = NSAppearance(named: .vibrantDark)
+        card.appearance = Theme.bubbleAppearance
+        NotificationCenter.default.addObserver(forName: Theme.changed, object: nil, queue: .main) { [weak self] _ in
+            self?.applyTheme()
+        }
         card.wantsLayer = true
         card.layer?.cornerRadius = 20
         card.layer?.masksToBounds = true
@@ -1263,7 +1266,7 @@ final class Bubble: NSObject {
         textView.isEditable = false
         textView.isSelectable = true
         textView.drawsBackground = false
-        textView.textColor = .white
+        textView.textColor = Theme.fg
         textView.font = .systemFont(ofSize: 14)
         textView.textContainerInset = .zero
         textView.textContainer?.lineFragmentPadding = 0
@@ -1307,9 +1310,9 @@ final class Bubble: NSObject {
         shareChip.isBordered = false
         shareChip.wantsLayer = true
         shareChip.layer?.cornerRadius = 11
-        shareChip.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+        shareChip.layer?.backgroundColor = Theme.fg.withAlphaComponent(0.10).cgColor
         shareChip.font = .systemFont(ofSize: 11)
-        shareChip.contentTintColor = .white
+        shareChip.contentTintColor = Theme.fg
         shareChip.alignment = .left
         shareChip.lineBreakMode = .byTruncatingTail
         shareChip.target = self
@@ -1373,6 +1376,23 @@ final class Bubble: NSObject {
     }
 
     /// Full-width tappable rows under the text (reply ideas). Pass [] to remove them.
+    /// Light / dark switched: recolour what is already on screen.
+    private func applyTheme() {
+        card.appearance = Theme.bubbleAppearance
+        textView.textColor = Theme.fg
+        if let ts = textView.textStorage, ts.length > 0 {
+            ts.addAttribute(.foregroundColor, value: Theme.fg, range: NSRange(location: 0, length: ts.length))
+        }
+        shareChip.layer?.backgroundColor = Theme.fg.withAlphaComponent(0.10).cgColor
+        shareChip.contentTintColor = Theme.fg
+        for b in choiceButtons {
+            b.layer?.backgroundColor = Theme.fg.withAlphaComponent(0.09).cgColor
+            let at = NSMutableAttributedString(attributedString: b.attributedTitle)
+            at.addAttribute(.foregroundColor, value: Theme.fg, range: NSRange(location: 0, length: at.length))
+            b.attributedTitle = at
+        }
+    }
+
     func setChoices(_ list: [(String, () -> Void)], tip: String = "") {
         for b in choiceButtons { b.removeFromSuperview() }
         choiceButtons = []
@@ -1385,11 +1405,11 @@ final class Bubble: NSObject {
             b.isBordered = false
             b.wantsLayer = true
             b.layer?.cornerRadius = 9
-            b.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.09).cgColor
+            b.layer?.backgroundColor = Theme.fg.withAlphaComponent(0.09).cgColor
             b.layer?.borderWidth = 1
             b.layer?.borderColor = kAmber.withAlphaComponent(0.35).cgColor
             b.attributedTitle = NSAttributedString(string: item.0, attributes: [
-                .font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.white, .paragraphStyle: para])
+                .font: NSFont.systemFont(ofSize: 13), .foregroundColor: Theme.fg, .paragraphStyle: para])
             b.cell?.wraps = true
             b.cell?.lineBreakMode = .byWordWrapping
             (b.cell as? NSButtonCell)?.imageScaling = .scaleNone
@@ -1988,6 +2008,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let sttStatus = NSTextField(wrappingLabelWithString: "")
     private var tabsView: NSTabView?
     private let hotkeyPopup = NSPopUpButton()
+    private let appearancePopup = NSPopUpButton()
+    private let languagePopup = NSPopUpButton()
     private var checks: [String: NSButton] = [:]
     private let axStatus = NSTextField(labelWithString: "")
     private let llm = LLM()
@@ -2147,32 +2169,12 @@ final class SettingsController: NSObject, NSWindowDelegate {
         topSeg.selectedSegment = 0
         root.addSubview(topSeg)
         segControl = topSeg
-        let tabs = NSTabView(frame: NSRect(x: 8, y: 40, width: root.bounds.width - 16,
-                                           height: root.bounds.height - topSeg.frame.height - 60))
+        let tabs = NSTabView(frame: NSRect(x: 8, y: 8, width: root.bounds.width - 16,
+                                           height: root.bounds.height - topSeg.frame.height - 28))
         tabs.tabViewType = .noTabsNoBorder
         tabsView = tabs
         tabs.autoresizingMask = [.width, .height]
         root.addSubview(tabs)
-        // Bottom bar: interface size.
-        let zl = NSTextField(labelWithString: "界面大小")
-        zl.font = .systemFont(ofSize: 12)
-        zl.textColor = .secondaryLabelColor
-        zl.frame = NSRect(x: 16, y: 12, width: 60, height: 18)
-        root.addSubview(zl)
-        let zoom = NSSegmentedControl(labels: ["小", "标准", "大", "特大"], trackingMode: .selectOne,
-                                      target: self, action: #selector(zoomChanged(_:)))
-        zoom.font = .systemFont(ofSize: 12)
-        zoom.frame = NSRect(x: 78, y: 8, width: 200, height: 24)
-        zoom.selectedSegment = zoomSteps.firstIndex(of: Prefs.settingsZoom) ?? 1
-        root.addSubview(zoom)
-        let tip = NSTextField(labelWithString: "可拖动窗口边缘调大小，内容放不下时可上下左右滚动")
-        tip.font = .systemFont(ofSize: 11)
-        tip.textColor = .tertiaryLabelColor
-        tip.frame = NSRect(x: 290, y: 12, width: root.bounds.width - 300, height: 16)
-        tip.autoresizingMask = [.width]
-        tip.lineBreakMode = .byTruncatingTail
-        root.addSubview(tip)
-
         // Tab 1: model
         let t1 = NSTabViewItem(identifier: "model")
         t1.label = "模型（BYOM）"
@@ -2282,7 +2284,22 @@ final class SettingsController: NSObject, NSWindowDelegate {
         // Tab 2: cat
         let t2 = NSTabViewItem(identifier: "cat")
         t2.label = "小猫"
-        let v2 = NSView(frame: NSRect(x: 0, y: 0, width: 470, height: 360))
+        let v2 = NSView(frame: NSRect(x: 0, y: 0, width: 470, height: 400))
+        // Whole-app appearance and interface language.
+        label("外观", NSRect(x: 10, y: 365, width: 50, height: 20), in: v2)
+        appearancePopup.addItems(withTitles: ["跟随系统", "浅色", "深色"])
+        appearancePopup.selectItem(at: max(0, min(2, Theme.mode)))
+        appearancePopup.target = self
+        appearancePopup.action = #selector(appearanceChanged)
+        appearancePopup.frame = NSRect(x: 66, y: 360, width: 140, height: 26)
+        v2.addSubview(appearancePopup)
+        label("语言", NSRect(x: 220, y: 365, width: 50, height: 20), in: v2)
+        languagePopup.addItems(withTitles: ["中文", "English"])
+        languagePopup.selectItem(at: L10n.english ? 1 : 0)
+        languagePopup.target = self
+        languagePopup.action = #selector(languageChanged)
+        languagePopup.frame = NSRect(x: 276, y: 360, width: 140, height: 26)
+        v2.addSubview(languagePopup)
         check("voiceChat", "开启语音对话（按快捷键或 🎤 和小猫说话）", y: 318, in: v2)
         label("快捷键", NSRect(x: 30, y: 287, width: 60, height: 20), in: v2)
         for h in kHotKeys { hotkeyPopup.addItem(withTitle: h.title) }
@@ -2450,18 +2467,26 @@ final class SettingsController: NSObject, NSWindowDelegate {
         tabs.addTabViewItem(tAcc)
 
         // Every page scrolls both ways and follows the interface size.
+        // Swapping a tab's view detaches the old one, so wrap first and re-attach the page afterwards
+        // (this is what left the first page blank).
         for item in tabs.tabViewItems {
             guard let content = item.view else { continue }
-            item.view = scrollable(content)
+            let sv = scrollable(content)
+            item.view = sv
+            if let doc = sv.documentView, content.superview !== doc {
+                content.removeFromSuperview()
+                content.frame.origin = .zero
+                doc.addSubview(content)
+            }
         }
         w.delegate = self
         window = w
+        fitPages()
     }
 
     private var segControl: NSSegmentedControl?
     private var pageScrolls: [NSScrollView] = []
     private var restoredFrame = false
-    private let zoomSteps: [Double] = [0.9, 1.0, 1.15, 1.3]
 
     /// Top-left anchored, scrollable, zoomable wrapper around a fixed-size settings page.
     private func scrollable(_ content: NSView) -> NSView {
@@ -2472,14 +2497,13 @@ final class SettingsController: NSObject, NSWindowDelegate {
         let sv = NSScrollView(frame: NSRect(x: 0, y: 0, width: 520, height: 400))
         sv.documentView = doc
         sv.hasVerticalScroller = true
-        sv.hasHorizontalScroller = true
+        sv.hasHorizontalScroller = false
         sv.autohidesScrollers = true
         sv.drawsBackground = false
         sv.borderType = .noBorder
         sv.allowsMagnification = true
-        sv.minMagnification = 0.8
-        sv.maxMagnification = 1.6
-        sv.magnification = CGFloat(Prefs.settingsZoom)
+        sv.minMagnification = 0.75
+        sv.maxMagnification = 2.0
         sv.autoresizingMask = [.width, .height]
         pageScrolls.append(sv)
         return sv
@@ -2487,25 +2511,45 @@ final class SettingsController: NSObject, NSWindowDelegate {
 
     @objc private func segChanged(_ s: NSSegmentedControl) {
         tabsView?.selectTabViewItem(at: s.selectedSegment)
+        fitPages()
     }
 
-    @objc private func zoomChanged(_ s: NSSegmentedControl) {
-        let z = zoomSteps[max(0, min(zoomSteps.count - 1, s.selectedSegment))]
-        Prefs.settingsZoom = z
-        for sv in pageScrolls { sv.magnification = CGFloat(z) }
-        // Grow the window a little with the zoom so less scrolling is needed.
-        if let w = window, let scr = w.screen?.visibleFrame {
-            var f = w.frame
-            let want = NSSize(width: min(scr.width, 560 * z), height: min(scr.height, 500 * z))
-            if f.width < want.width || f.height < want.height {
-                f.origin.y -= max(0, want.height - f.height)
-                f.size = NSSize(width: max(f.width, want.width), height: max(f.height, want.height))
-                w.setFrame(f, display: true, animate: true)
-            }
+    @objc private func appearanceChanged() {
+        Theme.mode = appearancePopup.indexOfSelectedItem
+    }
+
+    @objc private func languageChanged() {
+        let en = languagePopup.indexOfSelectedItem == 1
+        guard en != L10n.english else { return }
+        L10n.english = en
+        let a = NSAlert()
+        a.messageText = en ? "Restart OrdCat to switch to English?" : "重启 OrdCat 切换到中文？"
+        a.informativeText = en ? "The whole app, including the cat's replies, will use English." : "整个应用（包括小猫的回答）都会用中文。"
+        a.addButton(withTitle: en ? "Restart now" : "立即重启")
+        a.addButton(withTitle: en ? "Later" : "以后")
+        if a.runModal() == .alertFirstButtonReturn {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = ["-c", "sleep 1; /usr/bin/open \"$1\"", "ordcat-relaunch", Bundle.main.bundlePath]
+            try? p.run()
+            NSApp.terminate(nil)
+        }
+    }
+
+    /// Pages follow the window: each page scales to fill the window's width (no manual size setting).
+    private func fitPages() {
+        for sv in pageScrolls {
+            guard let doc = sv.documentView, doc.frame.width > 0 else { continue }
+            let avail = sv.frame.width - 4
+            guard avail > 50 else { continue }
+            let m = max(0.75, min(2.0, avail / doc.frame.width))
+            let stepped = (m * 40).rounded(.down) / 40
+            if abs(sv.magnification - stepped) > 0.001 { sv.magnification = stepped }
         }
     }
 
     func windowDidResize(_ notification: Notification) {
+        fitPages()
         if let w = window { UserDefaults.standard.set(NSStringFromRect(w.frame), forKey: "settingsFrame") }
     }
     func windowDidMove(_ notification: Notification) {
@@ -2852,6 +2896,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let catSize = NSSize(width: 300, height: 330)
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        L10n.install()
+        Theme.start()
         Keychain.prefetch()
         // Only one cat at a time: quit any other (older) OrdCat that is still running.
         let me = ProcessInfo.processInfo.processIdentifier
@@ -4262,7 +4308,8 @@ app.run()
 
 /// Light Markdown for the bubble: **bold**, headings and list markers become plain, readable text.
 /// Tolerates half-streamed text (an unclosed ** just makes the rest bold until it closes).
-func bubbleAttributed(_ raw: String, size: CGFloat = 14) -> NSAttributedString {
+func bubbleAttributed(_ rawIn: String, size: CGFloat = 14) -> NSAttributedString {
+    let raw = L10n.t(rawIn)
     var lines: [String] = []
     for l in raw.replacingOccurrences(of: "`", with: "").components(separatedBy: "\n") {
         let t = l.trimmingCharacters(in: .whitespaces)
@@ -4280,7 +4327,7 @@ func bubbleAttributed(_ raw: String, size: CGFloat = 14) -> NSAttributedString {
     let para = NSMutableParagraphStyle()
     para.lineSpacing = 2
     let base: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: size),
-                                               .foregroundColor: NSColor.white,
+                                               .foregroundColor: Theme.fg,
                                                .paragraphStyle: para]
     let out = NSMutableAttributedString()
     for (i, part) in text.components(separatedBy: "**").enumerated() {
