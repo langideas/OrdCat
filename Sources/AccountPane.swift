@@ -4,12 +4,11 @@ import Cocoa
 import UniformTypeIdentifiers
 
 final class AccountPane: NSObject {
-    let view = NSView(frame: NSRect(x: 0, y: 0, width: 470, height: 640))
     private let acc = Account.shared
     private let avatar = NSImageView()
     private let nameField = NSTextField()
     private let userField = NSTextField()
-    private let profileStatus = NSTextField(labelWithString: "")
+    private let profileStatus = SK.WrapLabel()
     private let loginLine = NSTextField(labelWithString: "")
     private let method = NSSegmentedControl(labels: ["邮箱", "手机号"], trackingMode: .selectOne, target: nil, action: nil)
     private let idField = NSTextField()
@@ -17,118 +16,92 @@ final class AccountPane: NSObject {
     private let sendBtn = NSButton(title: "发送验证码", target: nil, action: nil)
     private let loginBtn = NSButton(title: "登录 / 注册", target: nil, action: nil)
     private let logoutBtn = NSButton(title: "退出登录", target: nil, action: nil)
-    private let loginStatus = NSTextField(labelWithString: "")
-    private let subLines = NSTextField(labelWithString: "")
-    private let dataStatus = NSTextField(labelWithString: "")
-    private var loginViews: [NSView] = []
+    private let loginStatus = SK.WrapLabel()
+    private let subLines = SK.WrapLabel()
+    private let dataStatus = SK.WrapLabel()
+    private var loginFold: SK.Fold?
     var onOpenSkills: (() -> Void)?
 
     override init() {
         super.init()
-        build()
         acc.observe { [weak self] in self?.refresh() }
     }
 
-    private func section(_ t: String, _ y: CGFloat) {
-        let l = NSTextField(labelWithString: t)
-        l.font = .systemFont(ofSize: 13, weight: .semibold)
-        l.frame = NSRect(x: 16, y: y, width: 300, height: 18)
-        view.addSubview(l)
-        let line = NSBox(frame: NSRect(x: 16, y: y - 6, width: 438, height: 1))
-        line.boxType = .separator
-        view.addSubview(line)
-    }
-    private func label(_ t: String, _ y: CGFloat) {
-        let l = NSTextField(labelWithString: t)
-        l.alignment = .right
-        l.frame = NSRect(x: 100, y: y + 3, width: 60, height: 18)
-        view.addSubview(l)
-    }
-    private func button(_ t: String, _ sel: Selector, _ frame: NSRect) -> NSButton {
-        let b = NSButton(title: t, target: self, action: sel)
-        b.bezelStyle = .rounded
-        b.frame = frame
-        view.addSubview(b)
-        return b
-    }
-    private func small(_ l: NSTextField, _ frame: NSRect) {
-        l.font = .systemFont(ofSize: 11)
-        l.textColor = .secondaryLabelColor
-        l.lineBreakMode = .byWordWrapping
-        l.maximumNumberOfLines = 3
-        l.frame = frame
-        view.addSubview(l)
+    private func button(_ t: String, _ sel: Selector) -> NSButton { SK.button(t, self, sel) }
+    private func input(_ f: NSTextField, _ placeholder: String) -> NSTextField {
+        f.placeholderString = placeholder
+        f.font = .systemFont(ofSize: 13)
+        f.usesSingleLineMode = true
+        f.cell?.isScrollable = true
+        f.cell?.wraps = false
+        f.translatesAutoresizingMaskIntoConstraints = false
+        return f
     }
 
-    private func build() {
+    func build(into p: SK.Page) {
         // 个人资料
-        section("个人资料", 606)
-        avatar.frame = NSRect(x: 20, y: 512, width: 72, height: 72)
+        p.header("个人资料")
         avatar.imageScaling = .scaleProportionallyUpOrDown
         avatar.wantsLayer = true
-        avatar.layer?.cornerRadius = 36
+        avatar.layer?.cornerRadius = 32
         avatar.layer?.masksToBounds = true
-        view.addSubview(avatar)
-        _ = button("更换头像", #selector(pickAvatar), NSRect(x: 14, y: 478, width: 86, height: 28))
-        label("名称", 552)
-        nameField.frame = NSRect(x: 166, y: 552, width: 200, height: 24)
-        nameField.placeholderString = "小猫怎么称呼你"
-        view.addSubview(nameField)
-        label("用户名", 520)
-        userField.frame = NSRect(x: 166, y: 520, width: 200, height: 24)
-        userField.placeholderString = "字母、数字或下划线"
-        view.addSubview(userField)
-        _ = button("保存", #selector(saveProfile), NSRect(x: 372, y: 518, width: 76, height: 28))
-        small(profileStatus, NSRect(x: 166, y: 484, width: 280, height: 30))
+        avatar.translatesAutoresizingMaskIntoConstraints = false
+        avatar.widthAnchor.constraint(equalToConstant: 64).isActive = true
+        avatar.heightAnchor.constraint(equalToConstant: 64).isActive = true
+        let avatarCol = NSStackView(views: [avatar, button("更换头像", #selector(pickAvatar))])
+        avatarCol.orientation = .vertical
+        avatarCol.spacing = 8
+        avatarCol.alignment = .centerX
+        let g1 = SK.Group()
+        g1.add(SK.info(SK.WrapLabel("头像和名称会显示在聊天窗口左下角。", size: 12), avatarCol))
+        g1.add(SK.row("名称", input(nameField, "小猫怎么称呼你")))
+        g1.add(SK.row("用户名", input(userField, "字母、数字或下划线")))
+        p.add(g1)
+        p.add(SK.buttons([button("保存", #selector(saveProfile))], trailing: true))
+        p.add(profileStatus)
 
         // 账号与登录
-        section("账号与登录", 452)
-        loginLine.font = .systemFont(ofSize: 12)
-        loginLine.frame = NSRect(x: 20, y: 420, width: 330, height: 18)
-        view.addSubview(loginLine)
+        p.header("账号与登录")
+        loginLine.font = .systemFont(ofSize: 13)
+        loginLine.lineBreakMode = .byTruncatingTail
+        loginLine.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         logoutBtn.target = self; logoutBtn.action = #selector(logout)
         logoutBtn.bezelStyle = .rounded
-        logoutBtn.frame = NSRect(x: 360, y: 414, width: 90, height: 28)
-        view.addSubview(logoutBtn)
+        let g2 = SK.Group()
+        g2.add(SK.info(loginLine, logoutBtn))
+        p.add(g2)
         method.target = self; method.action = #selector(methodChanged)
         method.selectedSegment = 0
-        method.frame = NSRect(x: 20, y: 386, width: 140, height: 24)
-        view.addSubview(method)
-        idField.frame = NSRect(x: 166, y: 386, width: 180, height: 24)
-        view.addSubview(idField)
         sendBtn.target = self; sendBtn.action = #selector(sendCode)
         sendBtn.bezelStyle = .rounded
-        sendBtn.frame = NSRect(x: 350, y: 384, width: 100, height: 28)
-        view.addSubview(sendBtn)
-        codeField.frame = NSRect(x: 166, y: 352, width: 180, height: 24)
-        codeField.placeholderString = "6 位验证码"
-        view.addSubview(codeField)
         loginBtn.target = self; loginBtn.action = #selector(verify)
         loginBtn.bezelStyle = .rounded
         loginBtn.keyEquivalent = "\r"
-        loginBtn.frame = NSRect(x: 350, y: 350, width: 100, height: 28)
-        view.addSubview(loginBtn)
-        small(loginStatus, NSRect(x: 20, y: 316, width: 430, height: 30))
-        loginViews = [method, idField, sendBtn, codeField, loginBtn]
+        let lg = SK.Group()
+        lg.add(SK.row("方式", method, fill: false))
+        lg.add(SK.info(input(idField, ""), sendBtn))
+        lg.add(SK.info(input(codeField, "6 位验证码"), loginBtn))
+        let fold = SK.Fold(lg)
+        loginFold = fold
+        p.add(fold)
+        p.add(loginStatus)
 
         // 订阅与付款
-        section("订阅与付款", 290)
-        subLines.font = .systemFont(ofSize: 12)
-        subLines.maximumNumberOfLines = 4
-        subLines.lineBreakMode = .byWordWrapping
-        subLines.frame = NSRect(x: 20, y: 214, width: 430, height: 66)
-        view.addSubview(subLines)
-        _ = button("管理订阅", #selector(openSkills), NSRect(x: 14, y: 178, width: 110, height: 28))
-        _ = button("管理付款方式", #selector(openPortal), NSRect(x: 128, y: 178, width: 120, height: 28))
-        _ = button("刷新订阅", #selector(refreshSubs), NSRect(x: 252, y: 178, width: 100, height: 28))
+        p.header("订阅与付款")
+        subLines.font = .systemFont(ofSize: 12.5)
+        subLines.textColor = .labelColor
+        let g3 = SK.Group()
+        g3.add(SK.info(subLines))
+        p.add(g3)
+        p.add(SK.buttons([button("管理订阅", #selector(openSkills)), button("管理付款方式", #selector(openPortal)),
+                          button("刷新订阅", #selector(refreshSubs))]))
 
         // 数据管理
-        section("数据管理", 146)
-        _ = button("导出我的数据", #selector(exportData), NSRect(x: 14, y: 104, width: 120, height: 28))
-        _ = button("清除本机数据", #selector(wipeLocal), NSRect(x: 138, y: 104, width: 120, height: 28))
-        let del = button("注销账号", #selector(deleteAccount), NSRect(x: 262, y: 104, width: 100, height: 28))
+        p.header("数据管理")
+        p.add(dataStatus)
+        let del = button("注销账号", #selector(deleteAccount))
         del.contentTintColor = .systemRed
-        small(dataStatus, NSRect(x: 20, y: 40, width: 430, height: 56))
+        p.add(SK.buttons([button("导出我的数据", #selector(exportData)), button("清除本机数据", #selector(wipeLocal)), del]))
         dataStatus.stringValue = "聊天记录、记忆和刷推记忆都只存在这台 Mac 上。导出会打包到「下载」文件夹；注销会删除云端账号、头像和订阅绑定（已付的订阅请先在「管理付款方式」里取消）。"
         refresh()
     }
@@ -139,7 +112,7 @@ final class AccountPane: NSObject {
         userField.stringValue = acc.profile.username
         loginLine.stringValue = acc.accountLine
         logoutBtn.isHidden = !acc.signedIn
-        for v in loginViews { v.isHidden = acc.signedIn || !acc.configured }
+        loginFold?.folded = acc.signedIn || !acc.configured
         if !acc.configured {
             loginStatus.stringValue = "邮箱 / 手机号注册即将开放。现在名称和头像先保存在本机，开通后登录会自动同步。"
         } else if acc.signedIn {

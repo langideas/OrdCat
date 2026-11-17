@@ -1993,34 +1993,43 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let base = NSTextField()
     private let key = NSSecureTextField()
     private let model = NSTextField()
-    private let status = NSTextField(labelWithString: "")
+    private let status = SK.WrapLabel()
     // 看图 / 听写 panes of the model tab
     private var modelPanes: [NSView] = []
+    private let modelPaneHost = NSStackView()
+    /// Only the chosen sub-page (聊天/看图/听写/朗读) is in the layout, stretched to the page width.
+    private func showModelPane(_ i: Int) {
+        for v in modelPaneHost.arrangedSubviews { modelPaneHost.removeArrangedSubview(v); v.removeFromSuperview() }
+        guard i >= 0, i < modelPanes.count else { return }
+        let v = modelPanes[i]
+        v.translatesAutoresizingMaskIntoConstraints = false
+        modelPaneHost.addArrangedSubview(v)
+        v.widthAnchor.constraint(equalTo: modelPaneHost.widthAnchor).isActive = true
+    }
     private let visionPreset = NSPopUpButton()
     private let visionBase = NSTextField()
     private let visionKey = NSSecureTextField()
     private let visionModel = NSTextField()
-    private let visionStatus = NSTextField(wrappingLabelWithString: "")
+    private let visionStatus = SK.WrapLabel()
     private let sttPreset = NSPopUpButton()
     private let sttBase = NSTextField()
     private let sttKey = NSSecureTextField()
     private let sttModel = NSTextField()
-    private let sttStatus = NSTextField(wrappingLabelWithString: "")
-    private var tabsView: NSTabView?
+    private let sttStatus = SK.WrapLabel()
     private let hotkeyPopup = NSPopUpButton()
     private let appearancePopup = NSPopUpButton()
     private let languagePopup = NSPopUpButton()
-    private var checks: [String: NSButton] = [:]
-    private let axStatus = NSTextField(labelWithString: "")
+    private var checks: [String: NSSwitch] = [:]
+    private let axStatus = SK.WrapLabel()
     private let llm = LLM()
     private let perceptionPopup = NSPopUpButton()
     private let retentionPopup = NSPopUpButton()
     private let excluded = NSTextField()
-    private let memStats = NSTextField(wrappingLabelWithString: "")
+    private let memStats = SK.WrapLabel()
     private let versionLabel = NSTextField(labelWithString: "")
-    private let updateStatus = NSTextField(wrappingLabelWithString: "")
-    private let notesLabel = NSTextField(wrappingLabelWithString: "")
-    private let signLabel = NSTextField(wrappingLabelWithString: "")
+    private let updateStatus = SK.WrapLabel()
+    private let notesLabel = SK.WrapLabel()
+    private let signLabel = SK.WrapLabel()
     private var updateButton: NSButton!
     private let retentionOptions = [1, 3, 7, 30]
     var hub: ContextHub?
@@ -2037,7 +2046,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let ttsKey = NSSecureTextField()
     private let ttsModel = NSTextField()
     private let ttsVoiceBox = NSComboBox()
-    private let ttsStatus = NSTextField(wrappingLabelWithString: "")
+    private let ttsStatus = SK.WrapLabel()
     private var sysVoiceIDs: [String] = []
     var onHotKeyChanged: (() -> Void)?
     var onClearHistory: (() -> Void)?
@@ -2088,8 +2097,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         refreshSign()
         refreshAX()
         status.stringValue = ""
-        tabsView?.selectTabViewItem(at: tab)
-        segControl?.selectedSegment = tab
+        select(page: tab)
         NSApp.activate(ignoringOtherApps: true)
         if !restoredFrame { window?.center(); restoredFrame = true }
         window?.makeKeyAndOrderFront(nil)
@@ -2127,59 +2135,97 @@ final class SettingsController: NSObject, NSWindowDelegate {
         axStatus.stringValue = ok ? "✅ 已获得辅助功能权限" : "⚠️ 还没授权「辅助功能」，选中文字提示暂时用不了"
     }
 
-    private func label(_ s: String, _ frame: NSRect, in v: NSView) {
-        let l = NSTextField(labelWithString: s)
-        l.alignment = .right
-        l.frame = frame
-        v.addSubview(l)
+    // MARK: layout (sidebar + pages, native Auto Layout, nothing scaled)
+
+    private var pages: [NSScrollView] = []
+    private var sidebar: SettingsSidebar?
+    private var pageHost = NSView()
+    private var current = 0
+    private var restoredFrame = false
+
+    private func select(page i: Int) {
+        guard i >= 0, i < pages.count else { return }
+        current = i
+        for (k, p) in pages.enumerated() { p.isHidden = k != i }
+        sidebar?.select(i)
+        pages[i].contentView.scroll(to: .zero)
+        pages[i].reflectScrolledClipView(pages[i].contentView)
     }
 
-    private func row(_ title: String, _ field: NSView, y: CGFloat, in v: NSView) {
-        label(title, NSRect(x: 10, y: y + 3, width: 96, height: 20), in: v)
-        field.frame = NSRect(x: 114, y: y, width: 330, height: 26)
-        v.addSubview(field)
+    /// Switch row bound to a Prefs key through `toggled(_:)`.
+    private func sw(_ id: String, _ title: String, sub: String? = nil) -> NSView {
+        let s = NSSwitch()
+        s.identifier = NSUserInterfaceItemIdentifier(id)
+        s.target = self
+        s.action = #selector(toggled(_:))
+        checks[id] = s
+        return SK.toggle(title, s, sub: sub)
     }
 
-    private func check(_ id: String, _ title: String, y: CGFloat, in v: NSView) {
-        let b = NSButton(checkboxWithTitle: title, target: self, action: #selector(toggled(_:)))
-        b.identifier = NSUserInterfaceItemIdentifier(id)
-        b.frame = NSRect(x: 24, y: y, width: 440, height: 22)
-        v.addSubview(b)
-        checks[id] = b
+    private func field(_ f: NSTextField) -> NSTextField {
+        f.translatesAutoresizingMaskIntoConstraints = false
+        f.font = .systemFont(ofSize: 13)
+        f.lineBreakMode = .byTruncatingTail
+        f.cell?.isScrollable = true
+        f.cell?.wraps = false
+        f.usesSingleLineMode = true
+        return f
     }
 
     private func build() {
-        let saved = UserDefaults.standard.string(forKey: "settingsFrame").map(NSRectFromString)
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 500),
+        let saved = UserDefaults.standard.string(forKey: "settingsFrame2").map(NSRectFromString)
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 580),
                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         w.title = "OrdCat 设置 · v\(Updater.shared.current)"
         w.isReleasedWhenClosed = false
-        w.minSize = NSSize(width: 420, height: 360)
-        if let f = saved, f.width >= 420 { w.setFrame(f, display: false); restoredFrame = true }
-        let root = NSView(frame: w.contentRect(forFrameRect: w.frame))
+        w.minSize = NSSize(width: 640, height: 440)
+        if let f = saved, f.width >= 640, f.height >= 440 { w.setFrame(f, display: false); restoredFrame = true }
+
+        let root = NSView()
         w.contentView = root
-        // Clear, large section switcher instead of the small built-in tab strip.
-        let topSeg = NSSegmentedControl(labels: ["模型", "小猫", "感知与记忆", "声音", "技能", "关于", "账号"],
-                                     trackingMode: .selectOne, target: self, action: #selector(segChanged(_:)))
-        topSeg.font = .systemFont(ofSize: 13, weight: .medium)
-        topSeg.controlSize = .large
-        topSeg.sizeToFit()
-        topSeg.frame.origin = NSPoint(x: (root.bounds.width - topSeg.frame.width) / 2, y: root.bounds.height - topSeg.frame.height - 12)
-        topSeg.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin]
-        topSeg.selectedSegment = 0
-        root.addSubview(topSeg)
-        segControl = topSeg
-        let tabs = NSTabView(frame: NSRect(x: 8, y: 8, width: root.bounds.width - 16,
-                                           height: root.bounds.height - topSeg.frame.height - 28))
-        tabs.tabViewType = .noTabsNoBorder
-        tabsView = tabs
-        tabs.autoresizingMask = [.width, .height]
-        root.addSubview(tabs)
-        // Tab 1: model
-        let t1 = NSTabViewItem(identifier: "model")
-        t1.label = "模型（BYOM）"
-        let v1 = NSView(frame: NSRect(x: 0, y: 0, width: 470, height: 360))
-        for p in kPresets { preset.addItem(withTitle: p.name) }
+        let side = SettingsSidebar(items: [
+            ("cpu", "模型"), ("pawprint", "小猫"), ("eye", "感知与记忆"), ("speaker.wave.2", "声音"),
+            ("sparkles", "技能"), ("info.circle", "关于"), ("person.crop.circle", "账号")])
+        side.onSelect = { [weak self] i in self?.select(page: i) }
+        sidebar = side
+        let divider = NSBox()
+        divider.boxType = .separator
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        pageHost.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(side); root.addSubview(divider); root.addSubview(pageHost)
+        NSLayoutConstraint.activate([
+            side.topAnchor.constraint(equalTo: root.topAnchor),
+            side.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            side.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            side.widthAnchor.constraint(equalToConstant: 190),
+            divider.topAnchor.constraint(equalTo: root.topAnchor),
+            divider.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            divider.leadingAnchor.constraint(equalTo: side.trailingAnchor),
+            divider.widthAnchor.constraint(equalToConstant: 1),
+            pageHost.topAnchor.constraint(equalTo: root.topAnchor),
+            pageHost.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            pageHost.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
+            pageHost.trailingAnchor.constraint(equalTo: root.trailingAnchor)])
+
+        for page in [modelPage(), catPage(), memoryPage(), voicePage(), skillsPage(), aboutPage(), accountPage()] {
+            let sv = page.scroller()
+            pageHost.addSubview(sv)
+            NSLayoutConstraint.activate([
+                sv.topAnchor.constraint(equalTo: pageHost.topAnchor),
+                sv.bottomAnchor.constraint(equalTo: pageHost.bottomAnchor),
+                sv.leadingAnchor.constraint(equalTo: pageHost.leadingAnchor),
+                sv.trailingAnchor.constraint(equalTo: pageHost.trailingAnchor)])
+            pages.append(sv)
+        }
+        w.delegate = self
+        window = w
+        select(page: 0)
+    }
+
+    // 模型
+    private func modelPage() -> SK.Page {
+        let p = SK.Page(title: "模型")
+        for x in kPresets { preset.addItem(withTitle: x.name) }
         preset.target = self
         preset.action = #selector(presetChanged)
         base.placeholderString = "https://…/v1"
@@ -2187,331 +2233,252 @@ final class SettingsController: NSObject, NSWindowDelegate {
         model.placeholderString = "模型名称"
         let seg = NSSegmentedControl(labels: ["💬 聊天", "🖼️ 看图 / 视频", "🎙️ 听写", "🔊 朗读"],
                                      trackingMode: .selectOne, target: self, action: #selector(modelPaneChanged(_:)))
-        seg.frame = NSRect(x: 20, y: 318, width: 430, height: 24)
         seg.selectedSegment = 0
-        v1.addSubview(seg)
-        let chatPane = NSView(frame: NSRect(x: 0, y: 0, width: 470, height: 310))
-        let visionPane = NSView(frame: chatPane.frame)
-        let sttPane = NSView(frame: chatPane.frame)
-        let ttsPane = NSView(frame: chatPane.frame)
-        modelPanes = [chatPane, visionPane, sttPane, ttsPane]
-        for (i, p) in modelPanes.enumerated() { p.isHidden = i != 0; v1.addSubview(p) }
+        seg.segmentDistribution = .fillEqually
+        p.add(seg, gap: 16)
 
-        row("服务商", preset, y: 272, in: chatPane)
-        row("接口地址", base, y: 236, in: chatPane)
-        row("API Key", key, y: 200, in: chatPane)
-        row("模型", model, y: 164, in: chatPane)
-        let hint = NSTextField(wrappingLabelWithString: "任何 OpenAI 兼容接口都能用。API Key 只保存在你 Mac 的钥匙串里。聊天模型只懂文字也没关系：图片会交给「看图」模型，声音交给「听写」。")
-        hint.textColor = .secondaryLabelColor
-        hint.font = .systemFont(ofSize: 11)
-        hint.frame = NSRect(x: 114, y: 112, width: 330, height: 46)
-        chatPane.addSubview(hint)
-        status.frame = NSRect(x: 20, y: 70, width: 430, height: 34)
-        status.textColor = .secondaryLabelColor
-        status.lineBreakMode = .byTruncatingTail
-        chatPane.addSubview(status)
-        let test = NSButton(title: "测试连接", target: self, action: #selector(testIt))
-        test.frame = NSRect(x: 250, y: 20, width: 96, height: 30)
-        chatPane.addSubview(test)
-        let save = NSButton(title: "保存", target: self, action: #selector(saveIt))
+        // 聊天
+        let chat = NSStackView()
+        chat.orientation = .vertical; chat.alignment = .leading; chat.spacing = 10
+        func put(_ v: NSView, in s: NSStackView) {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            s.addArrangedSubview(v)
+            v.widthAnchor.constraint(equalTo: s.widthAnchor).isActive = true
+        }
+        let g1 = SK.Group()
+        g1.add(SK.row("服务商", preset))
+        g1.add(SK.row("接口地址", field(base)))
+        g1.add(SK.row("API Key", field(key)))
+        g1.add(SK.row("模型", field(model)))
+        put(g1, in: chat)
+        put(SK.WrapLabel("任何 OpenAI 兼容接口都能用。API Key 只保存在你 Mac 的钥匙串里。聊天模型只懂文字也没关系：图片会交给「看图」模型，声音交给「听写」。"), in: chat)
+        put(status, in: chat)
+        let save = SK.button("保存", self, #selector(saveIt))
         save.keyEquivalent = "\r"
-        save.frame = NSRect(x: 350, y: 20, width: 96, height: 30)
-        chatPane.addSubview(save)
+        put(SK.buttons([SK.button("测试连接", self, #selector(testIt)), save], trailing: true), in: chat)
 
         // 看图 / 视频
-        check("visionOn", "需要时看图片和视频画面（只在你提问时截这个窗口）", y: 280, in: visionPane)
-        for p in kVisionPresets { visionPreset.addItem(withTitle: p.name) }
+        let vis = NSStackView()
+        vis.orientation = .vertical; vis.alignment = .leading; vis.spacing = 10
+        for x in kVisionPresets { visionPreset.addItem(withTitle: x.name) }
         visionPreset.target = self
         visionPreset.action = #selector(visionPresetChanged)
         visionBase.placeholderString = "https://…/v1"
         visionKey.placeholderString = "和聊天同一家可留空"
         visionModel.placeholderString = "看图模型名称"
-        row("服务商", visionPreset, y: 244, in: visionPane)
-        row("接口地址", visionBase, y: 208, in: visionPane)
-        row("API Key", visionKey, y: 172, in: visionPane)
-        row("模型", visionModel, y: 136, in: visionPane)
-        check("videoAudio", "看视频时顺便听 6 秒声音（用「听写」转成文字）", y: 106, in: visionPane)
-        check("chatLayout", "聊天软件（微信、QQ…）按位置识别谁说了什么", y: 84, in: visionPane)
-        visionStatus.font = .systemFont(ofSize: 11)
-        visionStatus.textColor = .secondaryLabelColor
-        visionStatus.frame = NSRect(x: 20, y: 54, width: 430, height: 28)
-        visionPane.addSubview(visionStatus)
-        let vTest = NSButton(title: "测试看图", target: self, action: #selector(testVision))
-        vTest.frame = NSRect(x: 250, y: 20, width: 96, height: 30)
-        visionPane.addSubview(vTest)
-        let vSave = NSButton(title: "保存", target: self, action: #selector(saveIt))
-        vSave.frame = NSRect(x: 350, y: 20, width: 96, height: 30)
-        visionPane.addSubview(vSave)
+        let gv0 = SK.Group()
+        gv0.add(sw("visionOn", "需要时看图片和视频画面", sub: "只在你提问时截这个窗口"))
+        put(gv0, in: vis)
+        let gv = SK.Group()
+        gv.add(SK.row("服务商", visionPreset))
+        gv.add(SK.row("接口地址", field(visionBase)))
+        gv.add(SK.row("API Key", field(visionKey)))
+        gv.add(SK.row("模型", field(visionModel)))
+        put(gv, in: vis)
+        let gv2 = SK.Group()
+        gv2.add(sw("videoAudio", "看视频时顺便听 6 秒声音", sub: "用「听写」转成文字"))
+        gv2.add(sw("chatLayout", "聊天软件（微信、QQ…）按位置识别谁说了什么"))
+        put(gv2, in: vis)
+        put(visionStatus, in: vis)
+        put(SK.buttons([SK.button("测试看图", self, #selector(testVision)), SK.button("保存", self, #selector(saveIt))], trailing: true), in: vis)
 
         // 听写
-        for p in kSTTPresets { sttPreset.addItem(withTitle: p.name) }
+        let stt = NSStackView()
+        stt.orientation = .vertical; stt.alignment = .leading; stt.spacing = 10
+        for x in kSTTPresets { sttPreset.addItem(withTitle: x.name) }
         sttPreset.target = self
         sttPreset.action = #selector(sttPresetChanged)
         sttBase.placeholderString = "https://…/v1"
         sttKey.placeholderString = "和聊天同一家可留空"
         sttModel.placeholderString = "语音识别模型名称"
-        row("服务商", sttPreset, y: 272, in: sttPane)
-        row("接口地址", sttBase, y: 236, in: sttPane)
-        row("API Key", sttKey, y: 200, in: sttPane)
-        row("模型", sttModel, y: 164, in: sttPane)
-        let sHint = NSTextField(wrappingLabelWithString: "用在两个地方：你对小猫说话（⌃⌥空格 / 🎤），和看视频时听声音。本机识别完全离线；云端 Whisper 更准，会把录音发给你选的服务商。")
-        sHint.textColor = .secondaryLabelColor
-        sHint.font = .systemFont(ofSize: 11)
-        sHint.frame = NSRect(x: 114, y: 112, width: 330, height: 46)
-        sttPane.addSubview(sHint)
-        sttStatus.font = .systemFont(ofSize: 11)
-        sttStatus.textColor = .secondaryLabelColor
-        sttStatus.frame = NSRect(x: 20, y: 66, width: 430, height: 34)
-        sttPane.addSubview(sttStatus)
-        let sTest = NSButton(title: "测试听写", target: self, action: #selector(testSTT))
-        sTest.frame = NSRect(x: 250, y: 20, width: 96, height: 30)
-        sttPane.addSubview(sTest)
-        let sSave = NSButton(title: "保存", target: self, action: #selector(saveIt))
-        sSave.frame = NSRect(x: 350, y: 20, width: 96, height: 30)
-        sttPane.addSubview(sSave)
+        let gs = SK.Group()
+        gs.add(SK.row("服务商", sttPreset))
+        gs.add(SK.row("接口地址", field(sttBase)))
+        gs.add(SK.row("API Key", field(sttKey)))
+        gs.add(SK.row("模型", field(sttModel)))
+        put(gs, in: stt)
+        put(SK.WrapLabel("用在两个地方：你对小猫说话（⌃⌥空格 / 🎤），和看视频时听声音。本机识别完全离线；云端 Whisper 更准，会把录音发给你选的服务商。"), in: stt)
+        put(sttStatus, in: stt)
+        put(SK.buttons([SK.button("测试听写", self, #selector(testSTT)), SK.button("保存", self, #selector(saveIt))], trailing: true), in: stt)
 
         // 朗读
-        let tHint = NSTextField(wrappingLabelWithString: "小猫说话的声音（系统声音或云端自然声音、语速、音调）在「声音」标签里设置。")
-        tHint.font = .systemFont(ofSize: 13)
-        tHint.frame = NSRect(x: 24, y: 220, width: 420, height: 44)
-        ttsPane.addSubview(tHint)
-        let goVoice = NSButton(title: "去「声音」设置", target: self, action: #selector(goVoiceTab))
-        goVoice.frame = NSRect(x: 24, y: 176, width: 150, height: 30)
-        ttsPane.addSubview(goVoice)
-        t1.view = v1
-        tabs.addTabViewItem(t1)
+        let tts = NSStackView()
+        tts.orientation = .vertical; tts.alignment = .leading; tts.spacing = 12
+        put(SK.WrapLabel("小猫说话的声音（系统声音或云端自然声音、语速、音调）在「声音」标签里设置。", size: 13, secondary: false), in: tts)
+        put(SK.buttons([SK.button("去「声音」设置", self, #selector(goVoiceTab))]), in: tts)
 
-        // Tab 2: cat
-        let t2 = NSTabViewItem(identifier: "cat")
-        t2.label = "小猫"
-        let v2 = NSView(frame: NSRect(x: 0, y: 0, width: 470, height: 400))
-        // Whole-app appearance and interface language.
-        label("外观", NSRect(x: 10, y: 365, width: 50, height: 20), in: v2)
+        modelPanes = [chat, vis, stt, tts]
+        modelPaneHost.orientation = .vertical
+        modelPaneHost.alignment = .leading
+        p.add(modelPaneHost)
+        showModelPane(0)
+        return p
+    }
+
+    // 小猫
+    private func catPage() -> SK.Page {
+        let p = SK.Page(title: "小猫")
+        p.header("外观与语言")
         appearancePopup.addItems(withTitles: ["跟随系统", "浅色", "深色"])
         appearancePopup.selectItem(at: max(0, min(2, Theme.mode)))
         appearancePopup.target = self
         appearancePopup.action = #selector(appearanceChanged)
-        appearancePopup.frame = NSRect(x: 66, y: 360, width: 140, height: 26)
-        v2.addSubview(appearancePopup)
-        label("语言", NSRect(x: 220, y: 365, width: 50, height: 20), in: v2)
         languagePopup.addItems(withTitles: ["中文", "English"])
         languagePopup.selectItem(at: L10n.english ? 1 : 0)
         languagePopup.target = self
         languagePopup.action = #selector(languageChanged)
-        languagePopup.frame = NSRect(x: 276, y: 360, width: 140, height: 26)
-        v2.addSubview(languagePopup)
-        check("voiceChat", "开启语音对话（按快捷键或 🎤 和小猫说话）", y: 318, in: v2)
-        label("快捷键", NSRect(x: 30, y: 287, width: 60, height: 20), in: v2)
+        let g0 = SK.Group()
+        g0.add(SK.row("外观", appearancePopup, fill: false, maxW: 200))
+        g0.add(SK.row("语言", languagePopup, fill: false, maxW: 200))
+        p.add(g0)
+        p.hint("切换语言后重启 OrdCat 生效。")
+
+        p.header("说话")
         for h in kHotKeys { hotkeyPopup.addItem(withTitle: h.title) }
         hotkeyPopup.target = self
         hotkeyPopup.action = #selector(hotkeyChanged)
-        hotkeyPopup.frame = NSRect(x: 96, y: 282, width: 300, height: 26)
-        v2.addSubview(hotkeyPopup)
-        check("pageShare", "打开对话时分享当前页面（气泡里点 ✕ 就不分享）", y: 250, in: v2)
-        check("selectWatch", "选中文字时竖起耳朵提示", y: 214, in: v2)
-        check("selectFallback", "兼容模式：读不到选中内容时，自动复制再还原剪贴板", y: 190, in: v2)
-        check("clipWatch", "复制文字时提示", y: 166, in: v2)
-        check("care", "久坐 / 熬夜温柔提醒", y: 142, in: v2)
-        axStatus.frame = NSRect(x: 24, y: 104, width: 300, height: 20)
-        axStatus.font = .systemFont(ofSize: 12)
-        v2.addSubview(axStatus)
-        let ax = NSButton(title: "授权辅助功能", target: self, action: #selector(askAX))
-        ax.frame = NSRect(x: 330, y: 98, width: 120, height: 30)
-        v2.addSubview(ax)
-        let axHint = NSTextField(wrappingLabelWithString: "选中文字提示需要「辅助功能」权限：系统设置 → 隐私与安全性 → 辅助功能，打开 OrdCat。从 v0.2.8 起小猫用这台 Mac 自己的签名，授权一次以后更新不会再丢。如果开关是开着却没用，先用「−」删掉旧的 OrdCat 再重新添加。")
-        axHint.textColor = .secondaryLabelColor
-        axHint.font = .systemFont(ofSize: 11)
-        axHint.frame = NSRect(x: 24, y: 56, width: 430, height: 42)
-        v2.addSubview(axHint)
-        let clear = NSButton(title: "清空聊天记录", target: self, action: #selector(clearHistory))
-        clear.frame = NSRect(x: 20, y: 14, width: 130, height: 30)
-        v2.addSubview(clear)
-        t2.view = v2
-        tabs.addTabViewItem(t2)
+        let g1 = SK.Group()
+        g1.add(sw("voiceChat", "开启语音对话", sub: "按快捷键或 🎤 和小猫说话"))
+        g1.add(SK.row("快捷键", hotkeyPopup, fill: false, maxW: 300))
+        g1.add(sw("pageShare", "打开对话时分享当前页面", sub: "气泡里点 ✕ 就不分享"))
+        p.add(g1)
 
-        // Tab 3: perception & memory
-        let t3 = NSTabViewItem(identifier: "memory")
-        t3.label = "感知与记忆"
-        let v3 = NSView(frame: NSRect(x: 0, y: 0, width: 470, height: 360))
-        check("perception", "开启桌面感知（回答时参考你屏幕上的内容）", y: 318, in: v3)
-        label("快捷键", NSRect(x: 30, y: 289, width: 60, height: 20), in: v3)
+        p.header("陪伴")
+        let g2 = SK.Group()
+        g2.add(sw("selectWatch", "选中文字时竖起耳朵提示"))
+        g2.add(sw("selectFallback", "兼容模式", sub: "读不到选中内容时，自动复制再还原剪贴板"))
+        g2.add(sw("clipWatch", "复制文字时提示"))
+        g2.add(sw("care", "久坐 / 熬夜温柔提醒"))
+        p.add(g2)
+
+        p.header("权限")
+        axStatus.font = .systemFont(ofSize: 13)
+        let g3 = SK.Group()
+        g3.add(SK.info(axStatus, SK.button("授权辅助功能", self, #selector(askAX))))
+        p.add(g3)
+        p.hint("选中文字提示需要「辅助功能」权限：系统设置 → 隐私与安全性 → 辅助功能，打开 OrdCat。从 v0.2.8 起小猫用这台 Mac 自己的签名，授权一次以后更新不会再丢。如果开关是开着却没用，先用「−」删掉旧的 OrdCat 再重新添加。")
+
+        p.space(20)
+        p.add(SK.buttons([SK.button("清空聊天记录", self, #selector(clearHistory))]))
+        return p
+    }
+
+    // 感知与记忆
+    private func memoryPage() -> SK.Page {
+        let p = SK.Page(title: "感知与记忆")
         for h in kPerceptionHotKeys { perceptionPopup.addItem(withTitle: h.title) }
         perceptionPopup.target = self
         perceptionPopup.action = #selector(perceptionHotkeyChanged)
-        perceptionPopup.frame = NSRect(x: 96, y: 284, width: 300, height: 26)
-        v3.addSubview(perceptionPopup)
-        check("ocrFallback", "读不到文字时用 OCR 识别（需要「屏幕录制」权限）", y: 256, in: v3)
-        check("sendScreenshot", "提问时附带当前窗口截图（需要识图模型）", y: 232, in: v3)
-        check("highlight", "回答里指到的位置，在屏幕上高亮出来", y: 208, in: v3)
-        label("记忆保留", NSRect(x: 10, y: 177, width: 80, height: 20), in: v3)
+        let g1 = SK.Group()
+        g1.add(sw("perception", "开启桌面感知", sub: "回答时参考你屏幕上的内容"))
+        g1.add(SK.row("快捷键", perceptionPopup, fill: false, maxW: 300))
+        g1.add(sw("ocrFallback", "读不到文字时用 OCR 识别", sub: "需要「屏幕录制」权限"))
+        g1.add(sw("sendScreenshot", "提问时附带当前窗口截图", sub: "需要识图模型"))
+        g1.add(sw("highlight", "回答里指到的位置，在屏幕上高亮出来"))
+        p.add(g1)
+
+        p.header("记忆")
         for d in retentionOptions { retentionPopup.addItem(withTitle: "\(d) 天") }
         retentionPopup.target = self
         retentionPopup.action = #selector(retentionChanged)
-        retentionPopup.frame = NSRect(x: 96, y: 172, width: 110, height: 26)
-        v3.addSubview(retentionPopup)
-        label("排除应用", NSRect(x: 10, y: 143, width: 80, height: 20), in: v3)
         excluded.placeholderString = "Bundle ID，用逗号分隔，例如 com.tencent.xinWeChat"
-        excluded.frame = NSRect(x: 96, y: 140, width: 350, height: 24)
         excluded.target = self
         excluded.action = #selector(excludedChanged)
-        v3.addSubview(excluded)
-        memStats.font = .systemFont(ofSize: 11)
-        memStats.textColor = .secondaryLabelColor
-        memStats.frame = NSRect(x: 20, y: 44, width: 430, height: 62)
-        v3.addSubview(memStats)
-        let skHint = NSTextField(labelWithString: "「陪你刷推」等技能在 设置 → 技能 里开关。")
-        skHint.font = .systemFont(ofSize: 11); skHint.textColor = .secondaryLabelColor
-        skHint.frame = NSRect(x: 24, y: 114, width: 420, height: 16); v3.addSubview(skHint)
-        let b1 = NSButton(title: "授权屏幕录制", target: self, action: #selector(askScreen))
-        b1.frame = NSRect(x: 6, y: 14, width: 116, height: 30); v3.addSubview(b1)
-        let b2 = NSButton(title: "查看当前上下文", target: self, action: #selector(previewContext))
-        b2.frame = NSRect(x: 120, y: 14, width: 124, height: 30); v3.addSubview(b2)
-        let b3 = NSButton(title: "清空记忆", target: self, action: #selector(clearMemory))
-        b3.frame = NSRect(x: 242, y: 14, width: 96, height: 30); v3.addSubview(b3)
-        let b4 = NSButton(title: "数据文件夹", target: self, action: #selector(openData))
-        b4.frame = NSRect(x: 336, y: 14, width: 110, height: 30); v3.addSubview(b4)
-        t3.view = v3
-        tabs.addTabViewItem(t3)
+        let g2 = SK.Group()
+        g2.add(SK.row("记忆保留", retentionPopup, fill: false, maxW: 140))
+        g2.add(SK.row("排除应用", field(excluded)))
+        p.add(g2)
+        p.add(memStats)
+        p.hint("「陪你刷推」等技能在 设置 → 技能 里开关。")
+        p.space(20)
+        p.add(SK.buttons([SK.button("授权屏幕录制", self, #selector(askScreen)),
+                          SK.button("查看当前上下文", self, #selector(previewContext)),
+                          SK.button("清空记忆", self, #selector(clearMemory)),
+                          SK.button("数据文件夹", self, #selector(openData))]))
+        return p
+    }
 
-        // Tab: voice
-        let t5 = NSTabViewItem(identifier: "voice")
-        t5.label = "声音"
-        let v5 = NSView(frame: NSRect(x: 0, y: 0, width: 470, height: 360))
-        check("voice", "用语音读出小猫的回复", y: 322, in: v5)
+    // 声音
+    private func voicePage() -> SK.Page {
+        let p = SK.Page(title: "声音")
         enginePopup.addItems(withTitles: ["系统声音（离线、免费）", "云端自然声音（更像真人）"])
         enginePopup.target = self; enginePopup.action = #selector(voiceChanged)
-        row("声音来源", enginePopup, y: 290, in: v5)
         sysVoicePopup.target = self; sysVoicePopup.action = #selector(voiceChanged)
-        row("系统声音", sysVoicePopup, y: 258, in: v5)
-        label("语速", NSRect(x: 10, y: 229, width: 96, height: 20), in: v5)
-        rateSlider.frame = NSRect(x: 114, y: 226, width: 130, height: 24)
         rateSlider.target = self; rateSlider.action = #selector(voiceChanged)
-        v5.addSubview(rateSlider)
-        label("音调", NSRect(x: 244, y: 229, width: 50, height: 20), in: v5)
-        pitchSlider.frame = NSRect(x: 300, y: 226, width: 144, height: 24)
         pitchSlider.target = self; pitchSlider.action = #selector(voiceChanged)
-        v5.addSubview(pitchSlider)
-        let sysHint = NSTextField(wrappingLabelWithString: "想更自然：系统设置 → 辅助功能 → 朗读内容 → 系统声音 → 管理声音，下载带「高级」或「增强」的中文声音（如 Lilian、Tingting 增强版），装好后在上面选。")
-        sysHint.font = .systemFont(ofSize: 11); sysHint.textColor = .secondaryLabelColor
-        sysHint.frame = NSRect(x: 24, y: 184, width: 420, height: 34)
-        v5.addSubview(sysHint)
-        for p in kTTSPresets { ttsPresetPopup.addItem(withTitle: p.name) }
+        let g1 = SK.Group()
+        g1.add(sw("voice", "用语音读出小猫的回复"))
+        g1.add(SK.row("声音来源", enginePopup))
+        g1.add(SK.row("系统声音", sysVoicePopup))
+        g1.add(SK.row("语速", rateSlider))
+        g1.add(SK.row("音调", pitchSlider))
+        p.add(g1)
+        p.hint("想更自然：系统设置 → 辅助功能 → 朗读内容 → 系统声音 → 管理声音，下载带「高级」或「增强」的中文声音（如 Lilian、Tingting 增强版），装好后在上面选。")
+
+        p.header("云端声音")
+        for x in kTTSPresets { ttsPresetPopup.addItem(withTitle: x.name) }
         ttsPresetPopup.target = self; ttsPresetPopup.action = #selector(ttsPresetChanged)
-        row("云端服务", ttsPresetPopup, y: 150, in: v5)
         ttsBase.placeholderString = "https://…/v1"
-        row("接口地址", ttsBase, y: 120, in: v5)
         ttsKey.placeholderString = "云端声音的 API Key（只存在本机钥匙串）"
-        row("API Key", ttsKey, y: 90, in: v5)
-        label("模型 / 声音", NSRect(x: 10, y: 63, width: 96, height: 20), in: v5)
         ttsModel.placeholderString = "模型"
-        ttsModel.frame = NSRect(x: 114, y: 60, width: 150, height: 24); v5.addSubview(ttsModel)
-        ttsVoiceBox.frame = NSRect(x: 270, y: 58, width: 174, height: 26)
         ttsVoiceBox.completes = false
-        v5.addSubview(ttsVoiceBox)
-        let testV = NSButton(title: "▶︎ 试听", target: self, action: #selector(testVoice))
-        testV.frame = NSRect(x: 16, y: 14, width: 90, height: 30); v5.addSubview(testV)
-        let saveV = NSButton(title: "保存", target: self, action: #selector(saveVoice))
-        saveV.keyEquivalent = ""
-        saveV.frame = NSRect(x: 104, y: 14, width: 80, height: 30); v5.addSubview(saveV)
-        ttsStatus.font = .systemFont(ofSize: 11); ttsStatus.textColor = .secondaryLabelColor
-        ttsStatus.frame = NSRect(x: 190, y: 8, width: 260, height: 40)
-        v5.addSubview(ttsStatus)
-        t5.view = v5
-        tabs.addTabViewItem(t5)
-
-        // Tab 4: about & updates
-        let tSk = NSTabViewItem(identifier: "skills")
-        tSk.label = "技能"
-        skillsPane.build(xbuddy: xbuddy)
-        tSk.view = skillsPane.view
-        tabs.addTabViewItem(tSk)
-
-        let t4 = NSTabViewItem(identifier: "about")
-        t4.label = "关于"
-        let v4 = NSView(frame: NSRect(x: 0, y: 0, width: 470, height: 360))
-        versionLabel.font = .systemFont(ofSize: 20, weight: .bold)
-        versionLabel.frame = NSRect(x: 20, y: 300, width: 430, height: 28)
-        v4.addSubview(versionLabel)
-        let slogan = NSTextField(labelWithString: "A cozy cat in your island & desktop. Less burden, low power, always with you.")
-        slogan.font = .systemFont(ofSize: 11)
-        slogan.textColor = .secondaryLabelColor
-        slogan.frame = NSRect(x: 20, y: 278, width: 440, height: 18)
-        v4.addSubview(slogan)
-        updateStatus.frame = NSRect(x: 20, y: 228, width: 430, height: 40)
-        v4.addSubview(updateStatus)
-        check("autoUpdate", "自动检查更新（每 6 小时）", y: 198, in: v4)
-        let c = NSButton(title: "检查更新", target: self, action: #selector(checkUpdate))
-        c.frame = NSRect(x: 16, y: 156, width: 110, height: 30); v4.addSubview(c)
-        updateButton = NSButton(title: "立即更新", target: self, action: #selector(installUpdate))
-        updateButton.frame = NSRect(x: 126, y: 156, width: 110, height: 30); v4.addSubview(updateButton)
-        let rel = NSButton(title: "发布页", target: self, action: #selector(openReleases))
-        rel.frame = NSRect(x: 236, y: 156, width: 90, height: 30); v4.addSubview(rel)
-        let fix = NSButton(title: "修复授权", target: self, action: #selector(repairSigning))
-        fix.frame = NSRect(x: 326, y: 156, width: 110, height: 30); v4.addSubview(fix)
-        signLabel.font = .systemFont(ofSize: 11)
-        signLabel.frame = NSRect(x: 20, y: 118, width: 430, height: 32)
-        v4.addSubview(signLabel)
-        notesLabel.font = .systemFont(ofSize: 11)
-        notesLabel.textColor = .secondaryLabelColor
-        notesLabel.frame = NSRect(x: 20, y: 10, width: 430, height: 104)
-        v4.addSubview(notesLabel)
-        t4.view = v4
-        tabs.addTabViewItem(t4)
-
-        let tAcc = NSTabViewItem(identifier: "account")
-        tAcc.label = "账号"
-        accountPane.onOpenSkills = { [weak self] in
-            self?.tabsView?.selectTabViewItem(at: 4); self?.segControl?.selectedSegment = 4
-        }
-        tAcc.view = accountPane.view
-        tabs.addTabViewItem(tAcc)
-
-        // Every page scrolls both ways and follows the interface size.
-        // Swapping a tab's view detaches the old one, so wrap first and re-attach the page afterwards
-        // (this is what left the first page blank).
-        for item in tabs.tabViewItems {
-            guard let content = item.view else { continue }
-            let sv = scrollable(content)
-            item.view = sv
-            if let doc = (sv as? NSScrollView)?.documentView, content.superview !== doc {
-                content.removeFromSuperview()
-                content.frame.origin = .zero
-                doc.addSubview(content)
-            }
-        }
-        w.delegate = self
-        window = w
-        fitPages()
+        ttsVoiceBox.translatesAutoresizingMaskIntoConstraints = false
+        let g2 = SK.Group()
+        g2.add(SK.row("云端服务", ttsPresetPopup))
+        g2.add(SK.row("接口地址", field(ttsBase)))
+        g2.add(SK.row("API Key", field(ttsKey)))
+        g2.add(SK.row("模型", field(ttsModel)))
+        g2.add(SK.row("声音", ttsVoiceBox))
+        p.add(g2)
+        p.add(ttsStatus)
+        let saveV = SK.button("保存", self, #selector(saveVoice))
+        p.add(SK.buttons([SK.button("▶︎ 试听", self, #selector(testVoice)), saveV], trailing: true))
+        return p
     }
 
-    private var segControl: NSSegmentedControl?
-    private var pageScrolls: [NSScrollView] = []
-    private var restoredFrame = false
-
-    /// Top-left anchored, scrollable, zoomable wrapper around a fixed-size settings page.
-    private func scrollable(_ content: NSView) -> NSView {
-        final class Flipped: NSView { override var isFlipped: Bool { true } }
-        let doc = Flipped(frame: NSRect(origin: .zero, size: content.frame.size))
-        content.frame.origin = .zero
-        doc.addSubview(content)
-        let sv = NSScrollView(frame: NSRect(x: 0, y: 0, width: 520, height: 400))
-        sv.documentView = doc
-        sv.hasVerticalScroller = true
-        sv.hasHorizontalScroller = false
-        sv.autohidesScrollers = true
-        sv.drawsBackground = false
-        sv.borderType = .noBorder
-        sv.allowsMagnification = true
-        sv.minMagnification = 0.75
-        sv.maxMagnification = 2.0
-        sv.autoresizingMask = [.width, .height]
-        pageScrolls.append(sv)
-        return sv
+    // 技能
+    private func skillsPage() -> SK.Page {
+        let p = SK.Page(title: "技能")
+        skillsPane.build(xbuddy: xbuddy, into: p)
+        return p
     }
 
-    @objc private func segChanged(_ s: NSSegmentedControl) {
-        tabsView?.selectTabViewItem(at: s.selectedSegment)
-        fitPages()
+    // 关于
+    private func aboutPage() -> SK.Page {
+        let p = SK.Page(title: "关于")
+        versionLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+        p.add(versionLabel, full: false, gap: 4)
+        p.hint("A cozy cat in your island & desktop. Less burden, low power, always with you.")
+
+        p.header("更新")
+        updateStatus.font = .systemFont(ofSize: 13)
+        updateStatus.textColor = .labelColor
+        let g = SK.Group()
+        g.add(SK.info(updateStatus))
+        g.add(sw("autoUpdate", "自动检查更新（每 6 小时）"))
+        p.add(g)
+        updateButton = SK.button("立即更新", self, #selector(installUpdate))
+        p.add(SK.buttons([SK.button("检查更新", self, #selector(checkUpdate)), updateButton,
+                          SK.button("发布页", self, #selector(openReleases))]))
+
+        p.header("签名与授权")
+        signLabel.font = .systemFont(ofSize: 12)
+        signLabel.textColor = .labelColor
+        let g2 = SK.Group()
+        g2.add(SK.info(signLabel, SK.button("修复授权", self, #selector(repairSigning))))
+        p.add(g2)
+
+        p.header("更新内容")
+        p.add(notesLabel)
+        return p
+    }
+
+    // 账号
+    private func accountPage() -> SK.Page {
+        let p = SK.Page(title: "账号")
+        accountPane.onOpenSkills = { [weak self] in self?.select(page: 4) }
+        accountPane.build(into: p)
+        return p
     }
 
     @objc private func appearanceChanged() {
@@ -2536,27 +2503,14 @@ final class SettingsController: NSObject, NSWindowDelegate {
         }
     }
 
-    /// Pages follow the window: each page scales to fill the window's width (no manual size setting).
-    private func fitPages() {
-        for sv in pageScrolls {
-            guard let doc = sv.documentView, doc.frame.width > 0 else { continue }
-            let avail = sv.frame.width - 4
-            guard avail > 50 else { continue }
-            let m = max(0.75, min(2.0, avail / doc.frame.width))
-            let stepped = (m * 40).rounded(.down) / 40
-            if abs(sv.magnification - stepped) > 0.001 { sv.magnification = stepped }
-        }
-    }
-
     func windowDidResize(_ notification: Notification) {
-        fitPages()
-        if let w = window { UserDefaults.standard.set(NSStringFromRect(w.frame), forKey: "settingsFrame") }
+        if let w = window { UserDefaults.standard.set(NSStringFromRect(w.frame), forKey: "settingsFrame2") }
     }
     func windowDidMove(_ notification: Notification) {
-        if let w = window { UserDefaults.standard.set(NSStringFromRect(w.frame), forKey: "settingsFrame") }
+        if let w = window { UserDefaults.standard.set(NSStringFromRect(w.frame), forKey: "settingsFrame2") }
     }
 
-    @objc private func toggled(_ b: NSButton) {
+    @objc private func toggled(_ b: NSSwitch) {
         let on = b.state == .on
         switch b.identifier?.rawValue ?? "" {
         case "voice": Prefs.voice = on
@@ -2754,9 +2708,9 @@ final class SettingsController: NSObject, NSWindowDelegate {
     }
 
     @objc private func modelPaneChanged(_ seg: NSSegmentedControl) {
-        for (i, p) in modelPanes.enumerated() { p.isHidden = i != seg.selectedSegment }
+        showModelPane(seg.selectedSegment)
     }
-    @objc private func goVoiceTab() { tabsView?.selectTabViewItem(at: 3); segControl?.selectedSegment = 3 }
+    @objc private func goVoiceTab() { select(page: 3) }
 
     @objc private func visionPresetChanged() {
         let p = kVisionPresets[visionPreset.indexOfSelectedItem]
