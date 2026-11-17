@@ -2173,7 +2173,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     }
 
     private func build() {
-        let saved = UserDefaults.standard.string(forKey: "settingsFrame2").map(NSRectFromString)
+        let saved = UserDefaults.standard.string(forKey: "settingsFrame3").map(NSRectFromString)
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 580),
                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         w.title = "OrdCat 设置 · v\(Updater.shared.current)"
@@ -2181,8 +2181,13 @@ final class SettingsController: NSObject, NSWindowDelegate {
         w.minSize = NSSize(width: 640, height: 440)
         if let f = saved, f.width >= 640, f.height >= 440 { w.setFrame(f, display: false); restoredFrame = true }
 
-        let root = NSView()
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 780, height: 580))
         w.contentView = root
+        // Never let Auto Layout shrink the window to nothing (pages have no fixed height of their own).
+        w.contentMinSize = NSSize(width: 640, height: 440)
+        NSLayoutConstraint.activate([
+            root.widthAnchor.constraint(greaterThanOrEqualToConstant: 640),
+            root.heightAnchor.constraint(greaterThanOrEqualToConstant: 440)])
         let side = SettingsSidebar(items: [
             ("cpu", "模型"), ("pawprint", "小猫"), ("eye", "感知与记忆"), ("speaker.wave.2", "声音"),
             ("sparkles", "技能"), ("info.circle", "关于"), ("person.crop.circle", "账号")])
@@ -2217,6 +2222,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
                 sv.trailingAnchor.constraint(equalTo: pageHost.trailingAnchor)])
             pages.append(sv)
         }
+        if !restoredFrame { w.setContentSize(NSSize(width: 780, height: 580)) }
         w.delegate = self
         window = w
         select(page: 0)
@@ -2504,10 +2510,10 @@ final class SettingsController: NSObject, NSWindowDelegate {
     }
 
     func windowDidResize(_ notification: Notification) {
-        if let w = window { UserDefaults.standard.set(NSStringFromRect(w.frame), forKey: "settingsFrame2") }
+        if let w = window, w.frame.height >= 440 { UserDefaults.standard.set(NSStringFromRect(w.frame), forKey: "settingsFrame3") }
     }
     func windowDidMove(_ notification: Notification) {
-        if let w = window { UserDefaults.standard.set(NSStringFromRect(w.frame), forKey: "settingsFrame2") }
+        if let w = window, w.frame.height >= 440 { UserDefaults.standard.set(NSStringFromRect(w.frame), forKey: "settingsFrame3") }
     }
 
     @objc private func toggled(_ b: NSSwitch) {
