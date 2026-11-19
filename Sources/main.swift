@@ -1211,6 +1211,7 @@ final class Bubble: NSObject {
     var onExpand: (() -> Void)?
     var onTopics: ((NSView) -> Void)?
     private var topicsButton: NSButton!
+    private var squareButton: NSButton!
     var onMic: (() -> Void)?
     var anchor: () -> NSPoint = { .zero }   // cat head centre, screen coords
     let width: CGFloat = 340
@@ -1262,6 +1263,13 @@ final class Bubble: NSObject {
         topicsButton.contentTintColor = .secondaryLabelColor
         topicsButton.toolTip = "默认只参考当前页面；想接着聊以前的内容，在这里选"
         card.addSubview(topicsButton)
+
+        squareButton = NSButton(title: "🐟 广场", target: self, action: #selector(doSquare))
+        squareButton.isBordered = false
+        squareButton.font = .systemFont(ofSize: 11)
+        squareButton.contentTintColor = .secondaryLabelColor
+        squareButton.toolTip = "打开任务广场"
+        card.addSubview(squareButton)
 
         textView.isEditable = false
         textView.isSelectable = true
@@ -1355,6 +1363,7 @@ final class Bubble: NSObject {
 
     @objc private func doExpand() { onExpand?() }
     @objc private func doTopics() { onTopics?(topicsButton) }
+    @objc private func doSquare() { TaskSquare.shared.showWindow() }
     @objc private func doMic() { onMic?() }
     @objc private func doSpeakPause() { onSpeakPause?() }
     @objc private func doSpeakStop() { onSpeakStop?() }
@@ -1549,6 +1558,8 @@ final class Bubble: NSObject {
         topicsButton.isHidden = !chatMode
         // Read-aloud controls sit right after the "OrdCat" title.
         let speaking = speakState != 0
+        squareButton.frame = NSRect(x: width - pad - 90 - 92 - 62, y: y - 2, width: 60, height: 20)
+        squareButton.isHidden = !chatMode || speaking
         speakPause.isHidden = !speaking
         speakStop.isHidden = !speaking
         if speaking {

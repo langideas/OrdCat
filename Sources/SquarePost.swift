@@ -636,6 +636,7 @@ final class SquarePane: NSObject {
     private let balance = SK.WrapLabel("", size: 13, secondary: false)
     private let caps = SK.WrapLabel("", size: 12)
     private let auto = NSSwitch()
+    private let notify = NSSwitch()
     private var kindBoxes: [NSButton] = []
 
     func build(into p: SK.Page) {
@@ -653,7 +654,10 @@ final class SquarePane: NSObject {
         p.header("自动找任务")
         auto.target = self
         auto.action = #selector(autoToggled(_:))
+        notify.target = self
+        notify.action = #selector(notifyToggled(_:))
         let g = SK.Group()
+        g.add(SK.toggle("广场有新任务时提醒我", notify, sub: "大约每 10 分钟看一次，有你的小猫能做的新任务就弹出来问你"))
         g.add(SK.toggle("小猫自己去广场找适合它的任务", auto, sub: "大约每 15 分钟看一次，找到会先问你，接不接你说了算"))
         p.add(g)
 
@@ -684,12 +688,14 @@ final class SquarePane: NSObject {
             : (Account.shared.configured ? "🐟 先登录账号（设置 → 账号）才能用任务广场" : "🐟 账号服务还在开通中")
         caps.stringValue = TaskSquare.capsLine
         auto.state = Prefs.squareAuto ? .on : .off
+        notify.state = Prefs.squareNotify ? .on : .off
         let chosen = Set(Prefs.squareKinds)
         for b in kindBoxes { b.state = chosen.contains(b.title) ? .on : .off }
         if sq.ready && sq.balance == nil { sq.refreshBalance() }
     }
 
     @objc private func autoToggled(_ s: NSSwitch) { Prefs.squareAuto = s.state == .on }
+    @objc private func notifyToggled(_ s: NSSwitch) { Prefs.squareNotify = s.state == .on }
     @objc private func kindToggled(_ b: NSButton) {
         var k = Prefs.squareKinds.filter { $0 != b.title }
         if b.state == .on { k.append(b.title) }

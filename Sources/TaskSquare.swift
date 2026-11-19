@@ -15,6 +15,8 @@ extension Prefs {
     static var squareAuto: Bool { get { d.object(forKey: "squareAuto") as? Bool ?? false } set { d.set(newValue, forKey: "squareAuto") } }
     /// Task kinds the user wants the cat to pick from (empty = all).
     static var squareKinds: [String] { get { d.stringArray(forKey: "squareKinds") ?? [] } set { d.set(newValue, forKey: "squareKinds") } }
+    /// The cat pops up when new tasks it can do show up on the square (on by default).
+    static var squareNotify: Bool { get { d.object(forKey: "squareNotify") as? Bool ?? true } set { d.set(newValue, forKey: "squareNotify") } }
     static var squareSkipped: [String] { get { d.stringArray(forKey: "squareSkipped") ?? [] } set { d.set(Array(newValue.suffix(300)), forKey: "squareSkipped") } }
     static var squareSeen: [String] { get { d.stringArray(forKey: "squareSeen") ?? [] } set { d.set(Array(newValue.suffix(300)), forKey: "squareSeen") } }
 }
@@ -93,6 +95,7 @@ final class TaskSquare: NSObject {
     private let solveLLM = LLM()
     private var timer: Timer?
     private var lastMatch = Date.distantPast
+    private var lastNotify = Date.distantPast
     private var solving = false
     private var window: SquareWindow?
     private var draft: SquareDraft?
@@ -143,6 +146,30 @@ final class TaskSquare: NSObject {
         refreshBalance()
         checkMine()
         if Prefs.squareAuto && !solving && Date().timeIntervalSince(lastMatch) > 15 * 60 { autoMatch() }
+        else if Prefs.squareNotify && !Prefs.squareAuto && !solving && Date().timeIntervalSince(lastNotify) > 10 * 60 { notifyNew() }
+    }
+
+    /// New tasks this cat can do → one popup with what's there; each task is announced only once.
+    private func notifyNew() {
+        guard TaskSquare.myCaps.contains("text") else { return }
+        lastNotify = Date()
+        let uid = acct.profile.userID ?? ""
+        let skipped = Set(Prefs.squareSkipped)
+        let kinds = Set(Prefs.squareKinds)
+        openTasks { [weak self] ts, err in
+            guard let self = self, err == nil else { return }
+            var seen = Prefs.squareSeen
+            let fresh = ts.filter { $0.posterID != uid && !skipped.contains($0.id) && !seen.contains("n:" + $0.id)
+                && self.canDo($0) && (kinds.isEmpty || kinds.contains($0.kind)) }
+            guard let first = fresh.first else { return }
+            seen.append(contentsOf: fresh.map { "n:" + $0.id })
+            Prefs.squareSeen = seen
+            let more = fresh.count > 1 ? "等 \(fresh.count) 个新任务" : ""
+            self.present?("🐟 广场上有「\(first.title)」\(more)（\(first.kind) · \(first.reward) 条小鱼干），要我接吗？",
+                          [("接这个", { [weak self] in self?.take(first) }),
+                           ("看看广场", { [weak self] in self?.showWindow() }),
+                           ("不再提醒", { Prefs.squareNotify = false })], 25)
+        }
     }
 
     // MARK: server
