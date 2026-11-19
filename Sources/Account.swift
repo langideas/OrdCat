@@ -63,6 +63,8 @@ final class Account {
         return s
     }
     private var anonKey: String? { d.string(forKey: "account.anon").flatMap { $0.isEmpty ? nil : $0 } }
+    /// Project address for public storage links.
+    var publicBase: String? { baseURL }
     var configured: Bool { baseURL != nil && anonKey != nil }
     var signedIn: Bool { profile.userID != nil && session != nil }
     var accountLine: String {
@@ -302,7 +304,8 @@ final class Account {
 
     // MARK: HTTP
 
-    private func request(_ method: String, _ path: String, json: Any? = nil, raw: Data? = nil, contentType: String? = nil,
+    /// Supabase REST / storage / functions call with the signed-in session (also used by 任务广场).
+    func request(_ method: String, _ path: String, json: Any? = nil, raw: Data? = nil, contentType: String? = nil,
                          headers: [String: String] = [:], auth: Bool = true,
                          done: @escaping (Any?, String?) -> Void) {
         guard let base = baseURL, let anon = anonKey, let url = URL(string: base + path) else {
@@ -326,7 +329,7 @@ final class Account {
             }
             URLSession.shared.dataTask(with: req) { data, resp, error in
                 let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-                let obj = data.flatMap { try? JSONSerialization.jsonObject(with: $0) }
+                let obj = data.flatMap { try? JSONSerialization.jsonObject(with: $0, options: .fragmentsAllowed) }
                 var err: String? = nil
                 if let e = error { err = e.localizedDescription }
                 else if code >= 300 {

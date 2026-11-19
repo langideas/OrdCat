@@ -207,6 +207,7 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
                       if on { _ = SelectionWatcher.trusted(prompt: true) }
                   },
                   settings: { [weak self] in self?.agentSettings() ?? NSView() })
+
             // 以后的新技能加在这里。
         ]
     }

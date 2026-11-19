@@ -2036,6 +2036,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     var voice: Voice?
     var xbuddy: XCompanion?
     let skillsPane = SkillsPane()
+    let squarePane = SquarePane()
     let accountPane = AccountPane()
     private let enginePopup = NSPopUpButton()
     private let sysVoicePopup = NSPopUpButton()
@@ -2056,6 +2057,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     func show(tab: Int = 0) {
         if window == nil { build() }
         skillsPane.refresh()
+        squarePane.refresh()
         accountPane.refresh()
         base.stringValue = Prefs.base
         model.stringValue = Prefs.model
@@ -2190,7 +2192,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
             root.heightAnchor.constraint(greaterThanOrEqualToConstant: 440)])
         let side = SettingsSidebar(items: [
             ("cpu", "模型"), ("pawprint", "小猫"), ("eye", "感知与记忆"), ("speaker.wave.2", "声音"),
-            ("sparkles", "技能"), ("info.circle", "关于"), ("person.crop.circle", "账号")])
+            ("sparkles", "技能"), ("fish", "任务广场"), ("info.circle", "关于"), ("person.crop.circle", "账号")])
         side.onSelect = { [weak self] i in self?.select(page: i) }
         sidebar = side
         let divider = NSBox()
@@ -2212,7 +2214,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
             pageHost.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
             pageHost.trailingAnchor.constraint(equalTo: root.trailingAnchor)])
 
-        for page in [modelPage(), catPage(), memoryPage(), voicePage(), skillsPage(), aboutPage(), accountPage()] {
+        for page in [modelPage(), catPage(), memoryPage(), voicePage(), skillsPage(), squarePage(), aboutPage(), accountPage()] {
             let sv = page.scroller()
             pageHost.addSubview(sv)
             NSLayoutConstraint.activate([
@@ -2446,6 +2448,13 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private func skillsPage() -> SK.Page {
         let p = SK.Page(title: "技能")
         skillsPane.build(xbuddy: xbuddy, into: p)
+        return p
+    }
+
+    // 任务广场（功能，不是技能）
+    private func squarePage() -> SK.Page {
+        let p = SK.Page(title: "任务广场")
+        squarePane.build(into: p)
         return p
     }
 
@@ -2877,7 +2886,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chatWindow.onSend = { [weak self] text, imgs in self?.ask(text, images: imgs, inBubble: false) }
         chatWindow.onMic = { [weak self] in self?.toggleVoice(fromWindow: true) }
         chatWindow.onClear = { [weak self] in self?.store.clear() }
-        chatWindow.onOpenAccount = { [weak self] in self?.settings.show(tab: 6) }
+        chatWindow.onOpenAccount = { [weak self] in self?.settings.show(tab: 7) }
         bubble.anchor = { [weak self] in self?.catView.headScreenPoint() ?? .zero }
         bubble.onSend = { [weak self] text in self?.ask(text) }
         bubble.onExpand = { [weak self] in self?.bubble.hide(); self?.chatWindow.show() }
@@ -2977,10 +2986,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.bubble.notify(on ? "「帮我操作电脑」开啦 🤖 跟我说「帮我……」试试，每一步我都会先问你。" : "「帮我操作电脑」关掉啦。", hold: 5)
                 return
             }
+            if id == "square" {
+                self.bubble.notify(on ? "「任务广场」开啦 🐟 说「发任务：……」把问题发到广场；我也会去广场找适合我的任务，接之前先问你。" : "「任务广场」关掉啦。", hold: 6)
+                return
+            }
             guard id == "x" else { return }
             self.bubble.notify(on ? "「陪你刷推」开啦 🐾 去 x.com 刷一刷，我在旁边看着。" : "「陪你刷推」关掉啦，我不看 X 了。", hold: 4)
         }
         xbuddy.start()
+        TaskSquare.shared.present = { [weak self] text, acts, hold in self?.catPopup(text, acts, hold: hold) }
+        TaskSquare.shared.openAccount = { [weak self] in self?.settings.show(tab: 7) }
+        TaskSquare.shared.start()
         Updater.shared.onUpdateAvailable = { [weak self] v in self?.announceUpdate(v) }
         if Prefs.autoUpdate { Updater.shared.startAutoCheck() }
         RemoteConfig.shared.fetch { [weak self] text in
@@ -3079,6 +3095,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         perceptionItem.target = self
         m.addItem(perceptionItem)
         m.addItem(withTitle: "查看当前上下文", action: #selector(previewContextMenu), keyEquivalent: "").target = self
+        m.addItem(withTitle: "🐟 任务广场", action: #selector(menuSquare), keyEquivalent: "").target = self
         m.addItem(.separator())
         m.addItem(withTitle: "设置…", action: #selector(openSettings), keyEquivalent: ",").target = self
         m.addItem(.separator())
@@ -3094,6 +3111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         else { catPanel.orderFrontRegardless(); catView.peekIn() }
     }
     @objc private func openSettings() { settings.show() }
+    @objc private func menuSquare() { TaskSquare.shared.showWindow() }
     @objc private func previewContextMenu() { previewContext() }
 
     // MARK: perception
@@ -3222,7 +3240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(true, forKey: key)
             DispatchQueue.main.async {
                 self?.bubble.notify("这一版没能用本机固定签名，所以每次更新都要重新授权。可以在 设置 → 关于 点「修复授权」再试一次。", 
-                                    actions: [("去修复", { [weak self] in self?.settings.show(tab: 5) })], hold: 12)
+                                    actions: [("去修复", { [weak self] in self?.settings.show(tab: 6) })], hold: 12)
             }
         }
     }
@@ -3879,6 +3897,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func ask(_ text: String, images: [Data] = [], spoken: Bool = false, inBubble: Bool = true,
                      pageOverride: String? = nil, extra: String? = nil, after: ((String) -> String?)? = nil) {
         xGreetingLive = false
+        // 任务广场: "发任务：……" opens the post form instead of a chat answer.
+        if images.isEmpty && pageOverride == nil, let pre = TaskSquare.postIntent(text) {
+            TaskSquare.shared.postDialog(prefill: pre)
+            return
+        }
         // 技能「帮我操作电脑」: "帮我……" runs the desktop agent instead of a plain chat answer.
         if images.isEmpty && pageOverride == nil && !Prefs.agentOn && DesktopAgent.isTask(text) {
             catPopup("🤖 这件事要「帮我操作电脑」技能来做，它现在是关着的。去 设置 → 技能 打开开关，我就能替你动手。",
