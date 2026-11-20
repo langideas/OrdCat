@@ -22,7 +22,7 @@ a{color:inherit}
 .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
 nav{display:flex;align-items:center;justify-content:space-between;height:72px}
 .brand{display:flex;align-items:center;gap:10px;text-decoration:none}
-.brand img{width:34px;height:34px;border-radius:9px}
+.brand img{width:34px;height:34px;border-radius:9px}.brand img.eyes{width:auto;height:28px;border-radius:0}
 .brand .wm{font-family:Fredoka,sans-serif;font-weight:600;font-size:25px;color:var(--amber);letter-spacing:-.2px;line-height:1}
 .brand .cn{font-family:KuaiLe,sans-serif;font-size:14px;color:var(--mute);letter-spacing:2px;margin-left:2px;line-height:1;padding-top:4px}
 nav .links{display:flex;align-items:center}
@@ -77,7 +77,7 @@ footer a{color:var(--mute)}
 <body>
 <div class="wrap">
 <nav>
-  <a class="brand" href="#"><img src="logo.svg" alt="OrdCat"><span class="wm">OrdCat</span></a>
+  <a class="brand" href="#"><img class="eyes" src="eyes.svg" alt="OrdCat"><span class="wm">OrdCat</span></a>
   <div class="links"><a href="#features" data-i="nav1">功能</a><a href="#install" data-i="nav2">安装</a><a href="#faq" data-i="nav3">常见问题</a><a href="https://github.com/langideas/OrdCat">GitHub</a>
     <button class="tg" id="langBtn" onclick="ocToggleLang()">EN</button><button class="tg" id="themeBtn" onclick="ocCycleTheme()">◐</button></div>
 </nav>
