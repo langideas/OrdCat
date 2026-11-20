@@ -28,3 +28,14 @@
   window.ocLang=function(){return lang};
   document.addEventListener('DOMContentLoaded',function(){applyTheme(t);applyLang(lang)});
 })();
+
+// Nav logo eyes blink like the cat (2.2–6 s apart, 160 ms, sometimes twice).
+(function(){
+  function go(){
+    var e=document.querySelector('.brand img.eyes');if(!e||!e.animate)return;
+    if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+    function once(){e.animate([{transform:'scaleY(1)'},{transform:'scaleY(.15)'},{transform:'scaleY(1)'}],{duration:160,easing:'ease-in-out'})}
+    (function sch(){setTimeout(function(){once();if(Math.random()<.25)setTimeout(once,260);sch()},2200+Math.random()*3800)})();
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',go);else go();
+})();
