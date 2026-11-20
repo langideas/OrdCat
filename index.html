@@ -111,7 +111,8 @@ footer a{color:var(--mute)}
   </div>
 </div>
 
-<video id="demoVid" class="shot demo" controls playsinline preload="metadata" poster="demo-zh.jpg" src="OrdCat-demo-zh.mp4"></video>
+<video id="demoVid" class="shot demo" controls playsinline preload="none" poster="demo-zh.jpg"></video>
+<script>(function(){var v=document.getElementById('demoVid');window.ocDemoSrc=function(l){return 'OrdCat-demo-'+l+((Math.min(screen.width,screen.height)<900||window.innerWidth<900)?'-1080':'')+'.mp4'};var l=(document.documentElement.lang||'zh').indexOf('en')===0?'en':'zh';v.setAttribute('poster','demo-'+l+'.jpg');v.setAttribute('src',ocDemoSrc(l))})()</script>
 
 <section id="features">
   <h2 data-i="fh">不催你卷，只陪着你</h2>
@@ -243,7 +244,7 @@ document.addEventListener('oc-lang',setVer);
 })();
 </script>
 <script>
-document.addEventListener('oc-lang',function(e){var v=document.getElementById('demoVid');if(!v)return;var l=e.detail==='en'?'en':'zh';var src='OrdCat-demo-'+l+'.mp4';if(v.getAttribute('src')!==src){v.pause();v.setAttribute('poster','demo-'+l+'.jpg');v.setAttribute('src',src);v.load()}});
+document.addEventListener('oc-lang',function(e){var v=document.getElementById('demoVid');if(!v)return;var l=e.detail==='en'?'en':'zh';var src=window.ocDemoSrc?ocDemoSrc(l):'OrdCat-demo-'+l+'.mp4';if(v.getAttribute('src')!==src){v.pause();v.setAttribute('poster','demo-'+l+'.jpg');v.setAttribute('src',src);v.load()}});
 </script>
 </body>
 </html>
