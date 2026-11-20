@@ -53,6 +53,7 @@ h1 em{font-style:normal;color:var(--amber)}
 #say.on{opacity:1;transform:translateY(0)}
 .shot{border-radius:18px;border:1px solid var(--line);width:100%;display:block;box-shadow:0 40px 80px var(--shadow)}
 section{padding:64px 0}
+.demo{display:block;width:100%;border-radius:18px;border:1px solid var(--line);background:#000;aspect-ratio:16/9}
 h2{font-size:32px;margin:0 0 10px}
 .lead{color:var(--mute);margin:0 0 34px}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
@@ -112,6 +113,11 @@ footer a{color:var(--mute)}
 
 <img class="shot" src="desk.jpg" alt="复制报错后，小猫在屏幕边上给出提示" data-i-alt="shotalt">
 
+<section id="demo">
+  <h2 data-i="vh">50 秒，看它怎么陪你</h2>
+  <video id="demoVid" class="demo" controls playsinline preload="metadata" poster="demo-zh.jpg" src="OrdCat-demo-zh.mp4"></video>
+</section>
+
 <section id="features">
   <h2 data-i="fh">不催你卷，只陪着你</h2>
   <p class="lead" data-i="fl">平时几乎不占电脑资源，需要的时候轻轻一点就在。</p>
@@ -160,6 +166,7 @@ footer a{color:var(--mute)}
 </div>
 <script>
 window.OC_I18N={
+ vh:"OrdCat in 50 seconds",
  __title:"OrdCat · The AI cat that keeps you company",
  __desc:"OrdCat is an AI cat that lives at the edge of your Mac screen: low power, no burden, sees what you see, and keeps you company with the AI model you choose.",
  nav1:"Features",nav2:"Install",nav3:"FAQ",
@@ -240,6 +247,9 @@ document.addEventListener('oc-lang',setVer);
     requestAnimationFrame(loop);
   })(last);
 })();
+</script>
+<script>
+document.addEventListener('oc-lang',function(e){var v=document.getElementById('demoVid');if(!v)return;var l=e.detail==='en'?'en':'zh';var src='OrdCat-demo-'+l+'.mp4';if(v.getAttribute('src')!==src){v.pause();v.setAttribute('poster','demo-'+l+'.jpg');v.setAttribute('src',src);v.load()}});
 </script>
 </body>
 </html>
