@@ -7,7 +7,7 @@
 nav{display:flex;align-items:center;justify-content:space-between;height:68px}
 nav a{color:var(--mute);text-decoration:none;font-size:14px;margin-left:18px}
 .brand{display:flex;align-items:center;gap:10px;text-decoration:none;margin:0!important}
-.brand img{width:32px;height:32px;border-radius:9px}.brand img.eyes{width:auto;height:28px;border-radius:0}
+.brand img{width:32px;height:32px;border-radius:9px}.brand img.eyes{width:auto;height:21px;border-radius:0;margin-right:-2px}
 .brand .wm{font-family:Fredoka,sans-serif;font-weight:600;font-size:23px;color:#f5b53d;line-height:1}
 .brand .cn{font-family:KuaiLe,sans-serif;font-size:13px;color:var(--mute);letter-spacing:2px;line-height:1;padding-top:4px}
 .tg{margin-left:14px;height:30px;min-width:36px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:600 13px/28px -apple-system,sans-serif;cursor:pointer}
