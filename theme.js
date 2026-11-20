@@ -20,8 +20,10 @@
       if(!el.hasAttribute('data-zh-alt'))el.setAttribute('data-zh-alt',el.getAttribute('alt')||'');
       el.setAttribute('alt',v==='zh'?el.getAttribute('data-zh-alt'):e)});
     if(dict.__title){if(!d.hasAttribute('data-zh-title'))d.setAttribute('data-zh-title',document.title);document.title=v==='zh'?d.getAttribute('data-zh-title'):dict.__title}
+    var md=document.querySelector('meta[name=description]');if(md&&dict.__desc){if(!md.hasAttribute('data-zh'))md.setAttribute('data-zh',md.content);md.content=v==='zh'?md.getAttribute('data-zh'):dict.__desc}
     var b=document.getElementById('langBtn');if(b)b.textContent=v==='zh'?'EN':'中文';
     document.dispatchEvent(new CustomEvent('oc-lang',{detail:v}));}
+  d.setAttribute('data-lang',lang);
   window.ocToggleLang=function(){applyLang(lang==='zh'?'en':'zh')};
   window.ocLang=function(){return lang};
   document.addEventListener('DOMContentLoaded',function(){applyTheme(t);applyLang(lang)});
