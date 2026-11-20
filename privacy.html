@@ -27,15 +27,15 @@
 <p>OrdCat 不提供模型，由你自己配置（BYOM）。当你提问、分享页面、复制文字让小猫看看、使用看图或语音朗读等功能时，相关内容（你的问题、所选的屏幕文字或截图片段、相关记忆片段）会<b>直接从你的 Mac 发送到你配置的服务商</b>，例如 OpenAI、Anthropic、Google Gemini、DeepSeek、Groq、硅基流动，或你本机的 Ollama。这些数据不经过我们的服务器。服务商如何处理数据，以其各自的隐私政策为准。使用本地 Ollama 时，数据不离开你的电脑。</p>
 <p>发送前，OrdCat 会在本地尝试给密码、密钥、卡号等内容打码。</p>
 
-<h2>4. 账号与任务广场（可选）</h2>
+<h2>4. 账号与猫帮圈（可选）</h2>
 <p>只有你注册登录账号后，以下数据才会保存在我们使用的后端服务 <b>Supabase</b>（Supabase Inc.，数据中心位于新加坡）：</p>
 <table>
 <tr><th>数据</th><th>用途</th><th>谁能看到</th></tr>
 <tr><td>邮箱地址、登录记录</td><td>用邮箱验证码登录</td><td>仅你本人和运营者</td></tr>
-<tr><td>用户名、显示名称、头像</td><td>个人资料、广场署名</td><td>头像公开可访问；名称对登录用户可见</td></tr>
-<tr><td>小鱼干余额和流水</td><td>任务广场奖励</td><td>仅你本人</td></tr>
-<tr><td>你发布的任务（标题、说明、类型、链接、附件）</td><td>任务广场</td><td><b>所有登录用户可见</b>；附件通过公开链接可访问</td></tr>
-<tr><td>你提交的回答、使用的模型名称</td><td>任务广场</td><td>任务发布者和你本人</td></tr>
+<tr><td>用户名、显示名称、头像</td><td>个人资料、猫帮圈署名</td><td>头像公开可访问；名称对登录用户可见</td></tr>
+<tr><td>小鱼干余额和流水</td><td>猫帮圈奖励</td><td>仅你本人</td></tr>
+<tr><td>你发布的任务（标题、说明、类型、链接、附件）</td><td>猫帮圈</td><td><b>所有登录用户可见</b>；附件通过公开链接可访问</td></tr>
+<tr><td>你提交的回答、使用的模型名称</td><td>猫帮圈</td><td>任务发布者和你本人</td></tr>
 <tr><td>订阅状态（如以后开通付费）</td><td>开通付费技能</td><td>仅你本人</td></tr>
 </table>
 <p>登录验证码邮件通过 <b>Resend</b>（Resend Inc.，美国）从 noreply@ordcat.de 发出，Resend 会处理你的邮箱地址。</p>
@@ -74,7 +74,7 @@
 <p>The following is stored locally in ~/Library/Application Support/OrdCat or in the macOS Keychain and is <b>not sent to us</b>: chat history; local memories (text excerpts of the active window, read via macOS Accessibility or the system's built-in text recognition and filtered locally first); API keys and login data (Keychain); settings. Speech recognition uses macOS and, where the device supports it, runs entirely on-device. You can export or delete this data in Settings.</p>
 <h2>3. Data sent to the AI provider you choose</h2>
 <p>OrdCat does not provide its own AI model. When you ask a question or use a feature, the content needed for it (your question, selected on-screen text or an image excerpt, relevant local memories) is sent <b>directly from your Mac to the provider you configured</b> (e.g. OpenAI, Anthropic, Google, DeepSeek, Groq, SiliconFlow, or a local Ollama). This data does not pass through our servers. The provider's privacy terms apply. Passwords, keys and card numbers are masked locally before sending wherever possible.</p>
-<h2>4. Account and Task Square (optional)</h2>
+<h2>4. Account and Cat Circle (optional)</h2>
 <p>Only if you create an account, we store with our processor <b>Supabase Inc.</b> (data centre in Singapore): email address and login data; username, display name and avatar (publicly retrievable); balance and transactions of “Dried Fish” points; tasks you post including links and attachments (<b>visible to all signed-in users</b>, attachments retrievable via public links); your answers and the name of the model used (visible to the task poster); subscription status where applicable. Sign-in codes are sent via <b>Resend Inc.</b> (USA). You can delete your account at any time in Settings; the data above is deleted with it.</p>
 <h2>5. Updates</h2>
 <p>The app regularly contacts <b>GitHub</b> (GitHub Inc., USA) to check for and download updates and to read a public configuration file. Your IP address is processed in the process; we do not send personal data.</p>
@@ -100,7 +100,7 @@
 <p>Folgende Daten werden lokal unter ~/Library/Application Support/OrdCat bzw. im macOS-Schlüsselbund gespeichert und <b>nicht an uns übertragen</b>: Chatverläufe; lokale Erinnerungen (Textauszüge des aktiven Fensters, gelesen über die macOS-Bedienungshilfen bzw. die systemeigene Texterkennung, vorab lokal gefiltert); API-Schlüssel und Anmeldedaten (Schlüsselbund); Einstellungen. Die Spracherkennung erfolgt über macOS und, sofern vom Gerät unterstützt, ausschließlich lokal. Sie können diese Daten in den Einstellungen exportieren oder löschen.</p>
 <h2>3. Übermittlung an den von Ihnen gewählten KI-Anbieter</h2>
 <p>OrdCat stellt kein eigenes KI-Modell bereit. Wenn Sie eine Frage stellen oder eine Funktion nutzen, werden die dafür nötigen Inhalte (Ihre Frage, ausgewählter Bildschirmtext oder Bildausschnitt, relevante lokale Erinnerungen) <b>direkt von Ihrem Mac an den von Ihnen konfigurierten Anbieter</b> gesendet (z. B. OpenAI, Anthropic, Google, DeepSeek, Groq, SiliconFlow oder lokal Ollama). Diese Daten laufen nicht über unsere Server. Es gelten die Datenschutzbestimmungen des jeweiligen Anbieters. Passwörter, Schlüssel und Kartennummern werden vor dem Senden lokal möglichst maskiert.</p>
-<h2>4. Konto und Aufgaben-Marktplatz (optional)</h2>
+<h2>4. Konto und „Cat Circle“ (Katzen-Hilfekreis) (optional)</h2>
 <p>Nur wenn Sie ein Konto anlegen, speichern wir bei unserem Auftragsverarbeiter <b>Supabase Inc.</b> (Rechenzentrum Singapur): E-Mail-Adresse und Anmeldedaten; Benutzername, Anzeigename, Profilbild (öffentlich abrufbar); Guthaben und Buchungen der „Trockenfisch“-Punkte; von Ihnen veröffentlichte Aufgaben einschließlich Links und Anhängen (<b>für alle angemeldeten Nutzer sichtbar</b>, Anhänge über öffentliche Links abrufbar); Ihre Antworten und den Namen des verwendeten Modells (sichtbar für den Aufgabensteller); ggf. Abostatus. Anmeldecodes werden über <b>Resend Inc.</b> (USA) versendet. Sie können Ihr Konto jederzeit in den Einstellungen löschen; die genannten Daten werden dabei gelöscht.</p>
 <h2>5. Updates</h2>
 <p>Die App ruft regelmäßig <b>GitHub</b> (GitHub Inc., USA) auf, um nach Updates zu suchen, diese herunterzuladen und eine öffentliche Konfigurationsdatei zu lesen. Dabei wird Ihre IP-Adresse verarbeitet; personenbezogene Daten senden wir dabei nicht.</p>
