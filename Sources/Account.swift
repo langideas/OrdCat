@@ -78,11 +78,12 @@ final class Account {
         if let img = NSImage(contentsOf: avatarFile) { return img }
         let img = NSImage(size: NSSize(width: size, height: size))
         img.lockFocus()
-        NSColor(calibratedWhite: 0.18, alpha: 1).setFill()
+        // Brand graphite (#3d3d3c) circle with the amber capsule eyes.
+        NSColor(calibratedRed: 0.24, green: 0.24, blue: 0.235, alpha: 1).setFill()
         NSBezierPath(ovalIn: NSRect(x: 0, y: 0, width: size, height: size)).fill()
-        let s = NSAttributedString(string: "🐈‍⬛", attributes: [.font: NSFont.systemFont(ofSize: size * 0.55)])
-        let b = s.size()
-        s.draw(at: NSPoint(x: (size - b.width) / 2, y: (size - b.height) / 2))
+        let eyes = ordEyesImage(height: size * 0.34)
+        eyes.draw(in: NSRect(x: (size - eyes.size.width) / 2, y: (size - eyes.size.height) / 2,
+                             width: eyes.size.width, height: eyes.size.height))
         img.unlockFocus()
         return img
     }

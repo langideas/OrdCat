@@ -1174,12 +1174,39 @@ func voiceTip(listening: Bool = false) -> String {
     return "语音对话 · 快捷键 \(kHotKeys[Prefs.hotKeyIndex].title)"
 }
 
+// MARK: - Brand mark (2026-11-20): the cat's amber capsule eyes, no background.
+/// Proportions from brand/ordcat-logo.svg: eye 130×286, gap 170.
+func ordEyesImage(height h: CGFloat, color: NSColor = kAmber, glow: Bool = true, dot: NSColor? = nil) -> NSImage {
+    let ew = h * 130 / 286, gap = h * 170 / 286
+    let pad: CGFloat = glow ? max(1, h * 0.12) : 0
+    let dotW: CGFloat = dot == nil ? 0 : h * 0.45
+    let w = ew * 2 + gap + pad * 2 + dotW
+    let img = NSImage(size: NSSize(width: ceil(w), height: ceil(h + pad * 2)), flipped: false) { _ in
+        NSGraphicsContext.current?.saveGraphicsState()
+        if glow {
+            let sh = NSShadow(); sh.shadowColor = color.withAlphaComponent(0.6); sh.shadowBlurRadius = h * 0.18; sh.shadowOffset = .zero; sh.set()
+        }
+        color.setFill()
+        for x in [pad, pad + ew + gap] {
+            NSBezierPath(roundedRect: NSRect(x: x, y: pad, width: ew, height: h), xRadius: ew / 2, yRadius: ew / 2).fill()
+        }
+        NSGraphicsContext.current?.restoreGraphicsState()
+        if let d = dot {
+            let r = h * 0.28
+            d.setFill()
+            NSBezierPath(ovalIn: NSRect(x: pad + ew * 2 + gap + dotW - r, y: pad + h - r * 1.1, width: r, height: r)).fill()
+        }
+        return true
+    }
+    return img
+}
+
 // MARK: - Bubble (non-activating, sits to the left of the cat)
 
 final class Bubble: NSObject {
     let panel: KeyPanel
     private let card = NSVisualEffectView()
-    private let title = NSTextField(labelWithString: "OrdCat")
+    private let title = NSImageView(image: ordEyesImage(height: 13))
     private var expandButton: NSButton!
     private let scroll = NSScrollView()
     private let textView = NSTextView()
@@ -1246,8 +1273,9 @@ final class Bubble: NSObject {
         card.layer?.masksToBounds = true
         content.addSubview(card)
 
-        title.font = .systemFont(ofSize: 12, weight: .bold)
-        title.textColor = kAmber
+        title.imageScaling = .scaleNone
+        title.imageAlignment = .alignLeft
+        title.toolTip = "OrdCat"
         card.addSubview(title)
 
         expandButton = NSButton(title: "↗ 完整对话", target: self, action: #selector(doExpand))
@@ -1551,7 +1579,7 @@ final class Bubble: NSObject {
         let h = pad + 18 + 6 + textH + choicesH + actionH + chipH + chatH + pad
 
         var y = h - pad - 16
-        title.frame = NSRect(x: pad, y: y, width: 120, height: 16)
+        title.frame = NSRect(x: pad - 2, y: y - 2, width: 40, height: 20)
         expandButton.frame = NSRect(x: width - pad - 90, y: y - 2, width: 92, height: 20)
         expandButton.isHidden = !chatMode
         topicsButton.frame = NSRect(x: width - pad - 90 - 92, y: y - 2, width: 90, height: 20)
@@ -1563,8 +1591,8 @@ final class Bubble: NSObject {
         speakPause.isHidden = !speaking
         speakStop.isHidden = !speaking
         if speaking {
-            speakPause.frame = NSRect(x: pad + 58, y: y - 2, width: 22, height: 20)
-            speakStop.frame = NSRect(x: pad + 82, y: y - 2, width: 22, height: 20)
+            speakPause.frame = NSRect(x: pad + 40, y: y - 2, width: 22, height: 20)
+            speakStop.frame = NSRect(x: pad + 64, y: y - 2, width: 22, height: 20)
         }
         y -= 6 + textH
         scroll.frame = NSRect(x: pad, y: y, width: inner, height: textH)
@@ -1928,7 +1956,16 @@ final class ChatWindowController: NSObject, NSWindowDelegate, NSSplitViewDelegat
             let bodyPara = NSMutableParagraphStyle()
             bodyPara.alignment = isUser ? .right : .left
             bodyPara.lineSpacing = 3
-            out.append(NSAttributedString(string: (isUser ? "你" : "🐈‍⬛ OrdCat") + " · " + df.string(from: m.date) + "\n",
+            if !isUser {
+                let eyes = NSTextAttachment()
+                eyes.image = ordEyesImage(height: 10, glow: false)
+                eyes.bounds = CGRect(x: 0, y: -1, width: eyes.image!.size.width, height: eyes.image!.size.height)
+                let e = NSMutableAttributedString(attachment: eyes)
+                e.append(NSAttributedString(string: " "))
+                e.addAttribute(.paragraphStyle, value: para, range: NSRange(location: 0, length: e.length))
+                out.append(e)
+            }
+            out.append(NSAttributedString(string: (isUser ? "你" : "OrdCat") + " · " + df.string(from: m.date) + "\n",
                                           attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold),
                                                        .foregroundColor: isUser ? NSColor.secondaryLabelColor : kAmber,
                                                        .paragraphStyle: para]))
@@ -2131,7 +2168,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
 
     func refreshUpdate() {
         let u = Updater.shared
-        versionLabel.stringValue = "OrdCat 🐈‍⬛  v\(u.current)"
+        versionLabel.stringValue = "OrdCat  v\(u.current)"
         if u.hasUpdate, let v = u.latestVersion {
             updateStatus.stringValue = "🎉 有新版本 v\(v)，点「立即更新」，小猫会自己换新并重启。"
         } else if let v = u.latestVersion {
@@ -3092,7 +3129,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: menu bar
     private func buildStatusMenu() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "🐈‍⬛"
+        statusItem.button?.title = ""
+        statusItem.button?.image = ordEyesImage(height: 14)
+        statusItem.button?.imagePosition = .imageOnly
+        statusItem.button?.toolTip = "OrdCat"
         let m = NSMenu()
         versionItem = NSMenuItem(title: "OrdCat v\(Updater.shared.current)", action: nil, keyEquivalent: "")
         versionItem.isEnabled = false
@@ -3135,7 +3175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applyPerception(announce: Bool) {
         let on = Prefs.perception
         hub.setEnabled(on)
-        statusItem.button?.title = on ? "🐈‍⬛👀" : "🐈‍⬛"
+        statusItem.button?.image = ordEyesImage(height: 14, dot: on ? .systemGreen : nil)
         perceptionItem?.state = on ? .on : .off
         let k = kPerceptionHotKeys[Prefs.perceptionHotKeyIndex]
         perceptionItem?.title = "桌面感知（\(k.title)）"
