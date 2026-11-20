@@ -1176,7 +1176,7 @@ func voiceTip(listening: Bool = false) -> String {
 
 // MARK: - Brand mark (2026-11-20): the cat's amber capsule eyes, no background.
 /// Proportions from brand/ordcat-logo.svg: eye 130×286, gap 170.
-func ordEyesImage(height h: CGFloat, color: NSColor = kAmber, glow: Bool = true, dot: NSColor? = nil) -> NSImage {
+func ordEyesImage(height h: CGFloat, color: NSColor = kAmber, glow: Bool = true, dot: NSColor? = nil, openness: CGFloat = 1) -> NSImage {
     let ew = h * 130 / 286, gap = h * 170 / 286
     let pad: CGFloat = glow ? max(1, h * 0.12) : 0
     let dotW: CGFloat = dot == nil ? 0 : h * 0.45
@@ -1187,8 +1187,11 @@ func ordEyesImage(height h: CGFloat, color: NSColor = kAmber, glow: Bool = true,
             let sh = NSShadow(); sh.shadowColor = color.withAlphaComponent(0.6); sh.shadowBlurRadius = h * 0.18; sh.shadowOffset = .zero; sh.set()
         }
         color.setFill()
+        // openness < 1 = mid-blink: squash each eye toward its centre (canvas size unchanged, so nothing jumps).
+        let eh = max(h * openness, min(ew, h) * 0.35)
         for x in [pad, pad + ew + gap] {
-            NSBezierPath(roundedRect: NSRect(x: x, y: pad, width: ew, height: h), xRadius: ew / 2, yRadius: ew / 2).fill()
+            let r = min(ew, eh) / 2
+            NSBezierPath(roundedRect: NSRect(x: x, y: pad + (h - eh) / 2, width: ew, height: eh), xRadius: r, yRadius: r).fill()
         }
         NSGraphicsContext.current?.restoreGraphicsState()
         if let d = dot {
@@ -1206,7 +1209,7 @@ func ordEyesImage(height h: CGFloat, color: NSColor = kAmber, glow: Bool = true,
 final class Bubble: NSObject {
     let panel: KeyPanel
     private let card = NSVisualEffectView()
-    private let title = NSImageView(image: ordEyesImage(height: 13))
+    private let title = NSTextField(labelWithString: "OrdCat")
     private var expandButton: NSButton!
     private let scroll = NSScrollView()
     private let textView = NSTextView()
@@ -1273,9 +1276,8 @@ final class Bubble: NSObject {
         card.layer?.masksToBounds = true
         content.addSubview(card)
 
-        title.imageScaling = .scaleNone
-        title.imageAlignment = .alignLeft
-        title.toolTip = "OrdCat"
+        title.font = .systemFont(ofSize: 12, weight: .bold)
+        title.textColor = kAmber
         card.addSubview(title)
 
         expandButton = NSButton(title: "↗ 完整对话", target: self, action: #selector(doExpand))
@@ -1579,7 +1581,7 @@ final class Bubble: NSObject {
         let h = pad + 18 + 6 + textH + choicesH + actionH + chipH + chatH + pad
 
         var y = h - pad - 16
-        title.frame = NSRect(x: pad - 2, y: y - 2, width: 40, height: 20)
+        title.frame = NSRect(x: pad, y: y, width: 120, height: 16)
         expandButton.frame = NSRect(x: width - pad - 90, y: y - 2, width: 92, height: 20)
         expandButton.isHidden = !chatMode
         topicsButton.frame = NSRect(x: width - pad - 90 - 92, y: y - 2, width: 90, height: 20)
@@ -1591,8 +1593,8 @@ final class Bubble: NSObject {
         speakPause.isHidden = !speaking
         speakStop.isHidden = !speaking
         if speaking {
-            speakPause.frame = NSRect(x: pad + 40, y: y - 2, width: 22, height: 20)
-            speakStop.frame = NSRect(x: pad + 64, y: y - 2, width: 22, height: 20)
+            speakPause.frame = NSRect(x: pad + 58, y: y - 2, width: 22, height: 20)
+            speakStop.frame = NSRect(x: pad + 82, y: y - 2, width: 22, height: 20)
         }
         y -= 6 + textH
         scroll.frame = NSRect(x: pad, y: y, width: inner, height: textH)
@@ -3130,7 +3132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func buildStatusMenu() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = ""
-        statusItem.button?.image = ordEyesImage(height: 14)
+        setStatusEyes()
         statusItem.button?.imagePosition = .imageOnly
         statusItem.button?.toolTip = "OrdCat"
         let m = NSMenu()
@@ -3175,7 +3177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applyPerception(announce: Bool) {
         let on = Prefs.perception
         hub.setEnabled(on)
-        statusItem.button?.image = ordEyesImage(height: 14, dot: on ? .systemGreen : nil)
+        setStatusEyes()
         perceptionItem?.state = on ? .on : .off
         let k = kPerceptionHotKeys[Prefs.perceptionHotKeyIndex]
         perceptionItem?.title = "桌面感知（\(k.title)）"
@@ -4283,9 +4285,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Menu-bar eyes: sized like other menu-bar glyphs (≈11 pt tall, no glow); green dot while 桌面感知 is on.
+    private func setStatusEyes(openness: CGFloat = 1) {
+        statusItem?.button?.image = ordEyesImage(height: 11, glow: false,
+                                                 dot: Prefs.perception ? .systemGreen : nil, openness: openness)
+    }
+
+    /// Blink the menu-bar eyes together with the cat (same 0.18 s timing as CatView.blink).
+    private func blinkStatusEyes() {
+        let steps: [(Double, CGFloat)] = [(0, 0.5), (0.045, 0.1), (0.09, 0.1), (0.135, 0.5), (0.18, 1)]
+        for (t, o) in steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self] in self?.setStatusEyes(openness: o) }
+        }
+    }
+
     private func scheduleBlink() {
         blinkTimer = Timer.scheduledTimer(withTimeInterval: Double.random(in: 3.5...8), repeats: false) { [weak self] _ in
             self?.catView.blink()
+            self?.blinkStatusEyes()
             self?.scheduleBlink()
         }
         blinkTimer?.tolerance = 0.5
