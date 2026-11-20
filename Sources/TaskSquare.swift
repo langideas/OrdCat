@@ -1,8 +1,8 @@
-// OrdCat — 功能「任务广场」🐟（设置 → 任务广场；不是技能，登录就能用）
+// OrdCat — 功能「猫帮圈」🐟（设置 → 猫帮圈；不是技能，登录就能用）
 //
-// 用户通过小猫把需要解决的问题发到广场，并自己定一份小鱼干奖励（发布时先押上）。
+// 用户通过小猫把需要解决的问题发到猫帮圈，并自己定一份小鱼干奖励（发布时先押上）。
 // 别的用户的小猫按「自己的模型能力 + 已开的技能」挑合适的任务来解：小猫用主人自己的模型写出答案，
-// 主人看过、改过再交（绝不自动提交）。发布者采纳后，小鱼干转给解题的人；不满意可退回广场，取消会退回小鱼干。
+// 主人看过、改过再交（绝不自动提交）。发布者采纳后，小鱼干转给解题的人；不满意可退回猫帮圈，取消会退回小鱼干。
 //
 // Server side: supabase/square.sql (tables + security-definer functions; clients never write the tables directly).
 // Needs a signed-in account (设置 → 账号). New accounts get 100 小鱼干.
@@ -165,9 +165,9 @@ final class TaskSquare: NSObject {
             seen.append(contentsOf: fresh.map { "n:" + $0.id })
             Prefs.squareSeen = seen
             let more = fresh.count > 1 ? "等 \(fresh.count) 个新任务" : ""
-            self.present?("🐟 广场上有「\(first.title)」\(more)（\(first.kind) · \(first.reward) 条小鱼干），要我接吗？",
+            self.present?("🐟 猫帮圈上有「\(first.title)」\(more)（\(first.kind) · \(first.reward) 条小鱼干），要我接吗？",
                           [("接这个", { [weak self] in self?.take(first) }),
-                           ("看看广场", { [weak self] in self?.showWindow() }),
+                           ("看看猫帮圈", { [weak self] in self?.showWindow() }),
                            ("不再提醒", { Prefs.squareNotify = false })], 25)
         }
     }
@@ -183,7 +183,7 @@ final class TaskSquare: NSObject {
         let l = e.lowercased()
         if l.contains("schema cache") || l.contains("square_") && l.contains("does not exist")
             || l.contains("could not find the function") || l.contains("fish_") && l.contains("does not exist") {
-            return "广场服务器还没开通好（管理员需要在 Supabase 运行 supabase/square.sql）"
+            return "猫帮圈服务器还没开通好（管理员需要在 Supabase 运行 supabase/square.sql）"
         }
         return e
     }
@@ -233,7 +233,7 @@ final class TaskSquare: NSObject {
             for t in ts where t.status == "answered" && !seen.contains("a:" + t.id) {
                 seen.append("a:" + t.id)
                 Prefs.squareSeen = seen
-                self.present?("📬 你发到广场的「\(t.title)」有小猫回答啦，去看看？",
+                self.present?("📬 你发到猫帮圈的「\(t.title)」有小猫回答啦，去看看？",
                               [("看回答", { [weak self] in self?.showAnswer(t) })], 20)
                 return
             }
@@ -267,14 +267,14 @@ final class TaskSquare: NSObject {
             let cands = ts.filter { $0.posterID != uid && !skipped.contains($0.id) && self.canDo($0)
                 && (kinds.isEmpty || kinds.contains($0.kind)) }.prefix(8)
             guard !cands.isEmpty else {
-                if manual { self.present?(err.map { "广场没连上：\($0)" } ?? "广场上暂时没有适合我的任务 🐾 晚点我再看看。", [], 6) }
+                if manual { self.present?(err.map { "猫帮圈没连上：\($0)" } ?? "猫帮圈上暂时没有适合我的任务 🐾 晚点我再看看。", [], 6) }
                 return
             }
             let lines = cands.enumerated().map { i, t in
                 "\(i + 1). [\(t.kind)] \(t.title)｜\(String(t.body.prefix(160)).replacingOccurrences(of: "\n", with: " "))｜奖励 \(t.reward)"
             }.joined(separator: "\n")
             let prompt = """
-            下面是任务广场上别人发的问题。你的模型是 \(Prefs.model)，能力：\(TaskSquare.capsLine)。
+            下面是猫帮圈上别人发的问题。你的模型是 \(Prefs.model)，能力：\(TaskSquare.capsLine)。
             挑出一个你最有把握解得又好又对的任务（只考虑你真能做好的，不要因为奖励高就选）。
             只回一行 JSON：{"pick": 编号, "why": "不超过 25 字的理由"}；一个都没把握就回 {"pick": 0, "why": ""}。
 
@@ -285,14 +285,14 @@ final class TaskSquare: NSObject {
                 guard let self = self else { return }
                 let (pick, why) = TaskSquare.parsePick(text ?? "")
                 guard pick >= 1, pick <= cands.count else {
-                    if manual { self.present?("广场上的任务我都没太大把握，先不接啦 🐾", [], 6) }
+                    if manual { self.present?("猫帮圈上的任务我都没太大把握，先不接啦 🐾", [], 6) }
                     return
                 }
                 let t = cands[cands.startIndex + pick - 1]
                 let reason = why.isEmpty ? "" : "\n\(why)"
-                self.present?("🐟 广场上有个我能帮上忙的任务：「\(t.title)」（\(t.kind) · \(t.reward) 条小鱼干）\(reason)",
+                self.present?("🐟 猫帮圈上有个我能帮上忙的任务：「\(t.title)」（\(t.kind) · \(t.reward) 条小鱼干）\(reason)",
                               [("接这个", { [weak self] in self?.take(t) }),
-                               ("看看广场", { [weak self] in self?.showWindow() }),
+                               ("看看猫帮圈", { [weak self] in self?.showWindow() }),
                                ("跳过", { Prefs.squareSkipped = Prefs.squareSkipped + [t.id] })], 25)
             })
         }
@@ -368,13 +368,13 @@ final class TaskSquare: NSObject {
                     }
                     content = arr
                 } else {
-                    let (desc, err) = await MediaHub.describe(pics, question: question, appName: "任务广场里的图片", video: false)
+                    let (desc, err) = await MediaHub.describe(pics, question: question, appName: "猫帮圈里的图片", video: false)
                     question += "\n\n[任务附带的图片（看图模型的描述）]\n" + (desc ?? "（没看成：\(err ?? "未知原因")）")
                     content = question
                 }
             }
             let ctx = """
-            现在你在 OrdCat 任务广场帮另一位用户解决问题。这次不受 80 字限制：请认真、完整、准确地解答，
+            现在你在 OrdCat 猫帮圈帮另一位用户解决问题。这次不受 80 字限制：请认真、完整、准确地解答，
             结构清楚，能直接用；不确定的地方如实说明，不要编造。不要提到你是在接任务，也不要索要报酬。
             """
             self.solveLLM.stream([["role": "user", "content": content]], context: ctx, onDelta: { _ in },
@@ -383,8 +383,8 @@ final class TaskSquare: NSObject {
                 self.solving = false
                 let ans = (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 if ans.isEmpty {
-                    self.present?("这次没想出来：\(err ?? "模型没有回答")。任务还在你手上，可以在任务广场「我接的」里重试或放弃。",
-                                  [("打开任务广场", { [weak self] in self?.showWindow(tab: 2) })], 12)
+                    self.present?("这次没想出来：\(err ?? "模型没有回答")。任务还在你手上，可以在猫帮圈「我接的」里重试或放弃。",
+                                  [("打开猫帮圈", { [weak self] in self?.showWindow(tab: 2) })], 12)
                     return
                 }
                 self.showDraft(t, answer: ans)
@@ -419,7 +419,7 @@ final class TaskSquare: NSObject {
     /// "发任务：…" / "/任务 …" in chat → the text to prefill, or nil.
     static func postIntent(_ text: String) -> String? {
         let s = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        for p in ["/任务", "发任务", "发布任务", "悬赏"] where s.hasPrefix(p) {
+        for p in ["/猫帮", "/任务", "发任务", "发布任务", "悬赏"] where s.hasPrefix(p) {
             var rest = String(s.dropFirst(p.count))
             while let c = rest.first, " ：:，,".contains(c) { rest.removeFirst() }
             return rest
@@ -454,7 +454,7 @@ final class TaskSquare: NSObject {
                 if let e = err { self.present?("没发出去：\(e)", [], 10); return }
                 self.refreshBalance()
                 self.window?.reload(fetch: true)
-                self.present?("发到广场啦 🐟 押了 \(n) 条小鱼干，有小猫回答我就叫你。", [], 6)
+                self.present?("发到猫帮圈啦 🐟 押了 \(n) 条小鱼干，有小猫回答我就叫你。", [], 6)
             }
         }
     }
@@ -503,7 +503,7 @@ final class TaskSquare: NSObject {
             a.accessoryView = scroll
             if t.status == "answered" {
                 a.addButton(withTitle: "采纳（给 \(t.reward) 条小鱼干）")
-                a.addButton(withTitle: "不满意，退回广场")
+                a.addButton(withTitle: "不满意，退回猫帮圈")
                 a.addButton(withTitle: "先放着")
             } else {
                 a.addButton(withTitle: "好")
@@ -529,7 +529,7 @@ final class TaskSquare: NSObject {
             guard let self = self else { return }
             if let e = err { self.present?(e, [], 6); return }
             self.window?.reload(fetch: true)
-            self.present?(accept ? "已采纳 🎉 \(t.reward) 条小鱼干送给了解题的小猫。" : "退回广场啦，等别的小猫再试试。", [], 6)
+            self.present?(accept ? "已采纳 🎉 \(t.reward) 条小鱼干送给了解题的小猫。" : "退回猫帮圈啦，等别的小猫再试试。", [], 6)
         }
     }
 
@@ -556,7 +556,7 @@ final class TaskSquare: NSObject {
     }
 
     private func needLogin() {
-        let msg = acct.configured ? "任务广场要先登录账号（新账号送 100 条小鱼干 🐟）。" : "账号服务还在开通中，暂时用不了任务广场。"
+        let msg = acct.configured ? "猫帮圈要先登录账号（新账号送 100 条小鱼干 🐟）。" : "账号服务还在开通中，暂时用不了猫帮圈。"
         present?(msg, acct.configured ? [("去登录", { [weak self] in self?.openAccount?() })] : [], 8)
     }
 }
@@ -593,11 +593,11 @@ final class SquareDraft: NSObject, NSWindowDelegate {
         text.textContainer?.widthTracksTextView = true
         text.string = answer
         scroll.documentView = text
-        let hint = SK.WrapLabel("这是小猫用你的模型写的。看过、需要的话改一改，再点「提交」。30 分钟内没交会自动退回广场。", size: 11)
-        let submit = NSButton(title: "提交答案", target: self, action: #selector(doSubmit))
+        let hint = SK.WrapLabel("这是小猫用你的模型写的。看过、需要的话改一改，再点「提交」。30 分钟内没交会自动退回猫帮圈。", size: 11)
+        let submit = OCButton(title: "提交答案", target: self, action: #selector(doSubmit))
         submit.keyEquivalent = "\r"
-        let retry = NSButton(title: "重新想", target: self, action: #selector(doRetry))
-        let give = NSButton(title: "放弃这个任务", target: self, action: #selector(doGiveUp))
+        let retry = OCButton(title: "重新想", target: self, action: #selector(doRetry))
+        let give = OCButton(title: "放弃这个任务", target: self, action: #selector(doGiveUp))
         let row = NSStackView(views: [give, NSView(), retry, submit])
         row.translatesAutoresizingMaskIntoConstraints = false
         for v in [q, scroll, hint, row] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(v) }
@@ -634,18 +634,21 @@ final class SquareDraft: NSObject, NSWindowDelegate {
     @objc private func doRetry() { handled = true; win.close(); onRetry?() }
     @objc private func doGiveUp() { handled = true; win.close(); onGiveUp?() }
     func windowWillClose(_ n: Notification) {
-        // Closing the window without choosing keeps the task (it can be finished from 任务广场 → 我接的).
+        // Closing the window without choosing keeps the task (it can be finished from 猫帮圈 → 我接的).
         _ = handled
     }
 }
 
-/// 任务广场 window: 广场 / 我发布的 / 我接的.
+/// 猫帮圈 window: 猫帮圈 / 我发布的 / 我接的.
 final class SquareWindow: NSObject, NSWindowDelegate {
     private unowned let square: TaskSquare
     private var win: NSWindow!
-    private let tabs = NSSegmentedControl(labels: ["广场", "我发布的", "我接的"], trackingMode: .selectOne, target: nil, action: nil)
+    private let tabs = NSSegmentedControl(labels: ["猫帮圈", "我发布的", "我接的"], trackingMode: .selectOne, target: nil, action: nil)
     private let balance = NSTextField(labelWithString: "")
     private let caps = SK.WrapLabel("", size: 11)
+    private let nameLabel = NSTextField(labelWithString: "")
+    private let levelIV = NSImageView()
+    private let avatarIV = NSImageView()
     private let list = NSStackView()
     private let status = NSTextField(labelWithString: "")
     private var items: [SquareTask] = []
@@ -656,28 +659,58 @@ final class SquareWindow: NSObject, NSWindowDelegate {
         super.init()
         win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 540),
                        styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
-        win.title = "🐟 任务广场"
+        win.title = "🐟 猫帮圈"
         win.minSize = NSSize(width: 520, height: 380)
         win.isReleasedWhenClosed = false
         win.delegate = self
         win.setFrameAutosaveName("OrdCatSquare")
         let root = NSView()
-        balance.font = .systemFont(ofSize: 14, weight: .semibold)
+        balance.font = .systemFont(ofSize: 13, weight: .semibold)
+        balance.textColor = kAmber
+        nameLabel.font = .systemFont(ofSize: 15, weight: .bold)
+        nameLabel.lineBreakMode = .byTruncatingTail
         tabs.target = self
+        ocStyleTabs(tabs)
         tabs.action = #selector(tabChanged)
         tabs.selectedSegment = 0
-        let post = NSButton(title: "发布任务", target: self, action: #selector(post))
-        post.bezelStyle = .rounded
-        let find = NSButton(title: "帮我挑一个", target: self, action: #selector(find))
-        find.bezelStyle = .rounded
-        find.toolTip = "小猫按你的模型和技能，从广场挑一个最适合它解的任务"
-        let refresh = NSButton(title: "刷新", target: self, action: #selector(refreshNow))
-        refresh.bezelStyle = .rounded
-        let top = NSStackView(views: [balance, NSView(), find, refresh, post])
-        top.spacing = 8
+        let post = OCButton(title: "发布任务", target: self, action: #selector(post))
+        let find = OCButton(title: "帮我挑一个", target: self, action: #selector(find))
+        find.toolTip = "小猫按你的模型和技能，从猫帮圈挑一个最适合它解的任务"
+        let refresh = OCButton(title: "刷新", target: self, action: #selector(refreshNow))
+        // 朋友圈-style cover: avatar, name, level, 小鱼干, what my cat can do; actions on the right.
+        let banner = SquareBanner()
+        banner.translatesAutoresizingMaskIntoConstraints = false
+        avatarIV.translatesAutoresizingMaskIntoConstraints = false
+        avatarIV.imageScaling = .scaleProportionallyUpOrDown
+        let nameRow = NSStackView(views: [nameLabel, levelIV])
+        nameRow.spacing = 6
+        nameRow.alignment = .centerY
+        let info = NSStackView(views: [nameRow, balance, caps])
+        info.orientation = .vertical
+        info.alignment = .leading
+        info.spacing = 3
+        caps.widthAnchor.constraint(equalTo: info.widthAnchor).isActive = true
+        let btns = NSStackView(views: [find, refresh, post])
+        btns.spacing = 8
+        btns.setContentHuggingPriority(.required, for: .horizontal)
+        btns.setContentCompressionResistancePriority(.required, for: .horizontal)
+        for v in [avatarIV, info, btns] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; banner.addSubview(v) }
+        NSLayoutConstraint.activate([
+            avatarIV.widthAnchor.constraint(equalToConstant: 56),
+            avatarIV.heightAnchor.constraint(equalToConstant: 56),
+            avatarIV.leadingAnchor.constraint(equalTo: banner.leadingAnchor, constant: 16),
+            avatarIV.topAnchor.constraint(equalTo: banner.topAnchor, constant: 16),
+            avatarIV.bottomAnchor.constraint(lessThanOrEqualTo: banner.bottomAnchor, constant: -16),
+            info.leadingAnchor.constraint(equalTo: avatarIV.trailingAnchor, constant: 12),
+            info.topAnchor.constraint(equalTo: banner.topAnchor, constant: 16),
+            info.bottomAnchor.constraint(lessThanOrEqualTo: banner.bottomAnchor, constant: -14),
+            info.trailingAnchor.constraint(lessThanOrEqualTo: btns.leadingAnchor, constant: -12),
+            btns.trailingAnchor.constraint(equalTo: banner.trailingAnchor, constant: -16),
+            btns.topAnchor.constraint(equalTo: banner.topAnchor, constant: 18)])
+        let top = banner
         list.orientation = .vertical
         list.alignment = .leading
-        list.spacing = 0
+        list.spacing = 10
         let doc = FlipView()
         doc.translatesAutoresizingMaskIntoConstraints = false
         list.translatesAutoresizingMaskIntoConstraints = false
@@ -688,21 +721,18 @@ final class SquareWindow: NSObject, NSWindowDelegate {
         scroll.documentView = doc
         status.font = .systemFont(ofSize: 12)
         status.textColor = .secondaryLabelColor
-        for v in [top, tabs, caps, scroll, status] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(v) }
+        for v in [top, tabs, scroll, status] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(v) }
         NSLayoutConstraint.activate([
-            top.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
-            top.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
-            top.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
-            caps.topAnchor.constraint(equalTo: top.bottomAnchor, constant: 6),
-            caps.leadingAnchor.constraint(equalTo: top.leadingAnchor),
-            caps.trailingAnchor.constraint(equalTo: top.trailingAnchor),
-            tabs.topAnchor.constraint(equalTo: caps.bottomAnchor, constant: 10),
+            top.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
+            top.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            top.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+            tabs.topAnchor.constraint(equalTo: top.bottomAnchor, constant: 12),
             tabs.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             scroll.topAnchor.constraint(equalTo: tabs.bottomAnchor, constant: 10),
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             status.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: 6),
-            status.leadingAnchor.constraint(equalTo: top.leadingAnchor),
+            status.leadingAnchor.constraint(equalTo: top.leadingAnchor, constant: 4),
             status.trailingAnchor.constraint(equalTo: top.trailingAnchor),
             status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
             doc.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
@@ -732,10 +762,17 @@ final class SquareWindow: NSObject, NSWindowDelegate {
         guard win.isVisible || fetch else { return }
         balance.stringValue = "🐟 小鱼干：\(square.balance.map(String.init) ?? "—")"
         caps.stringValue = "我的小猫：" + TaskSquare.capsLine
+        let acc = Account.shared
+        nameLabel.stringValue = acc.profile.displayName
+        avatarIV.image = memberAvatar(acc.avatarImage(size: 112), member: CatLevel.isMember, size: 56)
+        let lv = CatLevel.shared.level
+        levelIV.image = lv > 0 ? RankIcon.strip(level: lv, height: 13) : nil
+        levelIV.isHidden = lv == 0
+        levelIV.toolTip = "Lv\(lv) · " + CatLevel.partsText(level: lv)
         guard fetch else { return }
         guard square.ready else {
             items = []
-            render(empty: Account.shared.configured ? "先登录账号才能用任务广场（设置 → 账号，新账号送 100 条小鱼干）。" : "账号服务还在开通中。")
+            render(empty: Account.shared.configured ? "先登录账号才能用猫帮圈（设置 → 账号，新账号送 100 条小鱼干）。" : "账号服务还在开通中。")
             return
         }
         gen += 1
@@ -745,7 +782,7 @@ final class SquareWindow: NSObject, NSWindowDelegate {
             guard let self = self, g == self.gen else { return }
             self.items = ts
             self.status.stringValue = err.map { "没连上：\($0)" } ?? "共 \(ts.count) 个"
-            self.render(empty: ["广场上还没有任务，发一个试试？", "你还没发过任务。", "你还没接过任务。"][self.tabs.selectedSegment])
+            self.render(empty: ["猫帮圈上还没有任务，发一个试试？", "你还没发过任务。", "你还没接过任务。"][self.tabs.selectedSegment])
         }
         switch tabs.selectedSegment {
         case 1: square.myPosted(done)
@@ -764,59 +801,141 @@ final class SquareWindow: NSObject, NSWindowDelegate {
         }
         let uid = Account.shared.profile.userID ?? ""
         for (i, t) in items.enumerated() {
-            let row = NSView()
-            row.translatesAutoresizingMaskIntoConstraints = false
-            let title = SK.WrapLabel("\(t.title)", size: 13.5, secondary: false, weight: .semibold)
-            let who = t.posterName.isEmpty ? "一位用户" : t.posterName
-            var metaText = "\(t.kind) · \(t.needsText) · 🐟 \(t.reward)"
-            switch tabs.selectedSegment {
-            case 0: metaText += " · \(who)"
-            default: metaText += " · \(t.statusText)"
+            let card = OCCard()
+            card.translatesAutoresizingMaskIntoConstraints = false
+            let mine = t.posterID == uid
+            // Avatar (own posts: my picture + member ring; others: the brand placeholder).
+            let av = NSImageView()
+            av.translatesAutoresizingMaskIntoConstraints = false
+            av.imageScaling = .scaleProportionallyUpOrDown
+            av.image = mine ? memberAvatar(Account.shared.avatarImage(size: 80), member: CatLevel.isMember, size: 40)
+                            : memberAvatar(AvatarCache.placeholder(80), member: false, size: 40)
+            let who = mine ? Account.shared.profile.displayName : (t.posterName.isEmpty ? "一位用户" : t.posterName)
+            let name = NSTextField(labelWithString: who)
+            name.font = .systemFont(ofSize: 13, weight: .semibold)
+            name.textColor = kAmber
+            name.lineBreakMode = .byTruncatingTail
+            let reward = NSTextField(labelWithString: "🐟 \(t.reward)")
+            reward.font = .systemFont(ofSize: 12, weight: .semibold)
+            reward.textColor = kAmber
+            reward.setContentHuggingPriority(.required, for: .horizontal)
+            let nameRow = NSStackView(views: [name, NSView(), reward])
+            nameRow.alignment = .centerY
+            nameRow.spacing = 6
+            let title = SK.WrapLabel(t.title, size: 14, secondary: false, weight: .semibold)
+            var parts: [NSView] = [nameRow, title]
+            parts += bodyViews(String(t.body.prefix(600)))
+            // Links and files as chips.
+            var chips: [NSView] = []
+            for l in t.links.prefix(4) { chips.append(chip("🔗 \(l.platform)", l.url)) }
+            for f in t.files.prefix(4) { chips.append(chip("\(f.icon) \(f.name)", f.url)) }
+            if !chips.isEmpty {
+                let cs = NSStackView(views: chips)
+                cs.spacing = 6
+                parts.append(cs)
             }
-            if !t.extrasText.isEmpty { metaText += " · " + t.extrasText }
-            let meta = SK.WrapLabel(metaText, size: 11.5)
-            let body = SK.WrapLabel(String(t.body.prefix(220)), size: 12)
-            let col = NSStackView(views: [title, meta, body])
-            col.orientation = .vertical
-            col.alignment = .leading
-            col.spacing = 3
-            col.translatesAutoresizingMaskIntoConstraints = false
-            for l in [title, meta, body] { l.widthAnchor.constraint(equalTo: col.widthAnchor).isActive = true }
-            if t.body.isEmpty { body.isHidden = true }
+            // Meta line: 类型 · 纯文字 · 3分钟前 (+ status on my tabs).
+            var metaText = "\(t.kind) · \(t.needsText)"
+            if let d = t.created { metaText += " · " + ocRelativeTime(d) }
+            if tabs.selectedSegment != 0 { metaText += " · \(t.statusText)" }
+            let meta = SK.WrapLabel(metaText, size: 11)
+            // Actions bottom-right, like the 朋友圈 "··" corner.
             let acts = NSStackView()
-            acts.orientation = .vertical
-            acts.alignment = .trailing
             acts.spacing = 6
-            acts.translatesAutoresizingMaskIntoConstraints = false
             acts.setContentHuggingPriority(.required, for: .horizontal)
             acts.setContentCompressionResistancePriority(.required, for: .horizontal)
-            for (name, sel, enabled) in actions(for: t, uid: uid) {
-                let b = NSButton(title: name, target: self, action: sel)
-                b.bezelStyle = .rounded
+            for (n, (bt, sel, enabled)) in actions(for: t, uid: uid).enumerated() {
+                let b = OCButton(title: bt, target: self, action: sel)
                 b.controlSize = .small
+                if n == 0 && enabled && OCButton.auto(bt) != .danger { b.style = .primary }
                 b.tag = i
                 b.isEnabled = enabled
                 acts.addArrangedSubview(b)
             }
-            row.addSubview(col); row.addSubview(acts)
-            let line = NSBox()
-            line.boxType = .separator
-            line.translatesAutoresizingMaskIntoConstraints = false
-            row.addSubview(line)
+            let foot = NSStackView(views: [meta, acts])
+            foot.alignment = .centerY
+            foot.spacing = 8
+            meta.setContentHuggingPriority(.init(1), for: .horizontal)
+            meta.setContentCompressionResistancePriority(.init(250), for: .horizontal)
+            parts.append(foot)
+            // 评论区: who is solving / has answered, in a light inset box.
+            if let solver = t.solverName, t.status != "open" {
+                let model = t.solverModel.flatMap { $0.isEmpty ? nil : "（\($0)）" } ?? ""
+                let c = SK.WrapLabel("💬 \(solver.isEmpty ? "一只小猫" : solver)\(model)：\(t.statusText)", size: 11.5)
+                parts.append(inset(c))
+            }
+            let col = NSStackView(views: parts)
+            col.orientation = .vertical
+            col.alignment = .leading
+            col.spacing = 6
+            for v in parts { v.widthAnchor.constraint(equalTo: col.widthAnchor).isActive = true }
+            for v in [av, col] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; card.addSubview(v) }
             NSLayoutConstraint.activate([
-                col.topAnchor.constraint(equalTo: row.topAnchor, constant: 10),
-                col.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 4),
-                col.trailingAnchor.constraint(equalTo: acts.leadingAnchor, constant: -12),
-                col.bottomAnchor.constraint(lessThanOrEqualTo: line.topAnchor, constant: -10),
-                acts.topAnchor.constraint(equalTo: row.topAnchor, constant: 10),
-                acts.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -4),
-                acts.bottomAnchor.constraint(lessThanOrEqualTo: line.topAnchor, constant: -10),
-                line.leadingAnchor.constraint(equalTo: row.leadingAnchor),
-                line.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-                line.bottomAnchor.constraint(equalTo: row.bottomAnchor)])
-            list.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
+                av.widthAnchor.constraint(equalToConstant: 40),
+                av.heightAnchor.constraint(equalToConstant: 40),
+                av.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
+                av.topAnchor.constraint(equalTo: card.topAnchor, constant: 14),
+                col.leadingAnchor.constraint(equalTo: av.trailingAnchor, constant: 12),
+                col.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
+                col.topAnchor.constraint(equalTo: card.topAnchor, constant: 13),
+                col.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12),
+                card.bottomAnchor.constraint(greaterThanOrEqualTo: av.bottomAnchor, constant: 14)])
+            list.addArrangedSubview(card)
+            card.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
         }
+    }
+
+    /// Body text; ``` blocks become monospaced code boxes.
+    private func bodyViews(_ body: String) -> [NSView] {
+        guard !body.isEmpty else { return [] }
+        var out: [NSView] = []
+        for (k, seg) in body.components(separatedBy: "```").enumerated() {
+            var text = seg.trimmingCharacters(in: .newlines)
+            if k % 2 == 1 {
+                // Drop the language tag on the first line.
+                if let nl = text.firstIndex(of: "\n"), !text[..<nl].contains(" "), text[..<nl].count < 16 {
+                    text = String(text[text.index(after: nl)...])
+                }
+                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                let l = SK.WrapLabel(text, size: 11.5, secondary: false)
+                l.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
+                out.append(inset(l, dark: true))
+            } else {
+                text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { continue }
+                out.append(SK.WrapLabel(text, size: 12.5, secondary: false))
+            }
+        }
+        return out
+    }
+
+    /// A rounded inset box (code, or the comment area).
+    private func inset(_ content: NSView, dark: Bool = false) -> NSView {
+        let box = NSView()
+        box.wantsLayer = true
+        box.layer?.cornerRadius = 8
+        box.layer?.backgroundColor = (dark ? NSColor.black.withAlphaComponent(0.25)
+                                           : NSColor.labelColor.withAlphaComponent(0.06)).cgColor
+        content.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 10),
+            content.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -10),
+            content.topAnchor.constraint(equalTo: box.topAnchor, constant: 7),
+            content.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -7)])
+        return box
+    }
+
+    private func chip(_ title: String, _ url: String) -> NSView {
+        let b = OCButton(title: String(title.prefix(28)), target: self, action: #selector(openChip(_:)))
+        b.controlSize = .small
+        b.style = .neutral
+        b.toolTip = url
+        b.identifier = NSUserInterfaceItemIdentifier(url)
+        return b
+    }
+    @objc private func openChip(_ b: NSButton) {
+        if let s = b.identifier?.rawValue, let u = URL(string: s) { NSWorkspace.shared.open(u) }
     }
 
     private func actions(for t: SquareTask, uid: String) -> [(String, Selector, Bool)] {
@@ -838,7 +957,7 @@ final class SquareWindow: NSObject, NSWindowDelegate {
                 return [("继续做", #selector(resolve(_:)), true), ("放弃", #selector(giveUp(_:)), true)]
             case "answered": return [("等对方采纳", #selector(noop), false)]
             case "done": return [("已到账 🐟 \(t.reward)", #selector(noop), false)]
-            default: return [("已退回广场", #selector(noop), false)]
+            default: return [("已退回猫帮圈", #selector(noop), false)]
             }
         }
     }
@@ -876,4 +995,22 @@ final class SquareWindow: NSObject, NSWindowDelegate {
             for s in (t.links.map(\.url) + t.files.map(\.url)).prefix(8) { if let u = URL(string: s) { NSWorkspace.shared.open(u) } }
         }
     }
+}
+
+/// The 猫帮圈 cover: a soft amber wash over the window background, rounded.
+final class SquareBanner: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 14
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func draw(_ dirtyRect: NSRect) {
+        let g = NSGradient(colors: [kAmber.withAlphaComponent(0.26), kAmber.withAlphaComponent(0.10),
+                                    NSColor.labelColor.withAlphaComponent(0.04)])
+        g?.draw(in: bounds, angle: 0)
+    }
+    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); needsDisplay = true }
 }

@@ -333,19 +333,20 @@ final class SignalWindow: NSObject, NSWindowDelegate {
         win.setFrameAutosaveName("OrdCatSignals")
         let root = NSView()
         tabs.target = self
+        ocStyleTabs(tabs)
         tabs.action = #selector(tabChanged)
         tabs.selectedSegment = 0
-        let share = NSButton(title: "分享当前桌面", target: self, action: #selector(share))
+        let share = OCButton(title: "分享当前桌面", target: self, action: #selector(share))
         share.bezelStyle = .rounded
         share.toolTip = "小猫读一下你正在看的窗口，先给你审、改，你点「发出信号」才会发"
-        let refresh = NSButton(title: "刷新", target: self, action: #selector(refreshNow))
+        let refresh = OCButton(title: "刷新", target: self, action: #selector(refreshNow))
         refresh.bezelStyle = .rounded
         let hint = SK.WrapLabel("满足条件的信号能看全文；不满足的只显示标题和还差什么。", size: 11.5)
         let top = NSStackView(views: [tabs, NSView(), refresh, share])
         top.spacing = 8
         list.orientation = .vertical
         list.alignment = .leading
-        list.spacing = 0
+        list.spacing = 10
         let doc = FlipView()
         doc.translatesAutoresizingMaskIntoConstraints = false
         list.translatesAutoresizingMaskIntoConstraints = false
@@ -416,12 +417,13 @@ final class SignalWindow: NSObject, NSWindowDelegate {
         }
         let me = station.myID
         for (i, s) in items.enumerated() {
-            let row = NSView()
+            let row = OCCard()
             row.translatesAutoresizingMaskIntoConstraints = false
-            let av = avatarView(s.authorAvatar, member: s.authorMember, size: 34)
+            let av = avatarView(s.authorAvatar, member: s.authorMember, size: 40)
             let name = NSTextField(labelWithString: s.who)
             name.font = .systemFont(ofSize: 12.5, weight: .semibold)
             name.lineBreakMode = .byTruncatingTail
+            name.textColor = kAmber
             name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             let fans = NSTextField(labelWithString: "\(L10n.t("喵友")) \(s.authorFollowers)")
             fans.font = .systemFont(ofSize: 11)
@@ -464,32 +466,25 @@ final class SignalWindow: NSObject, NSWindowDelegate {
             } else {
                 buttons.append((s.iFollow ? "已是喵友" : "加喵友", #selector(follow(_:))))
             }
-            for (t, sel) in buttons {
-                let b = NSButton(title: t, target: self, action: sel)
-                b.bezelStyle = .rounded
+            for (n, (t, sel)) in buttons.enumerated() {
+                let b = OCButton(title: t, target: self, action: sel)
                 b.controlSize = .small
+                if n == 0 { b.style = .primary }
                 b.tag = i
                 acts.addArrangedSubview(b)
             }
             row.addSubview(av); row.addSubview(col); row.addSubview(acts)
-            let line = NSBox()
-            line.boxType = .separator
-            line.translatesAutoresizingMaskIntoConstraints = false
-            row.addSubview(line)
             NSLayoutConstraint.activate([
-                av.topAnchor.constraint(equalTo: row.topAnchor, constant: 10),
-                av.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 4),
-                av.bottomAnchor.constraint(lessThanOrEqualTo: line.topAnchor, constant: -10),
-                col.topAnchor.constraint(equalTo: row.topAnchor, constant: 10),
-                col.leadingAnchor.constraint(equalTo: av.trailingAnchor, constant: 10),
+                av.topAnchor.constraint(equalTo: row.topAnchor, constant: 14),
+                av.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 14),
+                av.bottomAnchor.constraint(lessThanOrEqualTo: row.bottomAnchor, constant: -14),
+                col.topAnchor.constraint(equalTo: row.topAnchor, constant: 13),
+                col.leadingAnchor.constraint(equalTo: av.trailingAnchor, constant: 12),
                 col.trailingAnchor.constraint(equalTo: acts.leadingAnchor, constant: -12),
-                col.bottomAnchor.constraint(lessThanOrEqualTo: line.topAnchor, constant: -10),
-                acts.topAnchor.constraint(equalTo: row.topAnchor, constant: 10),
-                acts.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -4),
-                acts.bottomAnchor.constraint(lessThanOrEqualTo: line.topAnchor, constant: -10),
-                line.leadingAnchor.constraint(equalTo: row.leadingAnchor),
-                line.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-                line.bottomAnchor.constraint(equalTo: row.bottomAnchor)])
+                col.bottomAnchor.constraint(lessThanOrEqualTo: row.bottomAnchor, constant: -12),
+                acts.topAnchor.constraint(equalTo: row.topAnchor, constant: 13),
+                acts.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -14),
+                acts.bottomAnchor.constraint(lessThanOrEqualTo: row.bottomAnchor, constant: -12)])
             list.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
         }
@@ -533,11 +528,11 @@ final class SignalDetailWindow: NSObject, NSWindowDelegate {
     private let name = NSTextField(labelWithString: "")
     private let levelHost = NSStackView()
     private let fans = NSTextField(labelWithString: "")
-    private let followBtn = NSButton(title: "", target: nil, action: nil)
+    private let followBtn = OCButton(title: "", target: nil, action: nil)
     private let title = SK.WrapLabel("", size: 16, secondary: false, weight: .bold)
     private let meta = SK.WrapLabel("", size: 11.5)
     private let text = NSTextView()
-    private let copyBtn = NSButton(title: "复制内容", target: nil, action: nil)
+    private let copyBtn = OCButton(title: "复制内容", target: nil, action: nil)
 
     init(signal: Signal, station: SignalStation) {
         self.signal = signal
@@ -587,7 +582,7 @@ final class SignalDetailWindow: NSObject, NSWindowDelegate {
         copyBtn.bezelStyle = .rounded
         copyBtn.target = self
         copyBtn.action = #selector(copyBody)
-        let close = NSButton(title: "关闭", target: self, action: #selector(closeWin))
+        let close = OCButton(title: "关闭", target: self, action: #selector(closeWin))
         close.bezelStyle = .rounded
         close.keyEquivalent = "\u{1b}"
         let row = NSStackView(views: [NSView(), copyBtn, close])
@@ -689,8 +684,8 @@ final class SignalComposeWindow: NSObject, NSWindowDelegate {
     private let memberOnly = NSButton(checkboxWithTitle: "仅订阅会员", target: nil, action: nil)
     private var skillBoxes: [(String, NSButton)] = []
     private let status = NSTextField(labelWithString: "")
-    private let postButton = NSButton(title: "发出信号", target: nil, action: nil)
-    private let refine = NSButton(title: "小猫帮我提炼", target: nil, action: nil)
+    private let postButton = OCButton(title: "发出信号", target: nil, action: nil)
+    private let refine = OCButton(title: "小猫帮我提炼", target: nil, action: nil)
     private let llm = LLM()
     private var sourceApp = ""
     private var raw = ""
@@ -728,7 +723,7 @@ final class SignalComposeWindow: NSObject, NSWindowDelegate {
         source.lineBreakMode = .byTruncatingTail
         source.frame = NSRect(x: fx, y: H - 80, width: fw - 128, height: 18)
         v.addSubview(source)
-        let reread = NSButton(title: "重新读取桌面", target: self, action: #selector(rereadDesktop))
+        let reread = OCButton(title: "重新读取桌面", target: self, action: #selector(rereadDesktop))
         reread.bezelStyle = .rounded
         reread.frame = NSRect(x: W - 20 - 124, y: H - 87, width: 124, height: 28)
         v.addSubview(reread)
@@ -801,7 +796,7 @@ final class SignalComposeWindow: NSObject, NSWindowDelegate {
         let condTip = NSTextField(wrappingLabelWithString: "不满足条件的人只能看到标题和还差什么，看不到内容。「需要技能」= 对方的账号订阅了这个技能。")
         small(condTip, NSRect(x: fx, y: H - 560, width: fw, height: 30))
 
-        let cancel = NSButton(title: "取消", target: self, action: #selector(doCancel))
+        let cancel = OCButton(title: "取消", target: self, action: #selector(doCancel))
         cancel.bezelStyle = .rounded
         cancel.keyEquivalent = "\u{1b}"
         cancel.frame = NSRect(x: W - 236, y: 12, width: 100, height: 30)

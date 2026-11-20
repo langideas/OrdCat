@@ -352,7 +352,7 @@ final class ChatSidebar: NSObject, NSTableViewDataSource, NSTableViewDelegate, N
         view.state = .followsWindowActiveState
         view.frame = NSRect(x: 0, y: 0, width: 240, height: 600)
 
-        let newB = NSButton(title: "✏️  发起新对话", target: self, action: #selector(newChat))
+        let newB = OCButton(title: "✏️  发起新对话", target: self, action: #selector(newChat))
         newB.bezelStyle = .rounded
         newB.alignment = .left
         newB.keyEquivalent = "n"

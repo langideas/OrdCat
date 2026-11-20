@@ -1,4 +1,4 @@
-// OrdCat — 任务广场：发布窗口（模版、链接、代码、文件）+ 设置里的「任务广场」页。
+// OrdCat — 猫帮圈：发布窗口（模版、链接、代码、文件）+ 设置里的「猫帮圈」页。
 //
 // 发布：选一个模版（内置 + 自己存的），按提示填；可以贴链接（X 推文、GitHub、YouTube、B站、知乎……会自动识别），
 // 插入代码块，附代码 / 文本 / PDF / Word / 图片文件（最多 5 个，每个 10 MB 内）。
@@ -301,7 +301,7 @@ final class SquarePostWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate {
 
     private var win: NSWindow!
     private let templatePop = NSPopUpButton()
-    private let deleteTpl = NSButton(title: "删除模版", target: nil, action: nil)
+    private let deleteTpl = OCButton(title: "删除模版", target: nil, action: nil)
     private let title = NSTextField()
     private let kind = NSPopUpButton()
     private let kindHint = NSTextField(labelWithString: "")
@@ -311,7 +311,7 @@ final class SquarePostWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate {
     private let linkInfo = NSTextField(labelWithString: "")
     private let fileInfo = NSTextField(wrappingLabelWithString: "")
     private let reward = NSComboBox()
-    private let postButton = NSButton(title: "发布", target: nil, action: nil)
+    private let postButton = OCButton(title: "发布", target: nil, action: nil)
     private var files: [URL] = []
     private static let langs = ["swift", "python", "javascript", "typescript", "java", "go", "rust", "c", "cpp", "csharp",
                                 "kotlin", "ruby", "php", "bash", "sql", "html", "css", "json", "yaml", "markdown", "text"]
@@ -321,7 +321,7 @@ final class SquarePostWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate {
         let W: CGFloat = 620, H: CGFloat = 690
         win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: W, height: H), styleMask: [.titled, .closable],
                        backing: .buffered, defer: false)
-        win.title = "🐟 发布任务到广场"
+        win.title = "🐟 发布任务到猫帮圈"
         win.isReleasedWhenClosed = false
         win.delegate = self
         let v = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
@@ -340,7 +340,7 @@ final class SquarePostWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate {
             v.addSubview(l)
         }
 
-        let info = NSTextField(wrappingLabelWithString: "广场上所有登录的用户都能看到标题、说明、链接和附件。别写密码、手机号这类隐私（小猫也会自动打码）。")
+        let info = NSTextField(wrappingLabelWithString: "猫帮圈上所有登录的用户都能看到标题、说明、链接和附件。别写密码、手机号这类隐私（小猫也会自动打码）。")
         small(info, NSRect(x: 20, y: H - 46, width: W - 40, height: 32))
 
         // 模版
@@ -349,7 +349,7 @@ final class SquarePostWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate {
         templatePop.target = self
         templatePop.action = #selector(templateChosen)
         v.addSubview(templatePop)
-        let save = NSButton(title: "存为模版…", target: self, action: #selector(saveTemplate))
+        let save = OCButton(title: "存为模版…", target: self, action: #selector(saveTemplate))
         save.bezelStyle = .rounded
         save.frame = NSRect(x: fx + 286, y: H - 87, width: 110, height: 28)
         v.addSubview(save)
@@ -397,7 +397,7 @@ final class SquarePostWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate {
         langPop.frame = NSRect(x: fx, y: H - 478, width: 130, height: 26)
         langPop.addItems(withTitles: SquarePostWindow.langs)
         v.addSubview(langPop)
-        let insert = NSButton(title: "插入代码块", target: self, action: #selector(insertCode))
+        let insert = OCButton(title: "插入代码块", target: self, action: #selector(insertCode))
         insert.bezelStyle = .rounded
         insert.frame = NSRect(x: fx + 136, y: H - 479, width: 110, height: 28)
         v.addSubview(insert)
@@ -414,11 +414,11 @@ final class SquarePostWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate {
 
         // 附件
         lab("附件", H - 566)
-        let add = NSButton(title: "添加文件…", target: self, action: #selector(addFiles))
+        let add = OCButton(title: "添加文件…", target: self, action: #selector(addFiles))
         add.bezelStyle = .rounded
         add.frame = NSRect(x: fx - 4, y: H - 569, width: 110, height: 28)
         v.addSubview(add)
-        let clear = NSButton(title: "清空", target: self, action: #selector(clearFiles))
+        let clear = OCButton(title: "清空", target: self, action: #selector(clearFiles))
         clear.bezelStyle = .rounded
         clear.frame = NSRect(x: fx + 108, y: H - 569, width: 70, height: 28)
         v.addSubview(clear)
@@ -442,7 +442,7 @@ final class SquarePostWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate {
         small(bal, NSRect(x: fx + 124, y: H - 644, width: fw - 124, height: 30))
 
         // 按钮
-        let cancel = NSButton(title: "取消", target: self, action: #selector(doCancel))
+        let cancel = OCButton(title: "取消", target: self, action: #selector(doCancel))
         cancel.bezelStyle = .rounded
         cancel.keyEquivalent = "\u{1b}"
         cancel.frame = NSRect(x: W - 220, y: 12, width: 100, height: 30)
@@ -630,7 +630,7 @@ final class SquarePostWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate {
     }
 }
 
-// MARK: - 设置 → 任务广场
+// MARK: - 设置 → 猫帮圈
 
 final class SquarePane: NSObject {
     private let balance = SK.WrapLabel("", size: 13, secondary: false)
@@ -640,14 +640,14 @@ final class SquarePane: NSObject {
     private var kindBoxes: [NSButton] = []
 
     func build(into p: SK.Page) {
-        p.hint("把问题发到广场，自己定小鱼干奖励；也可以让小猫用你的模型帮别人解题，赚小鱼干。需要登录账号，新账号送 100 条。")
+        p.hint("把问题发到猫帮圈，自己定小鱼干奖励；也可以让小猫用你的模型帮别人解题，赚小鱼干。需要登录账号，新账号送 100 条。")
 
         p.header("我的小猫")
         let g0 = SK.Group()
         g0.add(SK.info(balance))
         g0.add(SK.info(caps))
         p.add(g0)
-        p.add(SK.buttons([SK.button("打开任务广场", self, #selector(openSquare)),
+        p.add(SK.buttons([SK.button("打开猫帮圈", self, #selector(openSquare)),
                           SK.button("发布任务", self, #selector(postSquare)),
                           SK.button("帮我挑一个", self, #selector(findOne))]))
 
@@ -657,8 +657,8 @@ final class SquarePane: NSObject {
         notify.target = self
         notify.action = #selector(notifyToggled(_:))
         let g = SK.Group()
-        g.add(SK.toggle("广场有新任务时提醒我", notify, sub: "大约每 10 分钟看一次，有你的小猫能做的新任务就弹出来问你"))
-        g.add(SK.toggle("小猫自己去广场找适合它的任务", auto, sub: "大约每 15 分钟看一次，找到会先问你，接不接你说了算"))
+        g.add(SK.toggle("猫帮圈有新任务时提醒我", notify, sub: "大约每 10 分钟看一次，有你的小猫能做的新任务就弹出来问你"))
+        g.add(SK.toggle("小猫自己去猫帮圈找适合它的任务", auto, sub: "大约每 15 分钟看一次，找到会先问你，接不接你说了算"))
         p.add(g)
 
         p.header("我想接的类型（都不勾 = 全部）")
@@ -676,7 +676,7 @@ final class SquarePane: NSObject {
         p.hint("""
         • 发任务：点「发布任务」，或在聊天里说「发任务：……」。可以选模版、贴链接（X 推文、GitHub 等）、插入代码块、附代码 / PDF / Word / 图片文件。
         • 接任务：小猫只挑你的模型做得了的（要看图的任务需要会看图的模型），会读链接和附件，用你自己的模型写答案；你看过、改过才会交，绝不自动提交。
-        • 广场上大家都能看到任务内容和附件，别放隐私（文字和代码里的密钥、密码会自动打码）。
+        • 猫帮圈上大家都能看到任务内容和附件，别放隐私（文字和代码里的密钥、密码会自动打码）。
         """)
         refresh()
         TaskSquare.shared.observe { [weak self] in self?.refresh() }
@@ -685,7 +685,7 @@ final class SquarePane: NSObject {
     func refresh() {
         let sq = TaskSquare.shared
         balance.stringValue = sq.ready ? "🐟 小鱼干：\(sq.balance.map(String.init) ?? "…")"
-            : (Account.shared.configured ? "🐟 先登录账号（设置 → 账号）才能用任务广场" : "🐟 账号服务还在开通中")
+            : (Account.shared.configured ? "🐟 先登录账号（设置 → 账号）才能用猫帮圈" : "🐟 账号服务还在开通中")
         caps.stringValue = TaskSquare.capsLine
         auto.state = Prefs.squareAuto ? .on : .off
         notify.state = Prefs.squareNotify ? .on : .off

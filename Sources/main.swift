@@ -1306,11 +1306,11 @@ final class Bubble: NSObject {
         topicsButton.toolTip = "默认只参考当前页面；想接着聊以前的内容，在这里选"
         card.addSubview(topicsButton)
 
-        squareButton = NSButton(title: "🐟 广场", target: self, action: #selector(doSquare))
+        squareButton = NSButton(title: "🐟 猫帮圈", target: self, action: #selector(doSquare))
         squareButton.isBordered = false
         squareButton.font = .systemFont(ofSize: 11)
         squareButton.contentTintColor = .secondaryLabelColor
-        squareButton.toolTip = "打开任务广场"
+        squareButton.toolTip = "打开猫帮圈"
         card.addSubview(squareButton)
 
         signalButton = NSButton(title: "📶", target: self, action: #selector(doSignal))
@@ -1508,9 +1508,10 @@ final class Bubble: NSObject {
         actionButtons = []
         actions = list.map { $0.1 }
         for (i, item) in list.enumerated() {
-            let b = NSButton(title: item.0, target: self, action: #selector(doAction(_:)))
+            let b = OCButton(title: item.0, target: self, action: #selector(doAction(_:)))
             b.bezelStyle = .rounded
             if list.count > 3 { b.controlSize = .small; b.font = .systemFont(ofSize: 11) }
+            if i == 0 { b.style = .primary }
             b.tag = i
             card.addSubview(b)
             actionButtons.append(b)
@@ -1855,7 +1856,7 @@ final class ChatWindowController: NSObject, NSWindowDelegate, NSSplitViewDelegat
         sideB.autoresizingMask = [.maxXMargin, .maxYMargin]
         v.addSubview(sideB)
 
-        deleteButton = NSButton(title: "删除对话", target: self, action: #selector(deleteCurrent))
+        deleteButton = OCButton(title: "删除对话", target: self, action: #selector(deleteCurrent))
         deleteButton.bezelStyle = .rounded
         deleteButton.controlSize = .small
         deleteButton.toolTip = "删除正在看的这个对话（全部清空在左栏右键或设置里）"
@@ -1870,7 +1871,7 @@ final class ChatWindowController: NSObject, NSWindowDelegate, NSSplitViewDelegat
         attachLabel.autoresizingMask = [.width, .maxYMargin]
         v.addSubview(attachLabel)
 
-        clearAttach = NSButton(title: "移除附件", target: self, action: #selector(removeAttachments))
+        clearAttach = OCButton(title: "移除附件", target: self, action: #selector(removeAttachments))
         clearAttach.bezelStyle = .rounded
         clearAttach.controlSize = .small
         clearAttach.frame = NSRect(x: W - 94, y: 64, width: 84, height: 26)
@@ -2302,7 +2303,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
             root.heightAnchor.constraint(greaterThanOrEqualToConstant: 440)])
         let side = SettingsSidebar(items: [
             ("person.crop.circle", "用户"), ("pawprint", "小猫"), ("cpu", "模型"), ("speaker.wave.2", "声音"),
-            ("eye", "感知与记忆"), ("sparkles", "技能"), ("fish", "任务广场"),
+            ("eye", "感知与记忆"), ("sparkles", "技能"), ("fish", "猫帮圈"),
             ("antenna.radiowaves.left.and.right", "信号站"), ("info.circle", "关于")])
         side.onSelect = { [weak self] i in if let pg = SettingsPage(rawValue: i) { self?.select(page: pg) } }
         sidebar = side
@@ -2567,9 +2568,9 @@ final class SettingsController: NSObject, NSWindowDelegate {
         return p
     }
 
-    // 任务广场（功能，不是技能）
+    // 猫帮圈（功能，不是技能）
     private func squarePage() -> SK.Page {
-        let p = SK.Page(title: "任务广场")
+        let p = SK.Page(title: "猫帮圈")
         squarePane.build(into: p)
         return p
     }
@@ -3112,7 +3113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             if id == "square" {
-                self.bubble.notify(on ? "「任务广场」开啦 🐟 说「发任务：……」把问题发到广场；我也会去广场找适合我的任务，接之前先问你。" : "「任务广场」关掉啦。", hold: 6)
+                self.bubble.notify(on ? "「猫帮圈」开啦 🐟 说「发任务：……」把问题发到猫帮圈；我也会去猫帮圈找适合我的任务，接之前先问你。" : "「猫帮圈」关掉啦。", hold: 6)
                 return
             }
             guard id == "x" else { return }
@@ -3243,7 +3244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         perceptionItem.target = self
         m.addItem(perceptionItem)
         m.addItem(withTitle: "查看当前上下文", action: #selector(previewContextMenu), keyEquivalent: "").target = self
-        m.addItem(withTitle: "🐟 任务广场", action: #selector(menuSquare), keyEquivalent: "").target = self
+        m.addItem(withTitle: "🐟 猫帮圈", action: #selector(menuSquare), keyEquivalent: "").target = self
         m.addItem(withTitle: "📶 信号站", action: #selector(menuSignal), keyEquivalent: "").target = self
         m.addItem(.separator())
         m.addItem(withTitle: "设置…", action: #selector(openSettings), keyEquivalent: ",").target = self
@@ -4054,7 +4055,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             SignalStation.shared.compose(prefill: pre)
             return
         }
-        // 任务广场: "发任务：……" opens the post form instead of a chat answer.
+        // 猫帮圈: "发任务：……" opens the post form instead of a chat answer.
         if images.isEmpty && pageOverride == nil, let pre = TaskSquare.postIntent(text) {
             TaskSquare.shared.postDialog(prefill: pre)
             return

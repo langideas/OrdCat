@@ -103,7 +103,7 @@ enum L10n {
         "\n\n提示：先切到浏览器打开 x.com，再回到这里点「检查刷推」。": "\n\nTip: switch to the browser and open x.com first, then come back and click “Check X reading”.",
         "· 项目说明": "· Project notes",
         "↗ 完整对话": "↗ Full chat",
-        "🐟 广场": "🐟 Square",
+        "🐟 猫帮圈": "🐟 Cat Circle",
         "⌃ Control + ⌥ Option + 空格": "⌃ Control + ⌥ Option + Space",
         "⌘ Command + ⇧ Shift + 空格": "⌘ Command + ⇧ Shift + Space",
         "⌥ Option + 空格": "⌥ Option + Space",

@@ -305,7 +305,7 @@ final class Account {
 
     // MARK: HTTP
 
-    /// Supabase REST / storage / functions call with the signed-in session (also used by 任务广场).
+    /// Supabase REST / storage / functions call with the signed-in session (also used by 猫帮圈).
     func request(_ method: String, _ path: String, json: Any? = nil, raw: Data? = nil, contentType: String? = nil,
                          headers: [String: String] = [:], auth: Bool = true,
                          done: @escaping (Any?, String?) -> Void) {

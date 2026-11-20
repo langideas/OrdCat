@@ -1,3 +1,17 @@
+# OrdCat v0.2.43
+
+- 「任务广场」改名「猫帮圈」：设置、菜单、聊天气泡按钮、窗口、提醒里都换成了新名字。聊天里说「/猫帮 ……」也能发任务，原来的「发任务：」「/任务」照样能用。
+- 全新统一按钮：整个 app 的按钮都换成圆角色块。主要操作是琥珀色实心，其他操作是浅琥珀色，清空、删除这类操作是红色。鼠标移上去会变亮，按下去会轻轻缩一下再弹回来。系统开启「减弱动态效果」时不缩放。
+- 猫帮圈窗口改成朋友圈风格：顶部是你的头像、名字、等级和小鱼干；每个任务是一张卡片，有头像、名字、奖励、正文（代码放在深色代码框里）、链接和附件小标签、「3分钟前」这样的时间；谁在解、回答到哪一步，显示在下面的评论区。原来的功能都还在。
+- 信号站列表也换成同样的卡片样式，切换标签换成琥珀色。
+
+**English**
+
+- “Task Square” is now called “Cat Circle” everywhere: settings, the menu, the chat-bubble button, windows and notifications. You can also post with “/猫帮 …” in chat, and the old “发任务：” and “/任务” still work.
+- New buttons across the whole app: rounded colour blocks. The main action is solid amber, other actions are soft amber, and actions like clear and delete are red. Buttons light up on hover and give a little springy press when you click. The press bounce is skipped when Reduce Motion is on.
+- The Cat Circle window now feels like a social feed. Your avatar, name, level and dried fish sit at the top. Each task is a card with the poster’s avatar, name, reward, text, code in a dark box, link and file chips, and a time like “3 min ago”. Who’s solving it and how far they’ve got shows in a comment box underneath. Everything it could do before still works.
+- The Signal Station list uses the same cards, with amber tabs.
+
 # OrdCat v0.2.42
 
 - 感知与记忆 →「记忆保留」新增「永久」：选了就不再自动删除旧记忆，需要时可以手动「清空记忆」。

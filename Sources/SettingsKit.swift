@@ -288,7 +288,7 @@ enum SK {
     }
 
     static func button(_ title: String, _ target: AnyObject, _ sel: Selector) -> NSButton {
-        let b = NSButton(title: title, target: target, action: sel)
+        let b = OCButton(title: title, target: target, action: sel)
         b.bezelStyle = .rounded
         b.translatesAutoresizingMaskIntoConstraints = false
         return b
