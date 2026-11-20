@@ -39,8 +39,9 @@ h1 em{font-style:normal;color:var(--amber)}
 .btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line);font-weight:600}
 .meta{color:var(--mute);font-size:13px;margin-top:14px}
 /* live cat — same geometry and colors as the app's CatView, peeking from the screen edge */
-.stage{position:relative;height:440px;clip-path:inset(-300px 0 -300px -400px);cursor:pointer;user-select:none;-webkit-user-select:none}
-#cat{position:absolute;right:0;top:50%;width:570px;height:570px;transform:translateY(-50%);overflow:visible}
+.stage{position:relative;justify-self:center;width:100%;max-width:420px;aspect-ratio:1;cursor:pointer;user-select:none;-webkit-user-select:none;clip-path:inset(-200px 0 -200px -400px)}
+.stage:before{content:"";position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle,var(--glow1) 0%,var(--glow2) 45%,transparent 70%)}
+#cat{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 #rig{will-change:transform}
 #cat .ear{transition:transform .5s cubic-bezier(.3,1.7,.5,1)}
 #earL{transform-origin:-44px -28px;transform:rotate(-20.63deg) scaleY(.8)}
@@ -69,7 +70,7 @@ details p{color:var(--mute);margin:10px 0 0}
 .cta{text-align:center;background:linear-gradient(180deg,var(--cta1),var(--cta2));border:1px solid var(--line);border-radius:24px;padding:52px 24px}
 footer{color:var(--mute);font-size:13px;padding:40px 0 56px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
 footer a{color:var(--mute)}
-@media(max-width:820px){.hero{grid-template-columns:1fr;text-align:center;padding-top:16px}.sub{margin-left:auto;margin-right:auto}.stage{height:320px;order:-1}h1{font-size:38px}.grid{grid-template-columns:1fr}nav .links a{display:none}.brand .cn{display:none}}
+@media(max-width:820px){.hero{grid-template-columns:1fr;text-align:center;padding-top:16px}.sub{margin-left:auto;margin-right:auto}.stage{max-width:300px;order:-1}h1{font-size:38px}.grid{grid-template-columns:1fr}nav .links a{display:none}.brand .cn{display:none}}
 </style>
 </head>
 <body>
@@ -106,7 +107,6 @@ footer a{color:var(--mute)}
     <div id="excl">!</div>
     <div id="say"></div>
   </div>
-</div>
 </div>
 
 <img class="shot" src="desk.jpg" alt="复制报错后，小猫在屏幕边上给出提示" data-i-alt="shotalt">
@@ -204,11 +204,7 @@ document.addEventListener('oc-lang',setVer);
   var T=18*Math.PI/180;
   var lines={zh:['喵？要我帮你看看吗','我在呢 🐾','今天也辛苦啦','选中文字我就竖耳朵 👂','记得喝口水 🍵'],
              en:['Meow? Need a paw?','I\'m here 🐾','You did great today','Select text and my ears perk up 👂','Sip some water 🍵']};
-  function fit(){ // stretch the stage to the right edge of the window, like the screen edge in the app
-    var vw=document.documentElement.clientWidth,r=hero.getBoundingClientRect();
-    st.style.marginRight=-(vw-r.right)+'px';
-    var sz=Math.min(450,Math.max(300,st.clientHeight*1.0));svg.style.width=svg.style.height=sz+'px';K=sz/300;
-  }
+  function fit(){K=st.clientWidth/300}
   addEventListener('resize',fit);fit();
   function headXY(){var r=svg.getBoundingClientRect();return[r.left+(254+px)*K,r.top+150*K]}
   function place(){var h=headXY(),s=st.getBoundingClientRect();
