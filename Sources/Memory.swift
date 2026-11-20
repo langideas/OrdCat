@@ -269,6 +269,7 @@ final class MemoryStore {
     }
 
     func prune(days: Int) {
+        guard days > 0 else { return }   // 0 = 永久：不自动删除
         q.async {
             let cut = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
             self.exec("DELETE FROM events WHERE ts < \(cut);")

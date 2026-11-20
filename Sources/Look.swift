@@ -85,6 +85,7 @@ enum L10n {
         "音调": "Pitch",
         "快捷键": "Hotkey",
         "记忆保留": "Keep memory",
+        "永久": "Forever",
         "排除应用": "Excluded apps",
         "关键词": "Keywords",
         "特别关注": "Watch accounts",

@@ -2138,7 +2138,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let notesLabel = SK.WrapLabel()
     private let signLabel = SK.WrapLabel()
     private var updateButton: NSButton!
-    private let retentionOptions = [1, 3, 7, 30]
+    private let retentionOptions = [1, 3, 7, 30, 0]   // 0 = 永久
     var hub: ContextHub?
     var voice: Voice?
     var xbuddy: XCompanion?
@@ -2502,7 +2502,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         p.add(g1)
 
         p.header("记忆")
-        for d in retentionOptions { retentionPopup.addItem(withTitle: "\(d) 天") }
+        for d in retentionOptions { retentionPopup.addItem(withTitle: d == 0 ? "永久" : "\(d) 天") }
         retentionPopup.target = self
         retentionPopup.action = #selector(retentionChanged)
         excluded.placeholderString = "Bundle ID，用逗号分隔，例如 com.tencent.xinWeChat"

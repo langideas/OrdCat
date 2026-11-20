@@ -1,3 +1,11 @@
+# OrdCat v0.2.42
+
+- 感知与记忆 →「记忆保留」新增「永久」：选了就不再自动删除旧记忆，需要时可以手动「清空记忆」。
+
+**English**
+
+- Perception & memory → “Keep memory” now has a “Forever” option: old memories are never deleted automatically. You can still clear them yourself with “Clear memory”.
+
 # OrdCat v0.2.41
 
 - 新功能「📶 信号站」：把小猫在桌面上看到的有价值信息分享给别的小猫。入口：聊天框右上角 📶、菜单栏 🐈‍⬛ →「📶 信号站」、设置 →「信号站」、聊天里说「发信号：……」或「/信号」。
