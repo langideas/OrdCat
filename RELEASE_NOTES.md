@@ -1,17 +1,28 @@
-# OrdCat v0.2.40
+# OrdCat v0.2.41
 
-- app 图标微调：眼睛缩小一些，看起来更柔和。
+- 新功能「📶 信号站」：把小猫在桌面上看到的有价值信息分享给别的小猫。入口：聊天框右上角 📶、菜单栏 🐈‍⬛ →「📶 信号站」、设置 →「信号站」、聊天里说「发信号：……」或「/信号」。
+  - 每次分享都会先打开「发信号」窗口，你看过、改过、点「发出信号」才会发；桌面内容绝不自动分享。密码、Key、卡号自动打码，也可以让小猫帮你提炼成标题 + 要点。
+  - 发的人选「情报等级」（普通 / 优质 / 稀有 / 绝密），并设谁能看：最低小猫等级、最少喵友数、仅订阅会员、需要拥有的技能。
+  - 不满足条件的人只看到标题和还差什么，内容由服务器挡住，不会发到他们那里。
+  - 有你能看的新信号时，小猫弹出提醒，点开就是完整信号。窗口分「信号流」「我发出的」。
+- 新功能「小猫等级」：像 QQ 等级，每天和小猫互动一次算一个活跃天，Lv1 要 5 天，越往后越多，没有上限。图标：星芒 = 1 级、猫瞳 = 4 级、猫眼 = 16 级、猫冠 = 64 级。显示在「用户」页、信号作者旁，以及聊天气泡标题旁。
+- 新功能「喵友」：在信号作者那一行点「加喵友」（单向关注）；喵友数 = 加你为喵友的人数。
+- 订阅会员徽章：有任何有效订阅的用户，头像带琥珀色光环和小眼睛角标，桌面上的小猫也会有一圈淡淡的琥珀色光晕。
+- 设置：「账号」改名「用户」，顶部重新排版（头像、名字、等级、陪伴天数、喵友），不再和卡片重叠。左边栏按内容重新排序：用户、小猫、模型、声音、感知与记忆、技能、任务广场、信号站、关于。
+- 后端：需要在 Supabase SQL Editor 运行一次 supabase/signal.sql。
 
-# OrdCat v0.2.39
+**English**
 
-- 菜单栏的眼睛缩小，和其它菜单栏图标一样大小；小猫眨眼时它也一起眨。
-- 聊天气泡左上角改回黄色「OrdCat」文字。
-
-# OrdCat v0.2.38
-
-- 新 logo：小猫的两只琥珀色胶囊眼睛。app 图标换成新 logo。
-- 菜单栏图标和聊天气泡左上角改成胶囊眼睛（透明背景）；桌面感知开启时，菜单栏眼睛旁边多一个小绿点。
-- 聊天记录里小猫名字前、默认头像也换成眼睛。
+- New: 📶 Signal Station. Share useful things your cat spots on your screen with other cats. Open it from 📶 in the chat bubble, the menu bar, Settings → Signal Station, or by saying “发信号：…” / “/信号” in chat.
+  - Every share opens a review window first. Nothing is sent until you've read it, edited it if needed and clicked “Send signal”; your screen is never shared automatically. Passwords, keys and card numbers are masked, and the cat can boil it down into a title and key points.
+  - Pick a signal grade (Standard / Good / Rare / Top secret) and who can read it: minimum cat level, minimum followers, subscribers only, or skills they own.
+  - People who don't qualify only see the title and what they're missing; the server never sends them the content.
+  - When a new signal you can read arrives, the cat lets you know; click to read it in full. Tabs: Feed / Sent by me.
+- New: Cat level. Like QQ levels: each day you spend a moment with your cat counts as an active day. Lv1 takes 5 days, each level takes a bit longer, and there's no cap. Icons: Sparkle = 1, Pupil = 4, Cat eyes = 16, Crown = 64 levels. Shown on the Profile page, next to signal authors, and beside the chat bubble title.
+- New: Followers. Click “Follow” on a signal's author row; your follower count is how many people follow you.
+- Subscriber badge: anyone with an active subscription gets an amber glowing ring and a small eyes chip on their avatar, and a soft amber halo around the desktop cat.
+- Settings: “Account” is now “Profile”, with a rebuilt header (avatar, name, level, days together, followers) that no longer overlaps the card. The sidebar is reordered by topic: Profile, Cat, Model, Voice, Perception & memory, Skills, Task Square, Signal Station, About.
+- Backend: run supabase/signal.sql once in the Supabase SQL Editor.
 
 # OrdCat v0.2.37
 

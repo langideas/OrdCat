@@ -6,6 +6,10 @@ import UniformTypeIdentifiers
 final class AccountPane: NSObject {
     private let acc = Account.shared
     private let avatar = NSImageView()
+    private let headerName = SK.WrapLabel("", size: 15, secondary: false, weight: .bold)
+    private let levelText = NSTextField(labelWithString: "")
+    private let levelIcons = NSImageView()
+    private let headerStats = SK.WrapLabel("", size: 11.5)
     private let nameField = NSTextField()
     private let userField = NSTextField()
     private let profileStatus = SK.WrapLabel()
@@ -25,6 +29,9 @@ final class AccountPane: NSObject {
     override init() {
         super.init()
         acc.observe { [weak self] in self?.refresh() }
+        NotificationCenter.default.addObserver(forName: CatLevel.changed, object: nil, queue: .main) { [weak self] _ in
+            self?.refreshHeader()
+        }
     }
 
     private func button(_ t: String, _ sel: Selector) -> NSButton { SK.button(t, self, sel) }
@@ -39,21 +46,13 @@ final class AccountPane: NSObject {
     }
 
     func build(into p: SK.Page) {
-        // 个人资料
+        // 个人资料: header card (avatar + 更换头像 | name, level, days), then the fields.
         p.header("个人资料")
-        avatar.imageScaling = .scaleProportionallyUpOrDown
-        avatar.wantsLayer = true
-        avatar.layer?.cornerRadius = 32
-        avatar.layer?.masksToBounds = true
-        avatar.translatesAutoresizingMaskIntoConstraints = false
-        avatar.widthAnchor.constraint(equalToConstant: 64).isActive = true
-        avatar.heightAnchor.constraint(equalToConstant: 64).isActive = true
-        let avatarCol = NSStackView(views: [avatar, button("更换头像", #selector(pickAvatar))])
-        avatarCol.orientation = .vertical
-        avatarCol.spacing = 8
-        avatarCol.alignment = .centerX
+        let head = SK.Group()
+        head.add(profileHeader())
+        p.add(head)
+        p.hint("头像和名称会显示在聊天窗口左下角。")
         let g1 = SK.Group()
-        g1.add(SK.info(SK.WrapLabel("头像和名称会显示在聊天窗口左下角。", size: 12), avatarCol))
         g1.add(SK.row("名称", input(nameField, "小猫怎么称呼你")))
         g1.add(SK.row("用户名", input(userField, "字母、数字或下划线")))
         p.add(g1)
@@ -106,8 +105,74 @@ final class AccountPane: NSObject {
         refresh()
     }
 
+    /// Left: 64pt avatar (member ring + eyes chip when subscribed) with 更换头像 under it.
+    /// Right: display name, level (Lv N + 猫冠/猫眼/猫瞳/星芒), then days together / to next level / 喵友.
+    private func profileHeader() -> NSView {
+        let r = NSView()
+        r.translatesAutoresizingMaskIntoConstraints = false
+        avatar.imageScaling = .scaleProportionallyUpOrDown
+        avatar.translatesAutoresizingMaskIntoConstraints = false
+        avatar.widthAnchor.constraint(equalToConstant: 64).isActive = true
+        avatar.heightAnchor.constraint(equalToConstant: 64).isActive = true
+        let change = button("更换头像", #selector(pickAvatar))
+        change.controlSize = .small
+        change.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        let left = NSStackView(views: [avatar, change])
+        left.orientation = .vertical
+        left.alignment = .centerX
+        left.spacing = 8
+        left.translatesAutoresizingMaskIntoConstraints = false
+        left.setContentHuggingPriority(.required, for: .horizontal)
+        left.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        levelText.font = .systemFont(ofSize: 13, weight: .semibold)
+        levelText.textColor = .labelColor
+        levelIcons.imageScaling = .scaleNone
+        levelIcons.setContentHuggingPriority(.required, for: .horizontal)
+        let levelRow = NSStackView(views: [levelText, levelIcons])
+        levelRow.spacing = 6
+        levelRow.alignment = .centerY
+        levelRow.translatesAutoresizingMaskIntoConstraints = false
+        let right = NSStackView(views: [headerName, levelRow, headerStats])
+        right.orientation = .vertical
+        right.alignment = .leading
+        right.spacing = 5
+        right.translatesAutoresizingMaskIntoConstraints = false
+        headerName.widthAnchor.constraint(equalTo: right.widthAnchor).isActive = true
+        headerStats.widthAnchor.constraint(equalTo: right.widthAnchor).isActive = true
+        levelRow.widthAnchor.constraint(lessThanOrEqualTo: right.widthAnchor).isActive = true
+
+        r.addSubview(left); r.addSubview(right)
+        NSLayoutConstraint.activate([
+            left.topAnchor.constraint(equalTo: r.topAnchor, constant: 14),
+            left.bottomAnchor.constraint(equalTo: r.bottomAnchor, constant: -14),
+            left.leadingAnchor.constraint(equalTo: r.leadingAnchor, constant: 14),
+            right.leadingAnchor.constraint(equalTo: left.trailingAnchor, constant: 16),
+            right.trailingAnchor.constraint(equalTo: r.trailingAnchor, constant: -14),
+            right.centerYAnchor.constraint(equalTo: r.centerYAnchor),
+            right.topAnchor.constraint(greaterThanOrEqualTo: r.topAnchor, constant: 14),
+            right.bottomAnchor.constraint(lessThanOrEqualTo: r.bottomAnchor, constant: -14)])
+        return r
+    }
+
+    private func refreshHeader() {
+        let member = CatLevel.isMember
+        avatar.image = memberAvatar(acc.avatarImage(size: 144), member: member, size: 64)
+        avatar.toolTip = member ? L10n.t("订阅会员") : nil
+        headerName.stringValue = acc.profile.displayName
+        let lc = CatLevel.shared
+        let lv = lc.level
+        levelText.stringValue = "Lv\(lv)"
+        levelIcons.image = RankIcon.strip(level: lv, height: 16)
+        levelIcons.toolTip = CatLevel.partsText(level: lv)
+        let fans = lc.followers
+        headerStats.stringValue = L10n.english
+            ? "\(lc.days) days together · \(lc.daysToNext) days to next level · \(fans) followers"
+            : "已陪伴 \(lc.days) 天 · 距下一级还差 \(lc.daysToNext) 天 · 喵友 \(fans)"
+    }
+
     func refresh() {
-        avatar.image = acc.avatarImage(size: 144)
+        refreshHeader()
         nameField.stringValue = acc.profile.displayName
         userField.stringValue = acc.profile.username
         loginLine.stringValue = acc.accountLine

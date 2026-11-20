@@ -843,6 +843,14 @@ final class CatView: NSView {
     private let paw = CAShapeLayer()
     private let excl = CAShapeLayer()
 
+    /// 订阅会员: a soft amber rim glow around the whole cat (follows its shape and peeks). Off for everyone else.
+    func setMember(_ on: Bool) {
+        rig.shadowColor = kAmber.cgColor
+        rig.shadowRadius = 7
+        rig.shadowOffset = .zero
+        rig.shadowOpacity = on ? 0.55 : 0
+    }
+
     private let tilt: CGFloat = 18 * .pi / 180
     private let restOffset: CGFloat = 0       // classic v0.1.3 peek
     private let hoverOffset: CGFloat = -22    // a small, curious lean on hover
@@ -1242,6 +1250,10 @@ final class Bubble: NSObject {
     var onTopics: ((NSView) -> Void)?
     private var topicsButton: NSButton!
     private var squareButton: NSButton!
+    private var signalButton: NSButton!
+    /// 小猫等级 icons right after the "OrdCat" title (hidden at Lv0). Click → 设置 → 用户.
+    private var levelButton: NSButton!
+    var onLevel: (() -> Void)?
     var onMic: (() -> Void)?
     var anchor: () -> NSPoint = { .zero }   // cat head centre, screen coords
     let width: CGFloat = 340
@@ -1300,6 +1312,23 @@ final class Bubble: NSObject {
         squareButton.contentTintColor = .secondaryLabelColor
         squareButton.toolTip = "打开任务广场"
         card.addSubview(squareButton)
+
+        signalButton = NSButton(title: "📶", target: self, action: #selector(doSignal))
+        signalButton.isBordered = false
+        signalButton.font = .systemFont(ofSize: 11)
+        signalButton.contentTintColor = .secondaryLabelColor
+        signalButton.toolTip = "打开信号站"
+        card.addSubview(signalButton)
+
+        levelButton = NSButton(title: "", target: self, action: #selector(doLevel))
+        levelButton.isBordered = false
+        levelButton.imagePosition = .imageOnly
+        levelButton.isHidden = true
+        card.addSubview(levelButton)
+        NotificationCenter.default.addObserver(forName: CatLevel.changed, object: nil, queue: .main) { [weak self] _ in
+            guard let self = self, self.isShown else { return }
+            self.layout()
+        }
 
         textView.isEditable = false
         textView.isSelectable = true
@@ -1394,6 +1423,8 @@ final class Bubble: NSObject {
     @objc private func doExpand() { onExpand?() }
     @objc private func doTopics() { onTopics?(topicsButton) }
     @objc private func doSquare() { TaskSquare.shared.showWindow() }
+    @objc private func doSignal() { SignalStation.shared.showWindow() }
+    @objc private func doLevel() { onLevel?() }
     @objc private func doMic() { onMic?() }
     @objc private func doSpeakPause() { onSpeakPause?() }
     @objc private func doSpeakStop() { onSpeakStop?() }
@@ -1555,6 +1586,21 @@ final class Bubble: NSObject {
         }
     }
 
+    /// Level icons right after the title: ~11pt, amber glow, no "Lv" text; hidden at Lv0 and while reading aloud.
+    private func layoutLevel(titleY y: CGFloat, speaking: Bool) {
+        let lc = CatLevel.shared
+        let lv = lc.level
+        let x = title.frame.minX + ceil(title.attributedStringValue.size().width) + 5
+        let limit = chatMode ? signalButton.frame.minX - 2 : width - 14
+        var img = RankIcon.strip(level: lv, height: 11)
+        if img.size.width > limit - x { img = RankIcon.strip(level: lv, height: 11, maxRepeat: 1) }
+        guard lv > 0, !speaking, img.size.width <= limit - x else { levelButton.isHidden = true; return }
+        levelButton.image = img
+        levelButton.frame = NSRect(x: x, y: y - 1, width: img.size.width, height: 16)
+        levelButton.toolTip = L10n.english ? "Lv\(lv) · \(lc.days) days together" : "Lv\(lv) · 已陪伴 \(lc.days) 天"
+        levelButton.isHidden = false
+    }
+
     func layout() {
         let pad: CGFloat = 16
         let inner = width - pad * 2
@@ -1582,14 +1628,20 @@ final class Bubble: NSObject {
 
         var y = h - pad - 16
         title.frame = NSRect(x: pad, y: y, width: 120, height: 16)
-        expandButton.frame = NSRect(x: width - pad - 90, y: y - 2, width: 92, height: 20)
+        // Header buttons hug their text (right to left) so 📶 and the level icons fit next to them.
+        let fitW: (NSButton, CGFloat) -> CGFloat = { b, maxW in min(maxW, ceil(b.intrinsicContentSize.width) + 6) }
+        let ew = fitW(expandButton, 92), tw = fitW(topicsButton, 90), qw = fitW(squareButton, 60)
+        expandButton.frame = NSRect(x: width - pad + 2 - ew, y: y - 2, width: ew, height: 20)
         expandButton.isHidden = !chatMode
-        topicsButton.frame = NSRect(x: width - pad - 90 - 92, y: y - 2, width: 90, height: 20)
+        topicsButton.frame = NSRect(x: expandButton.frame.minX - tw, y: y - 2, width: tw, height: 20)
         topicsButton.isHidden = !chatMode
         // Read-aloud controls sit right after the "OrdCat" title.
         let speaking = speakState != 0
-        squareButton.frame = NSRect(x: width - pad - 90 - 92 - 62, y: y - 2, width: 60, height: 20)
+        squareButton.frame = NSRect(x: topicsButton.frame.minX - qw, y: y - 2, width: qw, height: 20)
         squareButton.isHidden = !chatMode || speaking
+        signalButton.frame = NSRect(x: squareButton.frame.minX - 24, y: y - 2, width: 24, height: 20)
+        signalButton.isHidden = !chatMode || speaking
+        layoutLevel(titleY: y, speaking: speaking)
         speakPause.isHidden = !speaking
         speakStop.isHidden = !speaking
         if speaking {
@@ -2037,6 +2089,11 @@ func jpegData(cgImage cg: CGImage) -> Data? {
 
 // MARK: - Settings window
 
+/// Settings pages in sidebar order. Open pages by name, never by number (the order can change).
+enum SettingsPage: Int, CaseIterable {
+    case user, cat, model, voice, memory, skills, square, signal, about
+}
+
 final class SettingsController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let preset = NSPopUpButton()
@@ -2088,6 +2145,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     let skillsPane = SkillsPane()
     let squarePane = SquarePane()
     let accountPane = AccountPane()
+    let signalPane = SignalPane()
     private let enginePopup = NSPopUpButton()
     private let sysVoicePopup = NSPopUpButton()
     private let rateSlider = NSSlider(value: 0.5, minValue: 0.35, maxValue: 0.65, target: nil, action: nil)
@@ -2104,11 +2162,12 @@ final class SettingsController: NSObject, NSWindowDelegate {
     var onPerceptionChanged: (() -> Void)?
     var onPreviewContext: (() -> Void)?
 
-    func show(tab: Int = 0) {
+    func show(page: SettingsPage = .model) {
         if window == nil { build() }
         skillsPane.refresh()
         squarePane.refresh()
         accountPane.refresh()
+        signalPane.refresh()
         base.stringValue = Prefs.base
         model.stringValue = Prefs.model
         key.stringValue = Keychain.get()
@@ -2149,7 +2208,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         refreshSign()
         refreshAX()
         status.stringValue = ""
-        select(page: tab)
+        select(page: page)
         NSApp.activate(ignoringOtherApps: true)
         if !restoredFrame { window?.center(); restoredFrame = true }
         window?.makeKeyAndOrderFront(nil)
@@ -2195,7 +2254,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private var current = 0
     private var restoredFrame = false
 
-    private func select(page i: Int) {
+    private func select(page: SettingsPage) {
+        let i = page.rawValue
         guard i >= 0, i < pages.count else { return }
         current = i
         for (k, p) in pages.enumerated() { p.isHidden = k != i }
@@ -2241,9 +2301,10 @@ final class SettingsController: NSObject, NSWindowDelegate {
             root.widthAnchor.constraint(greaterThanOrEqualToConstant: 640),
             root.heightAnchor.constraint(greaterThanOrEqualToConstant: 440)])
         let side = SettingsSidebar(items: [
-            ("cpu", "模型"), ("pawprint", "小猫"), ("eye", "感知与记忆"), ("speaker.wave.2", "声音"),
-            ("sparkles", "技能"), ("fish", "任务广场"), ("info.circle", "关于"), ("person.crop.circle", "账号")])
-        side.onSelect = { [weak self] i in self?.select(page: i) }
+            ("person.crop.circle", "用户"), ("pawprint", "小猫"), ("cpu", "模型"), ("speaker.wave.2", "声音"),
+            ("eye", "感知与记忆"), ("sparkles", "技能"), ("fish", "任务广场"),
+            ("antenna.radiowaves.left.and.right", "信号站"), ("info.circle", "关于")])
+        side.onSelect = { [weak self] i in if let pg = SettingsPage(rawValue: i) { self?.select(page: pg) } }
         sidebar = side
         let divider = NSBox()
         divider.boxType = .separator
@@ -2264,7 +2325,12 @@ final class SettingsController: NSObject, NSWindowDelegate {
             pageHost.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
             pageHost.trailingAnchor.constraint(equalTo: root.trailingAnchor)])
 
-        for page in [modelPage(), catPage(), memoryPage(), voicePage(), skillsPage(), squarePage(), aboutPage(), accountPage()] {
+        // Pages are built in their original order (some share controls), then shown in sidebar order.
+        let built: [(SettingsPage, SK.Page)] = [(.model, modelPage()), (.cat, catPage()), (.memory, memoryPage()),
+                                                (.voice, voicePage()), (.skills, skillsPage()), (.square, squarePage()),
+                                                (.about, aboutPage()), (.user, accountPage()), (.signal, signalPage())]
+        for pg in SettingsPage.allCases {
+            guard let page = built.first(where: { $0.0 == pg })?.1 else { continue }
             let sv = page.scroller()
             pageHost.addSubview(sv)
             NSLayoutConstraint.activate([
@@ -2277,7 +2343,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         if !restoredFrame { w.setContentSize(NSSize(width: 780, height: 580)) }
         w.delegate = self
         window = w
-        select(page: 0)
+        select(page: .model)
     }
 
     // 模型
@@ -2508,6 +2574,13 @@ final class SettingsController: NSObject, NSWindowDelegate {
         return p
     }
 
+    // 信号站（功能，不是技能）
+    private func signalPage() -> SK.Page {
+        let p = SK.Page(title: "信号站")
+        signalPane.build(into: p)
+        return p
+    }
+
     // 关于
     private func aboutPage() -> SK.Page {
         let p = SK.Page(title: "关于")
@@ -2540,8 +2613,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
 
     // 账号
     private func accountPage() -> SK.Page {
-        let p = SK.Page(title: "账号")
-        accountPane.onOpenSkills = { [weak self] in self?.select(page: 4) }
+        let p = SK.Page(title: "用户")
+        accountPane.onOpenSkills = { [weak self] in self?.select(page: .skills) }
         accountPane.build(into: p)
         return p
     }
@@ -2775,7 +2848,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     @objc private func modelPaneChanged(_ seg: NSSegmentedControl) {
         showModelPane(seg.selectedSegment)
     }
-    @objc private func goVoiceTab() { select(page: 3) }
+    @objc private func goVoiceTab() { select(page: .voice) }
 
     @objc private func visionPresetChanged() {
         let p = kVisionPresets[visionPreset.indexOfSelectedItem]
@@ -2864,6 +2937,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var catPanel: CatPanel!
     private var catView: CatView!
+    /// Signed-in account the level was last loaded for.
+    private var levelUser = ""
     private let bubble = Bubble()
     private let store = ChatStore()
     private let llm = LLM()
@@ -2936,7 +3011,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chatWindow.onSend = { [weak self] text, imgs in self?.ask(text, images: imgs, inBubble: false) }
         chatWindow.onMic = { [weak self] in self?.toggleVoice(fromWindow: true) }
         chatWindow.onClear = { [weak self] in self?.store.clear() }
-        chatWindow.onOpenAccount = { [weak self] in self?.settings.show(tab: 7) }
+        chatWindow.onOpenAccount = { [weak self] in self?.settings.show(page: .user) }
         bubble.anchor = { [weak self] in self?.catView.headScreenPoint() ?? .zero }
         bubble.onSend = { [weak self] text in self?.ask(text) }
         bubble.onExpand = { [weak self] in self?.bubble.hide(); self?.chatWindow.show() }
@@ -3045,8 +3120,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         xbuddy.start()
         TaskSquare.shared.present = { [weak self] text, acts, hold in self?.catPopup(text, acts, hold: hold) }
-        TaskSquare.shared.openAccount = { [weak self] in self?.settings.show(tab: 7) }
+        TaskSquare.shared.openAccount = { [weak self] in self?.settings.show(page: .user) }
         TaskSquare.shared.start()
+        // 信号站 + 小猫等级 + 会员光环
+        SignalStation.shared.present = { [weak self] text, acts, hold in self?.catPopup(text, acts, hold: hold) }
+        SignalStation.shared.openAccount = { [weak self] in self?.settings.show(page: .user) }
+        SignalStation.shared.captureDesktop = { [weak self] in
+            guard let hub = self?.hub, let app = hub.lastExternalApp, !app.isTerminated,
+                  let card = await hub.reader.capture(app: app, deep: true, wantScreenshot: false, maxNodes: 4000, axBudget: 0.6)
+            else { return nil }
+            return (app: card.app, title: Redactor.clean(card.windowTitle), text: Redactor.clean(card.plainText))
+        }
+        SignalStation.shared.start()
+        bubble.onLevel = { [weak self] in self?.settings.show(page: .user) }
+        catView.setMember(CatLevel.isMember)
+        CatLevel.shared.refresh()
+        Account.shared.observe { [weak self] in
+            guard let self = self else { return }
+            self.catView.setMember(CatLevel.isMember)
+            let uid = Account.shared.signedIn ? (Account.shared.profile.userID ?? "") : ""
+            if uid != self.levelUser { self.levelUser = uid; CatLevel.shared.refresh() }
+        }
+        levelUser = Account.shared.signedIn ? (Account.shared.profile.userID ?? "") : ""
         Updater.shared.onUpdateAvailable = { [weak self] v in self?.announceUpdate(v) }
         if Prefs.autoUpdate { Updater.shared.startAutoCheck() }
         RemoteConfig.shared.fetch { [weak self] text in
@@ -3113,7 +3208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         catView = CatView(frame: NSRect(origin: .zero, size: catSize))
         catPanel.contentView = catView
         catView.onClick = { [weak self] in self?.toggleChat() }
-        catView.onRightClick = { [weak self] in self?.settings.show(tab: 1) }
+        catView.onRightClick = { [weak self] in self?.settings.show(page: .cat) }
         catView.onMoved = { [weak self] in
             guard let self = self, self.bubble.isShown else { return }
             self.bubble.layout()
@@ -3149,6 +3244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(perceptionItem)
         m.addItem(withTitle: "查看当前上下文", action: #selector(previewContextMenu), keyEquivalent: "").target = self
         m.addItem(withTitle: "🐟 任务广场", action: #selector(menuSquare), keyEquivalent: "").target = self
+        m.addItem(withTitle: "📶 信号站", action: #selector(menuSignal), keyEquivalent: "").target = self
         m.addItem(.separator())
         m.addItem(withTitle: "设置…", action: #selector(openSettings), keyEquivalent: ",").target = self
         m.addItem(.separator())
@@ -3165,6 +3261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     @objc private func openSettings() { settings.show() }
     @objc private func menuSquare() { TaskSquare.shared.showWindow() }
+    @objc private func menuSignal() { SignalStation.shared.showWindow() }
     @objc private func previewContextMenu() { previewContext() }
 
     // MARK: perception
@@ -3237,6 +3334,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: chat
     private func toggleChat() {
+        CatLevel.shared.touch()
         if bubble.isShown && bubble.chatMode {
             bubble.hide(); voice.stop(); catView.perk(false)
         } else {
@@ -3293,7 +3391,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(true, forKey: key)
             DispatchQueue.main.async {
                 self?.bubble.notify("这一版没能用本机固定签名，所以每次更新都要重新授权。可以在 设置 → 关于 点「修复授权」再试一次。", 
-                                    actions: [("去修复", { [weak self] in self?.settings.show(tab: 6) })], hold: 12)
+                                    actions: [("去修复", { [weak self] in self?.settings.show(page: .about) })], hold: 12)
             }
         }
     }
@@ -3735,7 +3833,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let acts: [(String, () -> Void)] = [
             ("换一批", { [weak self] in self?.xReplyAssist(p) }),
-            ("回复设置", { [weak self] in self?.settings.show(tab: 4) })
+            ("回复设置", { [weak self] in self?.settings.show(page: .skills) })
         ]
         if bubble.chatMode && bubble.isShown {
             var a = acts
@@ -3950,6 +4048,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func ask(_ text: String, images: [Data] = [], spoken: Bool = false, inBubble: Bool = true,
                      pageOverride: String? = nil, extra: String? = nil, after: ((String) -> String?)? = nil) {
         xGreetingLive = false
+        CatLevel.shared.touch()
+        // 信号站: "发信号：……" / "/信号" opens the review window (never shares by itself).
+        if images.isEmpty && pageOverride == nil, let pre = SignalStation.postIntent(text) {
+            SignalStation.shared.compose(prefill: pre)
+            return
+        }
         // 任务广场: "发任务：……" opens the post form instead of a chat answer.
         if images.isEmpty && pageOverride == nil, let pre = TaskSquare.postIntent(text) {
             TaskSquare.shared.postDialog(prefill: pre)
@@ -3958,7 +4062,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 技能「帮我操作电脑」: "帮我……" runs the desktop agent instead of a plain chat answer.
         if images.isEmpty && pageOverride == nil && !Prefs.agentOn && DesktopAgent.isTask(text) {
             catPopup("🤖 这件事要「帮我操作电脑」技能来做，它现在是关着的。去 设置 → 技能 打开开关，我就能替你动手。",
-                     [("打开技能", { [weak self] in self?.settings.show(tab: 4) })], hold: 8)
+                     [("打开技能", { [weak self] in self?.settings.show(page: .skills) })], hold: 8)
             return
         }
         if images.isEmpty && pageOverride == nil && Prefs.agentOn && DesktopAgent.isTask(text) {
@@ -3969,7 +4073,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             } else {
                 catPopup("🤖 「帮我操作电脑」是订阅技能，去 设置 → 技能 可以试用或订阅。",
-                         [("打开技能", { [weak self] in self?.settings.show(tab: 4) })], hold: 8)
+                         [("打开技能", { [weak self] in self?.settings.show(page: .skills) })], hold: 8)
                 return
             }
         }
@@ -4152,10 +4256,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func toggleVoice(fromWindow: Bool) {
+        CatLevel.shared.touch()
         if listener.isListening { listener.finish(); return }
         guard Prefs.voiceChat else {
             bubble.notify("语音对话还没开哦～右键点我 → 小猫 → 开启语音对话。",
-                          actions: [("打开设置", { [weak self] in self?.settings.show(tab: 1) })])
+                          actions: [("打开设置", { [weak self] in self?.settings.show(page: .cat) })])
             return
         }
         voice.stop()
