@@ -1,35 +1,63 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OrdCat · 窝在桌面角落的小黑猫</title>
-<meta name="description" content="OrdCat 是一只窝在 Mac 屏幕边上的小黑猫：低能耗、零负担，看你所看，用你自己的 AI 模型安静陪你。">
+<title>OrdCat 序数猫 · 会永远陪伴你的 AI 小猫</title>
+<meta name="description" content="OrdCat 序数猫是一只窝在 Mac 屏幕边上的 AI 小黑猫：低能耗、零负担，看你所看，用你自己的 AI 模型安静陪你。">
 <link rel="icon" href="favicon.png">
-<meta property="og:title" content="OrdCat 🐈‍⬛">
-<meta property="og:description" content="A cozy cat on your desktop. Less burden, low power, always with you.">
-<meta property="og:image" content="https://ordcat.de/cat.png">
+<link rel="apple-touch-icon" href="icon.png">
+<meta property="og:title" content="OrdCat 序数猫 🐈‍⬛">
+<meta property="og:description" content="The AI cat that keeps you company. Low power, no burden, your own model.">
+<meta property="og:image" content="https://ordcat.de/logo-1024.png">
+<script src="theme.js"></script>
 <style>
-:root{--bg:#0d0e14;--card:#161822;--line:#262938;--fg:#eceef5;--mute:#9aa0b4;--amber:#f5b53d}
+@font-face{font-family:Fredoka;src:url(fredoka.woff2) format("woff2");font-weight:300 700;font-display:swap}
+@font-face{font-family:KuaiLe;src:url(kuaile-logo.woff2) format("woff2");font-display:swap}
+:root,[data-theme=dark]{--bg:#0d0e14;--card:#161822;--line:#262938;--fg:#eceef5;--mute:#9aa0b4;--amber:#f5b53d;--ink:#1a1405;--shadow:rgba(0,0,0,.45);--cta1:#171a26;--cta2:#11121a;--glow1:rgba(245,181,61,.26);--glow2:rgba(120,110,190,.16)}
+[data-theme=light]{--bg:#f6f5f2;--card:#ffffff;--line:#e6e3dc;--fg:#18181c;--mute:#5f6270;--amber:#f0a92a;--ink:#2a1d02;--shadow:rgba(30,25,10,.14);--cta1:#fffaf0;--cta2:#fff3dc;--glow1:rgba(245,181,61,.32);--glow2:rgba(140,130,220,.14)}
 *{box-sizing:border-box}html{scroll-behavior:smooth}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;transition:background .3s,color .3s}
 a{color:inherit}
 .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
-nav{display:flex;align-items:center;justify-content:space-between;height:68px}
-.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;text-decoration:none}
-.brand img{width:30px;height:30px;border-radius:8px}
+nav{display:flex;align-items:center;justify-content:space-between;height:72px}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none}
+.brand img{width:34px;height:34px;border-radius:9px}
+.brand .wm{font-family:Fredoka,sans-serif;font-weight:600;font-size:25px;color:var(--amber);letter-spacing:-.2px;line-height:1}
+.brand .cn{font-family:KuaiLe,sans-serif;font-size:14px;color:var(--mute);letter-spacing:2px;margin-left:2px;line-height:1;padding-top:4px}
+nav .links{display:flex;align-items:center}
 nav .links a{color:var(--mute);text-decoration:none;margin-left:22px;font-size:14px}
 nav .links a:hover{color:var(--fg)}
-.hero{display:grid;grid-template-columns:1.15fr .85fr;gap:40px;align-items:center;padding:56px 0 72px}
+.tg{margin-left:14px;height:32px;min-width:38px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:600 13px/30px -apple-system,sans-serif;cursor:pointer}
+.tg:hover{border-color:var(--amber)}
+.hero{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center;padding:48px 0 72px}
 h1{font-size:52px;line-height:1.15;margin:0 0 18px;letter-spacing:-.5px}
 h1 em{font-style:normal;color:var(--amber)}
 .sub{color:var(--mute);font-size:18px;margin:0 0 30px;max-width:520px}
-.btn{display:inline-flex;align-items:center;gap:10px;background:var(--amber);color:#1a1405;font-weight:700;padding:14px 26px;border-radius:14px;text-decoration:none;font-size:17px;transition:transform .15s}
+.btn{display:inline-flex;align-items:center;gap:10px;background:var(--amber);color:var(--ink);font-weight:700;padding:14px 26px;border-radius:14px;text-decoration:none;font-size:17px;transition:transform .15s}
 .btn:hover{transform:translateY(-2px)}
 .btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line);font-weight:600}
 .meta{color:var(--mute);font-size:13px;margin-top:14px}
-.cat{width:100%;max-width:420px;justify-self:center;padding:36px;border-radius:50%;background:radial-gradient(circle,rgba(245,181,61,.28) 0%,rgba(120,110,190,.14) 45%,transparent 70%)}
-.shot{border-radius:18px;border:1px solid var(--line);width:100%;display:block;box-shadow:0 40px 80px rgba(0,0,0,.45)}
+/* live cat */
+.stage{position:relative;justify-self:center;width:100%;max-width:420px;aspect-ratio:1;display:grid;place-items:center;cursor:pointer;user-select:none;-webkit-user-select:none}
+.stage:before{content:"";position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle,var(--glow1) 0%,var(--glow2) 45%,transparent 70%)}
+#cat{position:relative;width:78%;overflow:visible;filter:drop-shadow(0 0 22px rgba(255,181,71,.18))}
+#cat .bob{animation:bob 4.2s ease-in-out infinite;transform-origin:0 0}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+#cat .ear{transition:transform .35s cubic-bezier(.3,1.6,.5,1)}
+#earL{transform-origin:-44px -28px;transform:rotate(-14deg) scaleY(.86)}
+#earR{transform-origin:44px -28px;transform:rotate(14deg) scaleY(.86)}
+.perk #earL{transform:rotate(0) scaleY(1.14)}
+.perk #earR{transform:rotate(0) scaleY(1.14)}
+#cat .eye{transition:transform .08s linear}
+#shadow{position:absolute;bottom:13%;left:50%;width:46%;height:5%;transform:translateX(-50%);border-radius:50%;background:radial-gradient(rgba(0,0,0,.35),transparent 70%);animation:sh 4.2s ease-in-out infinite}
+[data-theme=light] #shadow{background:radial-gradient(rgba(60,40,0,.22),transparent 70%)}
+@keyframes sh{0%,100%{transform:translateX(-50%) scaleX(1)}50%{transform:translateX(-50%) scaleX(.9)}}
+#excl{position:absolute;left:16%;top:12%;width:40px;height:40px;border-radius:50%;background:#ffb547;color:#111;font:800 26px/40px -apple-system,sans-serif;text-align:center;opacity:0;transform:scale(.4) translateY(10px);transition:all .3s cubic-bezier(.3,1.6,.5,1)}
+.perk #excl{opacity:1;transform:scale(1) translateY(0)}
+#say{position:absolute;left:50%;bottom:-2%;transform:translate(-50%,8px);white-space:nowrap;background:rgba(22,22,26,.94);color:#fff;font-size:15px;padding:9px 16px;border-radius:14px;opacity:0;transition:all .3s;pointer-events:none;box-shadow:0 10px 30px rgba(0,0,0,.3)}
+#say.on{opacity:1;transform:translate(-50%,0)}
+.shot{border-radius:18px;border:1px solid var(--line);width:100%;display:block;box-shadow:0 40px 80px var(--shadow)}
 section{padding:64px 0}
 h2{font-size:32px;margin:0 0 10px}
 .lead{color:var(--mute);margin:0 0 34px}
@@ -41,84 +69,160 @@ h2{font-size:32px;margin:0 0 10px}
 ol.steps{counter-reset:s;list-style:none;padding:0;margin:0;display:grid;gap:14px}
 ol.steps li{counter-increment:s;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px 18px 64px;position:relative;color:var(--mute)}
 ol.steps li b{color:var(--fg)}
-ol.steps li:before{content:counter(s);position:absolute;left:20px;top:17px;width:28px;height:28px;border-radius:50%;background:var(--amber);color:#1a1405;font-weight:700;display:grid;place-items:center;font-size:14px}
+ol.steps li:before{content:counter(s);position:absolute;left:20px;top:17px;width:28px;height:28px;border-radius:50%;background:var(--amber);color:var(--ink);font-weight:700;display:grid;place-items:center;font-size:14px}
 details{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 20px;margin-bottom:12px}
 summary{cursor:pointer;font-weight:600}
 details p{color:var(--mute);margin:10px 0 0}
-.cta{text-align:center;background:linear-gradient(180deg,#171a26,#11121a);border:1px solid var(--line);border-radius:24px;padding:52px 24px}
+.cta{text-align:center;background:linear-gradient(180deg,var(--cta1),var(--cta2));border:1px solid var(--line);border-radius:24px;padding:52px 24px}
 footer{color:var(--mute);font-size:13px;padding:40px 0 56px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
 footer a{color:var(--mute)}
-@media(max-width:820px){.hero{grid-template-columns:1fr;text-align:center;padding-top:24px}.sub{margin-left:auto;margin-right:auto}.cat{max-width:260px;order:-1}h1{font-size:38px}.grid{grid-template-columns:1fr}nav .links a:not(.dl){display:none}}
+@media(max-width:820px){.hero{grid-template-columns:1fr;text-align:center;padding-top:16px}.sub{margin-left:auto;margin-right:auto}.stage{max-width:280px;order:-1}h1{font-size:38px}.grid{grid-template-columns:1fr}nav .links a{display:none}.brand .cn{display:none}}
 </style>
 </head>
 <body>
 <div class="wrap">
 <nav>
-  <a class="brand" href="#"><img src="icon.png" alt="">OrdCat</a>
-  <div class="links"><a href="#features">功能</a><a href="#install">安装</a><a href="#faq">常见问题</a><a class="dl" href="https://github.com/langideas/OrdCat">GitHub</a></div>
+  <a class="brand" href="#"><img src="icon.png" alt="OrdCat"><span class="wm">OrdCat</span><span class="cn">序数猫</span></a>
+  <div class="links"><a href="#features" data-i="nav1">功能</a><a href="#install" data-i="nav2">安装</a><a href="#faq" data-i="nav3">常见问题</a><a href="https://github.com/langideas/OrdCat">GitHub</a>
+    <button class="tg" id="langBtn" onclick="ocToggleLang()">EN</button><button class="tg" id="themeBtn" onclick="ocCycleTheme()">◐</button></div>
 </nav>
 
 <div class="hero">
   <div>
-    <h1>会永远陪伴你的<br><em>AI 小猫</em></h1>
-    <p class="sub">低能耗、零负担。它看得懂你屏幕上的内容，用你自己选的 AI 模型，安静地陪你、在你卡住的时候搭把手。</p>
-    <a class="btn" href="https://github.com/langideas/OrdCat/releases/latest/download/OrdCat-macOS.zip">下载 macOS 版</a>
-    <a class="btn ghost" href="#install" style="margin-left:10px">怎么安装</a>
-    <div class="meta">免费 · macOS 13 及以上 · Apple 芯片和 Intel 都能用 · <span id="ver">最新版</span></div>
+    <h1 data-i="h1">会永远陪伴你的<br><em>AI 小猫</em></h1>
+    <p class="sub" data-i="sub">低能耗、零负担。它看得懂你屏幕上的内容，用你自己选的 AI 模型，安静地陪你、在你卡住的时候搭把手。</p>
+    <a class="btn" href="https://github.com/langideas/OrdCat/releases/latest/download/OrdCat-macOS.zip" data-i="dl">下载 macOS 版</a>
+    <a class="btn ghost" href="#install" style="margin-left:10px" data-i="how">怎么安装</a>
+    <div class="meta"><span data-i="meta">免费 · macOS 13 及以上 · Apple 芯片和 Intel 都能用</span> · <span id="ver"></span></div>
   </div>
-  <img class="cat" src="cat.png" alt="OrdCat 小黑猫">
+  <div class="stage" id="stage" aria-label="OrdCat">
+    <svg id="cat" viewBox="-100 -125 200 210">
+      <g class="bob">
+        <g class="ear" id="earL"><polygon points="-74,-28 -58,-106 -14,-58" fill="#121214" stroke="rgba(255,255,255,.24)" stroke-width="2" stroke-linejoin="round"/><polygon points="-62,-40 -55,-86 -30,-58" fill="#3b2b30"/></g>
+        <g class="ear" id="earR"><polygon points="74,-28 58,-106 14,-58" fill="#121214" stroke="rgba(255,255,255,.24)" stroke-width="2" stroke-linejoin="round"/><polygon points="62,-40 55,-86 30,-58" fill="#3b2b30"/></g>
+        <ellipse cx="0" cy="0" rx="80" ry="72" fill="#121214" stroke="rgba(255,255,255,.24)" stroke-width="2"/>
+        <g id="eyes"><rect class="eye" id="eyeL" x="-34.5" y="-16" width="15" height="28" rx="7.5" fill="#ffb547" style="filter:drop-shadow(0 0 5px rgba(255,181,71,.75))"/><rect class="eye" id="eyeR" x="17.5" y="-16" width="15" height="28" rx="7.5" fill="#ffb547" style="filter:drop-shadow(0 0 5px rgba(255,181,71,.75))"/></g>
+      </g>
+    </svg>
+    <div id="shadow"></div>
+    <div id="excl">!</div>
+    <div id="say"></div>
+  </div>
 </div>
 
-<img class="shot" src="desk.jpg" alt="复制报错后，小猫在屏幕边上给出提示">
+<img class="shot" src="desk.jpg" alt="复制报错后，小猫在屏幕边上给出提示" data-i-alt="shotalt">
 
 <section id="features">
-  <h2>不催你卷，只陪着你</h2>
-  <p class="lead">平时几乎不占电脑资源，需要的时候轻轻一点就在。</p>
+  <h2 data-i="fh">不催你卷，只陪着你</h2>
+  <p class="lead" data-i="fl">平时几乎不占电脑资源，需要的时候轻轻一点就在。</p>
   <div class="grid">
-    <div class="f"><span class="i">📋</span><b>复制就能问</b><p>复制一段报错、代码或文字，小猫竖起耳朵，点一下就帮你看看。</p></div>
-    <div class="f"><span class="i">👀</span><b>看你所看</b><p>把当前页面分享给小猫，问「重点是什么」，它会在屏幕上圈出对应的那一行。</p></div>
-    <div class="f"><span class="i">🧠</span><b>模型你来选</b><p>DeepSeek、OpenAI、Gemini、Claude、Groq，或本地离线的 Ollama，Key 存在系统钥匙串里。</p></div>
-    <div class="f"><span class="i">🎙</span><b>能说会听</b><p>语音输入、朗读回答，Esc 随时停下。熬夜和久坐时会轻声提醒你休息。</p></div>
-    <div class="f"><span class="i">🐟</span><b>任务广场</b><p>把问题发到广场，用小鱼干当奖励；也能让你的小猫帮别人解题，答案你看过才交。</p></div>
-    <div class="f"><span class="i">🔒</span><b>隐私优先</b><p>只在你分享时才看页面，忽略密码管理器的内容，发出去之前自动给密码和 Key 打码。</p></div>
+    <div class="f"><span class="i">📋</span><b data-i="f1t">复制就能问</b><p data-i="f1">复制一段报错、代码或文字，小猫竖起耳朵，点一下就帮你看看。</p></div>
+    <div class="f"><span class="i">👀</span><b data-i="f2t">看你所看</b><p data-i="f2">把当前页面分享给小猫，问「重点是什么」，它会在屏幕上圈出对应的那一行。</p></div>
+    <div class="f"><span class="i">🧠</span><b data-i="f3t">模型你来选</b><p data-i="f3">DeepSeek、OpenAI、Gemini、Claude、Groq，或本地离线的 Ollama，Key 存在系统钥匙串里。</p></div>
+    <div class="f"><span class="i">🎙</span><b data-i="f4t">能说会听</b><p data-i="f4">语音输入、朗读回答，Esc 随时停下。熬夜和久坐时会轻声提醒你休息。</p></div>
+    <div class="f"><span class="i">🐟</span><b data-i="f5t">任务广场</b><p data-i="f5">把问题发到广场，用小鱼干当奖励；也能让你的小猫帮别人解题，答案你看过才交。</p></div>
+    <div class="f"><span class="i">🔒</span><b data-i="f6t">隐私优先</b><p data-i="f6">只在你分享时才看页面，忽略密码管理器的内容，发出去之前自动给密码和 Key 打码。</p></div>
   </div>
 </section>
 
 <section id="install">
-  <h2>安装只要一分钟</h2>
-  <p class="lead">装好以后，有新版本小猫会自己更新。</p>
+  <h2 data-i="ih">安装只要一分钟</h2>
+  <p class="lead" data-i="il">装好以后，有新版本小猫会自己更新。</p>
   <ol class="steps">
-    <li><b>下载</b>：点上面的「下载 macOS 版」，得到 OrdCat-macOS.zip，双击解压。</li>
-    <li><b>拖进「应用程序」</b>：把 OrdCat 拖到 Finder 左边的「应用程序」文件夹。</li>
-    <li><b>第一次打开</b>：在「应用程序」里<b>右键 OrdCat → 打开 → 打开</b>。如果提示无法打开，去 系统设置 → 隐私与安全性，往下找到 OrdCat，点「仍要打开」。</li>
-    <li><b>设置模型</b>：右键小猫 → 设置 → 模型，选一个模型、填上 Key（本地 Ollama 不需要 Key）。弹出钥匙串提示时点「始终允许」。</li>
+    <li data-i="s1"><b>下载</b>：点上面的「下载 macOS 版」，得到 OrdCat-macOS.zip，双击解压。</li>
+    <li data-i="s2"><b>拖进「应用程序」</b>：把 OrdCat 拖到 Finder 左边的「应用程序」文件夹。</li>
+    <li data-i="s3"><b>第一次打开</b>：在「应用程序」里<b>右键 OrdCat → 打开 → 打开</b>。如果提示无法打开，去 系统设置 → 隐私与安全性，往下找到 OrdCat，点「仍要打开」。</li>
+    <li data-i="s4"><b>设置模型</b>：右键小猫 → 设置 → 模型，选一个模型、填上 Key（本地 Ollama 不需要 Key）。弹出钥匙串提示时点「始终允许」。</li>
   </ol>
 </section>
 
 <section id="faq">
-  <h2>常见问题</h2>
-  <details><summary>要花钱吗？</summary><p>OrdCat 本身免费。用云端模型的话，按你自己在模型平台的账号计费；用本地 Ollama 完全免费。</p></details>
-  <details><summary>它会一直录屏吗？</summary><p>不会。小猫平时不截屏、不录音，只有你主动分享页面时才读取内容。</p></details>
-  <details><summary>为什么第一次打开要右键？</summary><p>OrdCat 还没有经过苹果公证，macOS 会多问一句。右键打开一次之后就和普通应用一样了。</p></details>
-  <details><summary>怎么卸载？</summary><p>退出 OrdCat（菜单栏 🐈‍⬛ → 退出），把「应用程序」里的 OrdCat 拖进废纸篓即可。</p></details>
-  <details><summary>有 iPhone 版吗？</summary><p>在计划中，灵动岛里的小猫会晚一点和大家见面。</p></details>
+  <h2 data-i="qh">常见问题</h2>
+  <details><summary data-i="q1">要花钱吗？</summary><p data-i="a1">OrdCat 本身免费。用云端模型的话，按你自己在模型平台的账号计费；用本地 Ollama 完全免费。</p></details>
+  <details><summary data-i="q2">它会一直录屏吗？</summary><p data-i="a2">不会。小猫平时不截屏、不录音，只有你主动分享页面时才读取内容。</p></details>
+  <details><summary data-i="q3">为什么第一次打开要右键？</summary><p data-i="a3">OrdCat 还没有经过苹果公证，macOS 会多问一句。右键打开一次之后就和普通应用一样了。</p></details>
+  <details><summary data-i="q4">怎么卸载？</summary><p data-i="a4">退出 OrdCat（菜单栏 🐈‍⬛ → 退出），把「应用程序」里的 OrdCat 拖进废纸篓即可。</p></details>
+  <details><summary data-i="q5">有 iPhone 版吗？</summary><p data-i="a5">在计划中，灵动岛里的小猫会晚一点和大家见面。</p></details>
 </section>
 
 <section>
   <div class="cta">
-    <h2>领一只小黑猫回家</h2>
-    <p class="lead">A cozy cat on your desktop. Less burden, low power, always with you.</p>
-    <a class="btn" href="https://github.com/langideas/OrdCat/releases/latest/download/OrdCat-macOS.zip">下载 macOS 版</a>
+    <h2 data-i="ch">领养一只属于你的 AI 小猫回家</h2>
+    <p class="lead" data-i="cl">Adopt an AI cat of your own and bring it home.</p>
+    <a class="btn" href="https://github.com/langideas/OrdCat/releases/latest/download/OrdCat-macOS.zip" data-i="dl">下载 macOS 版</a>
   </div>
 </section>
 
 <footer>
-  <span>© 2026 OrdCat · Axun Conor</span>
-  <span><a href="https://github.com/langideas/OrdCat/releases">更新记录</a> · <a href="privacy.html">隐私政策</a> · <a href="terms.html">用户协议</a> · <a href="impressum.html">Impressum</a> · <a href="mailto:hello@ordcat.de">hello@ordcat.de</a></span>
+  <span>© 2026 OrdCat 序数猫 · Axun Conor</span>
+  <span><a href="https://github.com/langideas/OrdCat/releases" data-i="ft1">更新记录</a> · <a href="privacy.html" data-i="ft2">隐私政策</a> · <a href="terms.html" data-i="ft3">用户协议</a> · <a href="impressum.html">Impressum</a> · <a href="mailto:hello@ordcat.de">hello@ordcat.de</a></span>
 </footer>
 </div>
 <script>
-fetch('https://api.github.com/repos/langideas/OrdCat/releases/latest').then(r=>r.json()).then(j=>{if(j.tag_name)document.getElementById('ver').textContent='最新 '+j.tag_name}).catch(()=>{})
+window.OC_I18N={
+ __title:"OrdCat · The AI cat that keeps you company",
+ nav1:"Features",nav2:"Install",nav3:"FAQ",
+ h1:"The AI cat that'll<br><em>always be with you</em>",
+ sub:"Low power, zero burden. It understands what's on your screen, runs on the AI model you choose, keeps you quiet company, and lends a paw when you're stuck.",
+ dl:"Download for macOS",how:"How to install",
+ meta:"Free · macOS 13+ · Apple silicon &amp; Intel",
+ shotalt:"After you copy an error, the cat offers a hint from the edge of the screen",
+ fh:"No hustle. Just company.",fl:"Barely uses any resources, and it's there the moment you need it.",
+ f1t:"Copy to ask",f1:"Copy an error, some code or text. The cat perks its ears; one click and it takes a look.",
+ f2t:"Sees what you see",f2:"Share the current page and ask “what matters here?” – it circles the exact line on screen.",
+ f3t:"Bring your own model",f3:"DeepSeek, OpenAI, Gemini, Claude, Groq, or offline Ollama. Keys live in your macOS Keychain.",
+ f4t:"Talks and listens",f4:"Voice input and read-aloud answers; Esc stops anytime. Gently reminds you to rest on late nights.",
+ f5t:"Task Square",f5:"Post a question with dried-fish rewards, or let your cat help others – nothing is sent before you review it.",
+ f6t:"Privacy first",f6:"Only looks when you share, ignores password managers, and masks passwords and keys before anything is sent.",
+ ih:"Installed in a minute",il:"After that, the cat updates itself.",
+ s1:"<b>Download</b>: click “Download for macOS”, get OrdCat-macOS.zip and double-click to unzip.",
+ s2:"<b>Move to Applications</b>: drag OrdCat into the Applications folder in Finder.",
+ s3:"<b>First launch</b>: in Applications, <b>right-click OrdCat → Open → Open</b>. If macOS refuses, go to System Settings → Privacy &amp; Security, scroll to OrdCat and click “Open Anyway”.",
+ s4:"<b>Pick a model</b>: right-click the cat → Settings → Model, choose a model and paste your key (local Ollama needs none). Click “Always Allow” on the Keychain prompt.",
+ qh:"FAQ",
+ q1:"Does it cost anything?",a1:"OrdCat is free. Cloud models bill through your own provider account; local Ollama is completely free.",
+ q2:"Is it recording my screen?",a2:"No. The cat doesn't capture your screen or audio in the background – it only reads a page when you share it.",
+ q3:"Why right-click on first launch?",a3:"OrdCat isn't notarized by Apple yet, so macOS asks once. After that it opens like any other app.",
+ q4:"How do I uninstall?",a4:"Quit OrdCat (menu bar 🐈‍⬛ → Quit) and drag OrdCat from Applications to the Trash.",
+ q5:"Is there an iPhone version?",a5:"It's planned – the cat in your Dynamic Island is coming a little later.",
+ ch:"Adopt an AI cat of your own and bring it home",
+ cl:"领养一只属于你的 AI 小猫回家",
+ ft1:"Releases",ft2:"Privacy",ft3:"Terms"
+};
+// version
+fetch('https://api.github.com/repos/langideas/OrdCat/releases/latest').then(r=>r.json()).then(j=>{if(j.tag_name){window._ver=j.tag_name;setVer()}}).catch(()=>{});
+function setVer(){var v=document.getElementById('ver');if(!window._ver){v.textContent='';return}v.textContent=(ocLang()==='zh'?'最新 ':'latest ')+window._ver}
+document.addEventListener('oc-lang',setVer);
+
+// live cat: blink, eyes follow the pointer, ears perk on hover / text selection / click
+(function(){
+  var st=document.getElementById('stage'),svg=document.getElementById('cat'),
+      eL=document.getElementById('eyeL'),eR=document.getElementById('eyeR'),say=document.getElementById('say');
+  var ox=0,oy=0,tx=0,ty=0,blink=1,perkT=0,sayT=0,hover=false;
+  var lines={zh:['喵？要我帮你看看吗','我在呢 🐾','今天也辛苦啦','选中文字我就竖耳朵 👂','记得喝口水 🍵'],
+             en:['Meow? Need a paw?','I\'m here 🐾','You did great today','Select text and my ears perk up 👂','Sip some water 🍵']};
+  function perk(ms){perkT=Math.max(perkT,performance.now()+ms)}
+  function speak(){var l=lines[ocLang()]||lines.zh;say.textContent=l[Math.floor(Math.random()*l.length)];say.classList.add('on');sayT=performance.now()+2600;perk(2600)}
+  addEventListener('pointermove',function(e){
+    var r=svg.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height*.6;
+    var vx=e.clientX-cx,vy=e.clientY-cy,d=Math.hypot(vx,vy)||1,g=Math.min(1,d/260);
+    tx=vx/d*7*g;ty=vy/d*6*g;
+  });
+  st.addEventListener('pointerenter',function(){hover=true});
+  st.addEventListener('pointerleave',function(){hover=false});
+  st.addEventListener('click',speak);
+  document.addEventListener('selectionchange',function(){var s=String(getSelection()||'').trim();if(s.length>1)perk(1800)});
+  function scheduleBlink(){setTimeout(function(){var t0=performance.now();(function b(){var k=(performance.now()-t0)/160;blink=k<1?Math.abs(1-2*k)*.85+.15:1;if(k<1)requestAnimationFrame(b)})();if(Math.random()<.25)setTimeout(function(){var t1=performance.now();(function b(){var k=(performance.now()-t1)/160;blink=k<1?Math.abs(1-2*k)*.85+.15:1;if(k<1)requestAnimationFrame(b)})()},260);scheduleBlink()},2200+Math.random()*3800)}
+  scheduleBlink();
+  (function loop(now){
+    ox+=(tx-ox)*.15;oy+=(ty-oy)*.15;
+    var perked=hover||now<perkT;st.classList.toggle('perk',perked);
+    var sy=blink*(perked?1.12:1);
+    [eL,eR].forEach(function(e,i){var cx=i?25:-27;e.setAttribute('transform','translate('+ox+' '+oy+') translate('+cx+' -2) scale(1 '+sy+') translate('+(-cx)+' 2)')});
+    if(now>sayT)say.classList.remove('on');
+    requestAnimationFrame(loop);
+  })(performance.now());
+})();
 </script>
 </body>
 </html>

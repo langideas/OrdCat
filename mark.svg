@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<defs>
+ <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#262a40"/><stop offset=".6" stop-color="#14151f"/><stop offset="1" stop-color="#1e1a26"/></linearGradient>
+ <radialGradient id="glow" cx=".5" cy=".55" r=".5"><stop offset="0" stop-color="#ffb547" stop-opacity=".28"/><stop offset="1" stop-color="#ffb547" stop-opacity="0"/></radialGradient>
+ <filter id="eg" x="-1" y="-1" width="3" height="3"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>
+<rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#bg)"/>
+<circle cx="512" cy="560" r="400" fill="url(#glow)"/>
+<g transform="translate(512 585) scale(3.3)">
+ <polygon points="-74,-28 -58,-106 -14,-58" fill="#121214" stroke="rgba(255,255,255,.22)" stroke-width="2" stroke-linejoin="round"/>
+ <polygon points="-62,-40 -55,-86 -30,-58" fill="#3b2b30"/>
+ <polygon points="74,-28 58,-106 14,-58" fill="#121214" stroke="rgba(255,255,255,.22)" stroke-width="2" stroke-linejoin="round"/>
+ <polygon points="62,-40 55,-86 30,-58" fill="#3b2b30"/>
+ <ellipse cx="0" cy="0" rx="80" ry="72" fill="#121214" stroke="rgba(255,255,255,.22)" stroke-width="2"/>
+ <g filter="url(#eg)"><rect x="-34.5" y="-16" width="15" height="28" rx="7.5" fill="#ffb547"/><rect x="17.5" y="-16" width="15" height="28" rx="7.5" fill="#ffb547"/></g>
+</g>
+</svg>
