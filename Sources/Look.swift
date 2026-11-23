@@ -354,7 +354,7 @@ enum L10n {
         "账号": "Account",
         "账号与设置": "Account & settings",
         "跟随系统": "System",
-        "还没有之前的话题": "No earlier topics yet",
+        "还没有对话记录": "No chat history yet",
         "还没检查过更新": "Haven't checked for updates yet",
         "这一版没能用本机固定签名，所以每次更新都要重新授权。可以在 设置 → 关于 点「修复授权」再试一次。": "This build couldn't use this Mac's fixed signature, so each update needs permissions again. Try “Repair permissions” in Settings → About.",
         "这个页面": "this page",
@@ -391,7 +391,7 @@ enum L10n {
         "🔊 朗读": "🔊 Read aloud",
         "🖼️ 看图 / 视频": "🖼️ Images / Video",
         "🖼️ 看图模型正在看图…": "🖼️ Vision model is looking…",
-        "🗂 之前的话题": "🗂 Earlier topics",
+        "🗂 对话记录": "🗂 Chat history",
         "🙈 桌面感知已关闭，我不会再看你的屏幕。": "🙈 Desktop perception is off, I won't look at your screen.",
         // 信号站 / 小猫等级 / 喵友 / 用户页 (v0.2.41)
         "用户": "Profile",

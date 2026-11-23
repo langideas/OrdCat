@@ -1425,7 +1425,7 @@ final class Bubble: NSObject {
         expandButton.toolTip = "打开独立聊天窗口（聊天记录、发送图片和文件）"
         card.addSubview(expandButton)
 
-        topicsButton = OCButton(title: "🗂 之前的话题", target: self, action: #selector(doTopics))
+        topicsButton = OCButton(title: "🗂 对话记录", target: self, action: #selector(doTopics))
         (topicsButton as? OCButton)?.chip = true
         (topicsButton as? OCButton)?.style = .secondary
         topicsButton.toolTip = "默认只参考当前页面；想接着聊以前的内容，在这里选"
@@ -3612,7 +3612,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let df = DateFormatter(); df.dateFormat = "M月d日 HH:mm"
         let list = Array(topics.reversed().prefix(12))
         if list.isEmpty {
-            let none = NSMenuItem(title: "还没有之前的话题", action: nil, keyEquivalent: "")
+            let none = NSMenuItem(title: "还没有对话记录", action: nil, keyEquivalent: "")
             none.isEnabled = false
             menu.addItem(none)
         }
