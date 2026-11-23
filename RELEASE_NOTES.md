@@ -1,3 +1,19 @@
+# OrdCat v0.2.54
+
+- 喵传点「停止」会先问：保存记录并结束、不保存结束、或继续听。
+- 保存的记录由你的模型整理：改正识别错字、合并断开的句子、分段，生成整理后的原文、完整译文和要点。整理失败的部分保留原始字幕，不会丢。
+- 记录只存在这台 Mac 上。在 设置 → 技能 → 喵传「📂 喵传记录」、菜单栏小猫菜单或字幕条的 📂 打开，可以重命名、删除、重新整理。
+- 下载支持 PDF、Word（.docx）、Markdown、纯文本、SRT 字幕和网页，可选「原文 + 译文」「只要译文」「只要原文」。
+- 断句更稳：句号后面有新内容才算一句说完，太短的半句会等下一句一起翻译，不会在单词中间切开。
+
+**English**
+
+- Pressing Stop in MiaoChuan now asks first: save the record and end, end without saving, or keep listening.
+- Saved records are tidied by your model: recognition mistakes fixed, broken sentences joined and paragraphs formed, giving a clean original, a full translation and key points. Any part that can't be tidied keeps its raw subtitles, so nothing is lost.
+- Records stay only on this Mac. Open them from Settings → Skills → MiaoChuan "📂 MiaoChuan records", the cat's menu bar menu or the 📂 on the subtitle bar, and rename, delete or tidy them again there.
+- Download as PDF, Word (.docx), Markdown, plain text, SRT subtitles or a web page, with original and translation, translation only, or original only.
+- Steadier sentence breaks: a sentence ends only once the speaker has moved past its full stop, very short fragments wait for the next sentence, and words are never cut in half.
+
 # OrdCat v0.2.53
 
 - 喵传字幕条加了语言选择：右上角直接改「他们说的语言 → 翻译成」，听的语言改了会马上换。

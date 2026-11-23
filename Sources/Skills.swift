@@ -537,7 +537,7 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
                   isOn: { Prefs.miaoOn },
                   setOn: { on in
                       Prefs.miaoOn = on
-                      if !on { MiaoChuan.shared.stop() }
+                      if !on { MiaoChuan.shared.requestStop(allowContinue: false) }
                   },
                   settings: { [weak self] in self?.miaoSettings() ?? NSView() })
 
@@ -646,13 +646,15 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
 
     private func miaoSettings() -> NSView {
         let v = column()
-        put(SK.buttons([SK.button("🎧 开始喵传", self, #selector(miaoStart))]), in: v, gap: 14)
+        put(SK.buttons([SK.button("🎧 开始喵传", self, #selector(miaoStart)),
+                        SK.button("📂 喵传记录", self, #selector(miaoRecords))]), in: v, gap: 14)
         let info = SK.WrapLabel("""
         怎么用：先打开会议、视频会议或 X Spaces，再点「开始喵传」（菜单栏的小猫菜单里也有）。选好要听的应用和语言，屏幕下方会出现字幕条：上面一行是原话，下面一行是译文。
 
         • 点「刚才在说什么」，小猫总结最近几分钟
         • 声音只在本机转成文字，翻译只把文字发给你设置的模型
-        • 字幕不保存，点「停止」就清掉
+        • 点「停止」时可以选择保存记录：小猫用你的模型整理成原文、译文和要点，只存在这台 Mac 上
+        • 保存的记录点上面的「📂 喵传记录」查看，可下载成 PDF、Word、Markdown、TXT、SRT 字幕或网页
         • 需要「屏幕录制」和「语音识别」权限
         • 多人抢话、口音重的时候可能识别错
         """, size: 12)
@@ -660,6 +662,7 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
         return v
     }
     @objc private func miaoStart() { MiaoChuan.shared.begin() }
+    @objc private func miaoRecords() { MiaoRecordsWindow.shared.show() }
 
     @objc private func xAlertToggled(_ b: NSSwitch) {
         Prefs.setXAlert(b.identifier?.rawValue ?? "", b.state == .on)

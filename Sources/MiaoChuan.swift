@@ -5,7 +5,8 @@
 //   • ScreenCaptureKit 只录那个应用的声音（不录画面），苹果语音识别优先在本机转文字，声音不离开 Mac。
 //   • 每说完一句，用用户自己设置的模型翻译成目标语言（只发文字）。
 //   • 屏幕下方一条字幕条：原话（小字）+ 译文（大字），可以拖动；「刚才在说什么」总结最近几分钟。
-//   • 字幕只在内存里，点「停止」就清掉，不自动保存、不上传。
+//   • 字幕只在内存里。点「停止」先问：保存记录并结束 / 不保存 / 继续听。保存的记录只在本机（MiaoRecords.swift）。
+//   • 断句：句号后面有新内容才算说完；停顿 1.6 秒且够长、或停顿 3 秒才切；不在单词中间切。
 // v2 (later): 会议纪要、术语解释、「我该怎么回」、识别自己的麦克风。
 
 import Cocoa
@@ -38,6 +39,8 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
 
     /// Shows a longer message next to the cat (set by the app delegate).
     var present: ((String) -> Void)?
+    /// Same, with buttons under the message.
+    var presentActions: ((String, [(String, () -> Void)]) -> Void)?
 
     private(set) var running = false
     private var stream: SCStream?
@@ -48,6 +51,7 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
     private var taskStarted = Date()
     private var recGen = 0
     private var appName = ""
+    private var startedAt = Date()
 
     // Sentence handling (main thread).
     private var latestText = ""          // the current recognition task's full text
@@ -70,7 +74,7 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
 
     // MARK: start / stop
 
-    func toggle() { running ? stop() : begin() }
+    func toggle() { running ? requestStop() : begin() }
 
     /// Pick the app and languages, check permissions, then listen.
     func begin() {
@@ -138,7 +142,7 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
         }
         let a = NSAlert()
         a.messageText = L10n.t("🎧 开始喵传")
-        a.informativeText = L10n.t("小猫只听你选的应用的声音，在本机转成文字，再用你设置的模型翻译（只发文字）。字幕不会保存，点「停止」就清掉。")
+        a.informativeText = L10n.t("小猫只听你选的应用的声音，在本机转成文字，再用你设置的模型翻译（只发文字）。点「停止」时可以选择保存记录，只存在这台 Mac 上。")
         a.accessoryView = box
         a.addButton(withTitle: L10n.t("开始"))
         let c = a.addButton(withTitle: L10n.t("取消")); c.keyEquivalent = "\u{1b}"
@@ -174,9 +178,11 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
         stream = s
         running = true
         lines = []; queue = []; latestText = ""; committed = 0
+        startedAt = Date()
         startRecognition()
         let b = bar ?? MiaoBar()
-        b.onStop = { [weak self] in self?.stop() }
+        b.onStop = { [weak self] in self?.requestStop() }
+        b.onRecords = { MiaoRecordsWindow.shared.show() }
         b.onSummary = { [weak self] in self?.summarize() }
         b.onLanguages = { [weak self] src, dst in self?.changeLanguages(source: src, target: dst) }
         bar = b
@@ -203,8 +209,32 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
         bar?.setStatus(L10n.english ? "● Listening to \(appName)" : "● 正在听 \(appName)")
     }
 
-    func stop() {
+    /// 停止 pressed: ask whether to save this session first.
+    func requestStop(allowContinue: Bool = true) {
         guard running else { return }
+        commitTail()
+        guard !lines.isEmpty else { stop(save: false); return }
+        let mins = max(1, Int((Date().timeIntervalSince(startedAt) / 60).rounded()))
+        let a = NSAlert()
+        a.messageText = L10n.t("结束喵传？")
+        a.informativeText = L10n.english
+            ? "Listened for \(mins) min, \(lines.count) lines. Save a record? The cat tidies it into the original and the translation with your model, and keeps it only on this Mac. Find it later in Settings → Skills → MiaoChuan → MiaoChuan records, or in the cat's menu bar menu."
+            : "这次听了 \(mins) 分钟、\(lines.count) 句。要保存记录吗？小猫会用你的模型整理成原文和译文，只存在这台 Mac 上。以后在 设置 → 技能 → 喵传 →「喵传记录」或菜单栏小猫菜单里查看和下载。"
+        a.addButton(withTitle: L10n.t("保存记录并结束"))
+        a.addButton(withTitle: L10n.t("不保存，结束"))
+        if allowContinue { let c = a.addButton(withTitle: L10n.t("继续听")); c.keyEquivalent = "\u{1b}" }
+        NSApp.activate(ignoringOtherApps: true)
+        switch a.runModal() {
+        case .alertFirstButtonReturn: stop(save: true)
+        case .alertSecondButtonReturn: stop(save: false)
+        default: break
+        }
+    }
+
+    func stop(save: Bool = false, quiet: Bool = false) {
+        guard running else { return }
+        if save { commitTail() }
+        let snapshot = lines
         running = false
         tick?.invalidate(); tick = nil
         let s = stream; stream = nil
@@ -217,7 +247,31 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
         llm.cancel(); sumLLM.cancel()
         lines = []; queue = []; translating = false
         bar?.hide()
-        present?(L10n.t("喵传停啦，这次的字幕已经清掉了 🎧"))
+        if save && !snapshot.isEmpty {
+            saveRecord(snapshot)
+        } else if !quiet {
+            present?(L10n.t("喵传停啦，这次的字幕已经清掉了 🎧"))
+        }
+    }
+
+    /// Store the raw subtitles right away (nothing gets lost), then tidy them with the user's model.
+    private func saveRecord(_ snapshot: [(at: Date, orig: String, tr: String)]) {
+        let rec = MiaoRecord(
+            id: UUID().uuidString,
+            title: MiaoRecords.defaultTitle(app: appName, start: startedAt),
+            start: startedAt, end: Date(), app: appName,
+            source: Prefs.miaoSource, target: Prefs.miaoTarget,
+            lines: snapshot.map { MiaoLine(t: $0.at.timeIntervalSince(startedAt), o: $0.orig, tr: $0.tr.hasPrefix("⚠️") ? "" : $0.tr) },
+            summary: "", origText: "", trText: "", tidied: false, tidyError: nil)
+        MiaoRecords.save(rec)
+        let open: (String) -> Void = { id in MiaoRecordsWindow.shared.show(select: id) }
+        presentActions?(L10n.t("📂 喵传记录已保存，小猫正在整理原文和译文…"), [(L10n.t("打开"), { open(rec.id) })])
+        MiaoTidier.start(rec) { [weak self] done in
+            let msg = done.tidyError == nil
+                ? (L10n.english ? "📂 Your MiaoChuan record is ready: \(done.title)" : "📂 喵传记录整理好了：\(done.title)")
+                : (L10n.english ? "📂 Record saved, but part of it couldn't be tidied, so the raw subtitles are kept: \(done.tidyError ?? "")" : "📂 记录已保存，有一部分没整理好，先保留了原始字幕：\(done.tidyError ?? "")")
+            self?.presentActions?(msg, [(L10n.t("打开"), { open(done.id) }), (L10n.t("下载"), { MiaoExport.run(MiaoRecords.load(done.id) ?? done) })])
+        }
     }
 
     // MARK: recognition
@@ -273,8 +327,10 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         DispatchQueue.main.async {
             guard self.running else { return }
-            self.stop()
-            self.present?(L10n.t("喵传停了：那个应用可能关掉了。"))
+            self.commitTail()
+            if self.lines.isEmpty { self.stop(quiet: true); self.present?(L10n.t("喵传停了：那个应用可能关掉了。")); return }
+            let keep = OCConfirm.ask(L10n.t("喵传停了：那个应用可能关掉了。"), L10n.t("要保存这次的记录吗？只存在这台 Mac 上。"), ok: L10n.t("保存记录"))
+            self.stop(save: keep)
         }
     }
 
@@ -293,18 +349,50 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
 
     private func tail() -> String {
         guard latestText.count > committed else { return "" }
-        return String(latestText.dropFirst(committed))
+        // The recognizer sometimes rewrites earlier words; never start in the middle of a word.
+        var start = latestText.index(latestText.startIndex, offsetBy: committed)
+        if start > latestText.startIndex {
+            let before = latestText[latestText.index(before: start)]
+            while start < latestText.endIndex, MiaoChuan.isWordChar(before), MiaoChuan.isWordChar(latestText[start]) {
+                start = latestText.index(after: start)
+            }
+        }
+        return String(latestText[start...])
     }
 
-    /// Finished sentences go to translation; the unfinished rest shows live.
+    /// Latin letters and digits (CJK characters are words on their own).
+    static func isWordChar(_ c: Character) -> Bool {
+        guard let u = c.unicodeScalars.first else { return false }
+        if u.value >= 0x2E80 { return false }
+        return c.isLetter || c.isNumber || c == "'" || c == "’"
+    }
+
+    /// Long enough to stand alone: 3 words, or 4 CJK characters.
+    static func longEnough(_ s: String) -> Bool {
+        let cjk = s.unicodeScalars.filter { $0.value >= 0x2E80 }.count
+        if cjk >= 4 { return true }
+        return s.split(whereSeparator: { $0 == " " }).count >= 3
+    }
+
+    /// A sentence is finished when the recognizer has already moved on past its full stop,
+    /// so a full stop it may still take back never cuts a sentence in two.
     private func onText() {
         var t = tail()
         let enders: Set<Character> = [".", "?", "!", "。", "？", "！", "…"]
-        while let i = t.firstIndex(where: { enders.contains($0) }) {
-            let sentence = String(t[...i]).trimmingCharacters(in: .whitespaces)
-            committed += t.distance(from: t.startIndex, to: t.index(after: i))
+        var from = t.startIndex
+        while let i = t[from...].firstIndex(where: { enders.contains($0) }) {
+            let next = t.index(after: i)
+            // "3.5", "U.S." and "e.g." are not the end of a sentence.
+            if t[i] == ".", next < t.endIndex, !t[next].isWhitespace { from = next; continue }
+            let rest = t[next...]
+            guard rest.contains(where: { !$0.isWhitespace && !enders.contains($0) }) else { break }
+            let sentence = String(t[..<next]).trimmingCharacters(in: .whitespaces)
+            // A very short piece ("Need.") waits and joins the next sentence.
+            guard MiaoChuan.longEnough(sentence) || sentence.count >= 12 else { from = next; continue }
+            committed = latestText.count - t.count + t.distance(from: t.startIndex, to: next)
             if sentence.count > 1 { add(sentence) }
             t = tail()
+            from = t.startIndex
         }
         let live = t.trimmingCharacters(in: .whitespaces)
         if !live.isEmpty { bar?.setLive(live) }
@@ -312,11 +400,26 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
 
     private func onTick() {
         guard running else { return }
-        // A pause of 1.2 s ends a sentence even without punctuation; long talk gets cut at ~120 characters.
+        // Pause of 1.6 s ends a long-enough sentence; 3 s ends anything; long talk is cut at a word break.
         let t = tail().trimmingCharacters(in: .whitespaces)
-        if !t.isEmpty && (Date().timeIntervalSince(lastChange) > 1.2 || t.count > 120) { commitTail() }
+        let pause = Date().timeIntervalSince(lastChange)
+        if !t.isEmpty && ((pause > 1.6 && MiaoChuan.longEnough(t)) || pause > 3.0) { commitTail() }
+        else if t.count > 160 { commitLongTail() }
         let age = Date().timeIntervalSince(taskStarted)
         if (age > 50 && tail().trimmingCharacters(in: .whitespaces).isEmpty) || age > 58 { commitTail(); restartRecognition() }
+    }
+
+    /// Someone talks on and on: cut at the last comma or space inside the first 160 characters.
+    private func commitLongTail() {
+        let t = tail()
+        let head = t.prefix(160)
+        let breaks: Set<Character> = [",", "，", "、", ";", "；", " "]
+        guard let cut = head.lastIndex(where: { breaks.contains($0) }), head.distance(from: head.startIndex, to: cut) > 40 else {
+            commitTail(); return
+        }
+        let piece = String(head[...cut]).trimmingCharacters(in: .whitespaces)
+        committed = latestText.count - t.count + head.distance(from: head.startIndex, to: head.index(after: cut))
+        if piece.count > 1 { add(piece) }
     }
 
     private func commitTail() {
@@ -326,11 +429,8 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     private func add(_ sentence: String) {
+        // The whole session stays in memory (text only) so it can be saved at the end.
         lines.append((Date(), sentence, ""))
-        // Keep about 15 minutes in memory, nothing more.
-        let cutoff = Date().addingTimeInterval(-15 * 60)
-        let drop = lines.prefix { $0.at < cutoff }.count
-        if drop > 0 { lines.removeFirst(drop); queue = queue.map { $0 - drop }.filter { $0 >= 0 } }
         if sameLanguage {
             show()
         } else {
@@ -427,6 +527,7 @@ final class MiaoBar: NSObject {
     var onStop: (() -> Void)?
     var onSummary: (() -> Void)?
     var onLanguages: ((String, String) -> Void)?
+    var onRecords: (() -> Void)?
     private let panel: NSPanel
     private let card = NSView()
     private let grad = CAGradientLayer()
@@ -439,6 +540,7 @@ final class MiaoBar: NSObject {
     private let arrow = NSTextField(labelWithString: "→")
     private let dstPop = NSPopUpButton()
     private var styleButton: OCButton!
+    private var recButton: OCButton!
     private var sumButton: OCButton!
     private var stopButton: OCButton!
     private let stylePop = NSPopover()
@@ -491,6 +593,10 @@ final class MiaoBar: NSObject {
         styleButton.chip = true
         styleButton.style = .neutral
         styleButton.toolTip = L10n.t("字幕字体：大小、粗细、颜色")
+        recButton = OCButton(title: "📂", target: self, action: #selector(doRecords))
+        recButton.chip = true
+        recButton.style = .neutral
+        recButton.toolTip = L10n.t("喵传记录")
         sumButton = OCButton(title: "刚才在说什么", target: self, action: #selector(doSummary))
         sumButton.chip = true
         sumButton.style = .secondary
@@ -503,7 +609,7 @@ final class MiaoBar: NSObject {
             l.lineBreakMode = .byTruncatingHead
             l.isSelectable = false
         }
-        for v in [card, title, status, srcPop, arrow, dstPop, styleButton!, sumButton!, stopButton!, prevLabel, origLabel, trLabel] as [NSView] {
+        for v in [card, title, status, srcPop, arrow, dstPop, recButton!, styleButton!, sumButton!, stopButton!, prevLabel, origLabel, trLabel] as [NSView] {
             panel.contentView?.addSubview(v)
         }
         stylePop.behavior = .transient
@@ -633,12 +739,13 @@ final class MiaoBar: NSObject {
         let y0 = h - 28
         title.frame = NSRect(x: 16, y: y0, width: 70, height: 16)
         let fit: (NSControl, CGFloat) -> CGFloat = { c, minW in max(minW, ceil(c.intrinsicContentSize.width)) }
-        let tw = fit(stopButton, 48), sw = fit(sumButton, 96), aw = fit(styleButton, 32)
+        let tw = fit(stopButton, 48), sw = fit(sumButton, 96), aw = fit(styleButton, 32), rw = fit(recButton, 30)
         stopButton.frame = NSRect(x: w - 16 - tw, y: y0 - 4, width: tw, height: 20)
         sumButton.frame = NSRect(x: stopButton.frame.minX - 6 - sw, y: y0 - 4, width: sw, height: 20)
         styleButton.frame = NSRect(x: sumButton.frame.minX - 6 - aw, y: y0 - 4, width: aw, height: 20)
+        recButton.frame = NSRect(x: styleButton.frame.minX - 6 - rw, y: y0 - 4, width: rw, height: 20)
         let dw = fit(dstPop, 70), pw = fit(srcPop, 70)
-        dstPop.frame = NSRect(x: styleButton.frame.minX - 10 - dw, y: y0 - 4, width: dw, height: 22)
+        dstPop.frame = NSRect(x: recButton.frame.minX - 10 - dw, y: y0 - 4, width: dw, height: 22)
         arrow.frame = NSRect(x: dstPop.frame.minX - 16, y: y0, width: 14, height: 16)
         srcPop.frame = NSRect(x: arrow.frame.minX - 2 - pw, y: y0 - 4, width: pw, height: 22)
         status.frame = NSRect(x: 86, y: y0, width: max(40, srcPop.frame.minX - 8 - 86), height: 16)
@@ -682,4 +789,5 @@ final class MiaoBar: NSObject {
 
     @objc private func doStop() { onStop?() }
     @objc private func doSummary() { onSummary?() }
+    @objc private func doRecords() { onRecords?() }
 }
