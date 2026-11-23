@@ -1692,9 +1692,13 @@ final class Bubble: NSObject {
         panel.makeFirstResponder(input)
     }
 
-    func setText(_ text: String) {
+    /// keepScroll: a late addition to an answer already on screen keeps the reader where they are
+    /// instead of jumping to the end.
+    func setText(_ text: String, keepScroll: Bool = false) {
+        let keep = keepScroll ? scroll.contentView.bounds.origin : nil
         textView.textStorage?.setAttributedString(bubbleAttributed(text))
-        if isShown { layout() }
+        if isShown { layout(scrollToEnd: keep == nil) }
+        if let o = keep { scroll.contentView.scroll(to: o); scroll.reflectScrolledClipView(scroll.contentView) }
     }
 
     func setListening(_ on: Bool) { if let b = micButton { styleVoiceButton(b, listening: on) } }
@@ -1746,7 +1750,7 @@ final class Bubble: NSObject {
         levelButton.isHidden = false
     }
 
-    func layout() {
+    func layout(scrollToEnd: Bool = true) {
         let pad: CGFloat = 16
         let inner = width - pad * 2
         textView.frame = NSRect(x: 0, y: 0, width: inner, height: 10)
@@ -1755,6 +1759,12 @@ final class Bubble: NSObject {
         if let lm = textView.layoutManager, let tc = textView.textContainer {
             lm.ensureLayout(for: tc)
             used = lm.usedRect(for: tc).height
+        }
+        // Belt and braces: never size the text area below what the text itself needs.
+        if let a = textView.textStorage, a.length > 0 {
+            let r = a.boundingRect(with: NSSize(width: inner - 2 * (textView.textContainer?.lineFragmentPadding ?? 0), height: .greatestFiniteMagnitude),
+                                   options: [.usesLineFragmentOrigin, .usesFontLeading])
+            used = max(used, ceil(r.height))
         }
         let textH = min(max(used, 18), 300)
         // Action buttons: equal widths filling the row (up to 4 per row; 2 per row when a title is long).
@@ -1852,7 +1862,7 @@ final class Bubble: NSObject {
         panel.setFrame(NSRect(x: x, y: yy, width: width, height: h), display: true)
         panel.contentView?.frame = NSRect(x: 0, y: 0, width: width, height: h)
         card.frame = NSRect(x: 0, y: 0, width: width, height: h)
-        textView.scrollToEndOfDocument(nil)
+        if scrollToEnd { textView.scrollToEndOfDocument(nil) }
     }
 }
 
@@ -4308,6 +4318,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let gen = bubbleGen
         let pointish = ["重点", "关键", "在哪", "哪里", "哪儿", "标出", "圈", "指出", "找到", "highlight", "circle", "point"]
             .contains { text.lowercased().contains($0) }
+        // Asked where something is on screen (a summary that merely says 重点 doesn't count).
+        let locateAsk = ["在哪", "哪里", "哪儿", "标出", "圈", "找到", "highlight", "circle", "where"]
+            .contains { text.lowercased().contains($0) }
         // The user's recent selection counts when they act on it, or ask to ring/point within 3 minutes of making it.
         let selMark: (rect: CGRect, pid: pid_t, text: String, at: Date)? = {
             guard let m = selectionMark, Date().timeIntervalSince(m.at) < 180 else { return nil }
@@ -4413,8 +4426,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         }
                         if !marks.isEmpty { self.highlighter.show(marks: marks.sorted { $0.1 < $1.1 }, seconds: 15) }
                         else if liveRinged > 0 { self.highlighter.clear() }   // everything scrolled away
-                        if marks.isEmpty && pointish && inBubble && self.bubble.isShown && gen == self.bubbleGen {
-                            self.bubble.setText(final + "\n\n" + L10n.t("（这次没在屏幕上找到能圈出来的位置。先选中那段文字，或打开「分享页面」再问我。）"))
+                        // Only when the user asked where something is (not for summaries like 重点+核实),
+                        // and never tell them to turn on sharing when it is already on.
+                        if marks.isEmpty && locateAsk && inBubble && self.bubble.isShown && gen == self.bubbleGen {
+                            let note = pageRead ? "（这次没在屏幕上找到能圈出来的位置。）"
+                                : "（这次没在屏幕上找到能圈出来的位置。先选中那段文字，或打开「分享页面」再问我。）"
+                            self.bubble.setText(final + "\n\n" + L10n.t(note), keepScroll: true)
                         }
                     }
                 }

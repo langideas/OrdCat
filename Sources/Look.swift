@@ -399,6 +399,7 @@ enum L10n {
         "信号站": "Signal Station",
         "📶 信号站": "📶 Signal Station",
         "📶 信号": "📶 Signal",
+        "（这次没在屏幕上找到能圈出来的位置。）": "(I couldn't find a spot on screen to circle this time.)",
         "（这次没在屏幕上找到能圈出来的位置。先选中那段文字，或打开「分享页面」再问我。）": "(I couldn't find a spot on screen to circle this time. Select the text first, or turn on page sharing, then ask me again.)",
         "打开信号站": "Open Signal Station",
         "一只小猫": "A cat",
