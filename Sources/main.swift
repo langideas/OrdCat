@@ -1369,9 +1369,23 @@ final class Bubble: NSObject {
     private(set) var shareTitle: String?
     private(set) var sharing = false
     var onShareChanged: ((Bool) -> Void)?
+    // 🎧 正在收听 (喵传) chip, under the share chip. Text set by the app delegate; nil hides it.
+    private let listenChip = NSButton(title: "", target: nil, action: nil)
+    private let listenClose = NSButton(title: "✕", target: nil, action: nil)
+    private(set) var listenTitle: String?
+    private(set) var listenActive = false
+    var onListenMenu: ((NSView) -> Void)?
+    var onListenClose: (() -> Void)?
+    // ➕ attachments waiting to be sent with the next message.
+    private var plusButton: NSButton!
+    private let attachLabel = NSTextField(labelWithString: "")
+    private let attachClear = NSButton(title: "✕", target: nil, action: nil)
+    private(set) var pendingImages: [Data] = []
+    private(set) var pendingFiles: [PendingFile] = []
+    var onNotice: ((String) -> Void)?
     private var hideTimer: Timer?
     private(set) var chatMode = false
-    var onSend: ((String) -> Void)?
+    var onSend: ((String, [Data]) -> Void)?
     var onExpand: (() -> Void)?
     var onTopics: ((NSView) -> Void)?
     private var topicsButton: NSButton!
@@ -1485,6 +1499,13 @@ final class Bubble: NSObject {
         input.action = #selector(doSend)
         card.addSubview(input)
 
+        plusButton = iconButton("", self, #selector(doPlus), tip: "添加图片或文件")
+        plusButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "添加")?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold))
+        if plusButton.image == nil { plusButton.title = "＋" }
+        plusButton.imagePosition = .imageOnly
+        card.addSubview(plusButton)
+
         micButton = iconButton("", self, #selector(doMic), tip: voiceTip())
         styleVoiceButton(micButton, listening: false)
         card.addSubview(micButton)
@@ -1524,6 +1545,35 @@ final class Bubble: NSObject {
         shareClose.action = #selector(closeShare)
         shareClose.toolTip = "这次对话不分享这个页面"
         card.addSubview(shareClose)
+        for (b, sel, tip) in [(listenChip, #selector(listenClicked), "选一段喵传听到的内容来聊"),
+                              (attachClear, #selector(clearAttachments), "移除附件")] {
+            b.isBordered = false
+            b.target = self
+            b.action = sel
+            b.toolTip = tip
+        }
+        listenChip.wantsLayer = true
+        listenChip.layer?.cornerRadius = 11
+        listenChip.layer?.backgroundColor = Theme.fg.withAlphaComponent(0.10).cgColor
+        listenChip.font = .systemFont(ofSize: 11)
+        listenChip.contentTintColor = Theme.fg
+        listenChip.alignment = .left
+        listenChip.lineBreakMode = .byTruncatingTail
+        card.addSubview(listenChip)
+        listenClose.isBordered = false
+        listenClose.font = .systemFont(ofSize: 11)
+        listenClose.contentTintColor = .secondaryLabelColor
+        listenClose.target = self
+        listenClose.action = #selector(closeListen)
+        listenClose.toolTip = "这次对话不带收听内容"
+        card.addSubview(listenClose)
+        attachLabel.font = .systemFont(ofSize: 11)
+        attachLabel.textColor = .secondaryLabelColor
+        attachLabel.lineBreakMode = .byTruncatingTail
+        card.addSubview(attachLabel)
+        attachClear.font = .systemFont(ofSize: 11)
+        attachClear.contentTintColor = .secondaryLabelColor
+        card.addSubview(attachClear)
 
         railLine.boxType = .custom
         railLine.borderWidth = 0
@@ -1555,6 +1605,64 @@ final class Bubble: NSObject {
 
     @objc private func chipClicked() { if !sharing { setShare(title: shareTitle, on: true); onShareChanged?(true) } }
     @objc private func closeShare() { setShare(title: shareTitle, on: false); onShareChanged?(false) }
+
+    // MARK: 🎧 正在收听
+    @objc private func listenClicked() { onListenMenu?(listenChip) }
+    @objc private func closeListen() { onListenClose?() }
+
+    /// title nil hides the chip; active shows ✕ (something is being brought into the chat).
+    func setListen(title: String?, active: Bool) {
+        guard title != listenTitle || active != listenActive else { return }
+        listenTitle = title
+        listenActive = active && title != nil
+        if let t = title { listenChip.title = "  " + t + "  ⌄" }
+        if isShown { layout(scrollToEnd: false) }
+    }
+
+    // MARK: ➕ attachments
+    @objc private func doPlus() {
+        let m = NSMenu()
+        m.addItem(BlockMenuItem("🖼 图片或文件…") { [weak self] in self?.pickFiles() })
+        let paste = BlockMenuItem("📋 剪贴板里的图片") { [weak self] in
+            guard let self = self else { return }
+            if let d = BubbleAttach.pasteboardImage() { self.pendingImages.append(d); self.attachChanged() }
+            else { NSSound.beep() }
+        }
+        paste.isEnabled = BubbleAttach.pasteboardHasImage
+        m.autoenablesItems = false
+        m.addItem(paste)
+        m.popUp(positioning: nil, at: NSPoint(x: 0, y: plusButton.bounds.height + 4), in: plusButton)
+    }
+
+    private func pickFiles() {
+        let p = NSOpenPanel()
+        p.allowsMultipleSelection = true
+        p.canChooseDirectories = false
+        p.allowedContentTypes = BubbleAttach.types
+        p.message = L10n.t("选择要发给小猫的图片或文件")
+        hideTimer?.invalidate()
+        NSApp.activate(ignoringOtherApps: true)
+        p.begin { [weak self] r in
+            guard let self = self, r == .OK else { return }
+            let got = BubbleAttach.read(p.urls)
+            self.pendingImages += got.images
+            self.pendingFiles += got.files
+            if got.failed > 0 { self.onNotice?(L10n.t("有些文件读不出内容，没加进来")) }
+            self.attachChanged()
+            self.present(makeKey: true)
+            self.panel.makeFirstResponder(self.input)
+        }
+    }
+
+    @objc private func clearAttachments() { pendingImages = []; pendingFiles = []; attachChanged() }
+
+    private func attachChanged() {
+        var parts: [String] = []
+        if !pendingImages.isEmpty { parts.append("🖼 \(pendingImages.count) 张图片") }
+        for f in pendingFiles { parts.append("📄 " + f.name) }
+        attachLabel.stringValue = parts.isEmpty ? "" : "📎 待发送：" + parts.joined(separator: "、")
+        if isShown { layout(scrollToEnd: false) }
+    }
 
     /// Show or update the "正在分享「…」" chip above the input box.
     /// Set when the user picked an earlier topic from 🗂: the chip then says what we are continuing.
@@ -1613,6 +1721,8 @@ final class Bubble: NSObject {
         }
         shareChip.layer?.backgroundColor = Theme.fg.withAlphaComponent(0.10).cgColor
         shareChip.contentTintColor = Theme.fg
+        listenChip.layer?.backgroundColor = Theme.fg.withAlphaComponent(0.10).cgColor
+        listenChip.contentTintColor = Theme.fg
         railLine.fillColor = Theme.fg.withAlphaComponent(0.10)
         refreshRail()
         for b in choiceButtons {
@@ -1657,10 +1767,15 @@ final class Bubble: NSObject {
         a()
     }
     @objc private func doSend() {
-        let t = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return }
+        var t = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty && pendingImages.isEmpty && pendingFiles.isEmpty { return }
+        if t.isEmpty { t = pendingImages.isEmpty ? "帮我看看这个文件" : "帮我看看这张图" }
+        for f in pendingFiles { t += "\n\n【附件：\(f.name)】\n\(f.text)" }
+        let imgs = pendingImages
         input.stringValue = ""
-        onSend?(t)
+        pendingImages = []; pendingFiles = []
+        attachChanged()
+        onSend?(t, imgs)
     }
 
     func setActions(_ list: [(String, () -> Void)]) {
@@ -1824,7 +1939,11 @@ final class Bubble: NSObject {
         let chatH: CGFloat = chatMode ? 44 : 0
         let showChip = chatMode && shareTitle != nil
         let chipH: CGFloat = showChip ? 32 : 0
-        var h = pad + 18 + 10 + textH + choicesH + actionH + chipH + chatH + pad
+        let showListen = chatMode && listenTitle != nil
+        let listenH: CGFloat = showListen ? (showChip ? 26 : 32) : 0
+        let hasAttach = chatMode && !attachLabel.stringValue.isEmpty
+        let attachH: CGFloat = hasAttach ? 20 : 0
+        var h = pad + 18 + 10 + textH + choicesH + actionH + chipH + listenH + attachH + chatH + pad
         // The rail never gets cut off: grow the text area if the card would be shorter than the icons.
         let railH = pad * 2 + CGFloat(railIcons.count) * 42 - 10
         if railShown && h < railH { textH += railH - h; h = railH }
@@ -1881,14 +2000,32 @@ final class Bubble: NSObject {
             shareChip.frame = NSRect(x: left, y: y + 6, width: cw, height: 22)
             shareClose.frame = NSRect(x: left + cw + 4, y: y + 6, width: 22, height: 22)
         }
+        listenChip.isHidden = !showListen
+        listenClose.isHidden = !showListen || !listenActive
+        if showListen {
+            y -= listenH
+            listenChip.sizeToFit()
+            let cw = min(inner - 28, listenChip.frame.width + 14)
+            listenChip.frame = NSRect(x: left, y: y + listenH - 26, width: cw, height: 22)
+            listenClose.frame = NSRect(x: left + cw + 4, y: y + listenH - 26, width: 22, height: 22)
+        }
+        attachLabel.isHidden = !hasAttach
+        attachClear.isHidden = !hasAttach
+        if hasAttach {
+            y -= attachH
+            attachLabel.frame = NSRect(x: left + 4, y: y + 2, width: inner - 34, height: 16)
+            attachClear.frame = NSRect(x: left + inner - 26, y: y, width: 22, height: 20)
+        }
         input.isHidden = !chatMode
+        plusButton.isHidden = !chatMode
         sendButton.isHidden = !chatMode
         micButton.isHidden = !chatMode
         if micButton.image != nil && micButton.contentTintColor == nil { micButton.toolTip = voiceTip() }
         if chatMode {
             y -= chatH
-            // Input, voice and send share one 30pt row with even 6pt gaps.
-            input.frame = NSRect(x: left, y: y + 8, width: inner - 6 - 40 - 6 - 64, height: 30)
+            // ➕, input, voice and send share one 30pt row with even 6pt gaps.
+            plusButton.frame = NSRect(x: left, y: y + 8, width: 30, height: 30)
+            input.frame = NSRect(x: left + 36, y: y + 8, width: inner - 36 - 6 - 40 - 6 - 64, height: 30)
             micButton.frame = NSRect(x: left + inner - 64 - 6 - 40, y: y + 8, width: 40, height: 30)
             sendButton.frame = NSRect(x: left + inner - 64, y: y + 8, width: 64, height: 30)
         }
@@ -3249,7 +3386,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chatWindow.onClear = { [weak self] in self?.store.clear() }
         chatWindow.onOpenAccount = { [weak self] in self?.settings.show(page: .user) }
         bubble.anchor = { [weak self] in self?.catView.headScreenPoint() ?? .zero }
-        bubble.onSend = { [weak self] text in self?.ask(text) }
+        bubble.onSend = { [weak self] text, imgs in self?.ask(text, images: imgs) }
+        bubble.onNotice = { [weak self] msg in self?.bubble.setText(msg) }
+        bubble.onListenMenu = { [weak self] v in self?.showListenMenu(v) }
+        bubble.onListenClose = { [weak self] in
+            guard let self = self else { return }
+            self.listenPick = nil; self.listenUserOff = true; self.refreshListen()
+        }
+        NotificationCenter.default.addObserver(forName: SkillsPane.changed, object: nil, queue: .main) { [weak self] _ in
+            self?.refreshListen()
+        }
         bubble.onExpand = { [weak self] in self?.bubble.hide(); self?.chatWindow.show() }
         bubble.onMic = { [weak self] in self?.toggleVoice(fromWindow: false) }
         bubble.onTopics = { [weak self] v in self?.showTopicsMenu(v) }
@@ -4276,11 +4422,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// While the chat bubble is open, keep the share chip pointed at whatever page is in front.
     private var shareWatch: Timer?
+    /// 🎧 what the bubble brings in from 喵传 (nil = nothing).
+    private var listenPick: ListenPick?
+    /// The user pressed ✕ while 喵传 was running: don't switch the live transcript back on by itself.
+    private var listenUserOff = false
+    private var listenWasRunning = false
+
+    /// Update the 🎧 chip from 喵传's state and the user's pick.
+    private func refreshListen() {
+        let m = MiaoChuan.shared
+        if m.running != listenWasRunning {
+            listenWasRunning = m.running
+            listenUserOff = false
+            if !m.running, listenPick?.isLive == true { listenPick = nil }
+        }
+        if m.running && listenPick == nil && !listenUserOff { listenPick = .live(5) }
+        if case .record(let id, _)? = listenPick, MiaoRecords.load(id) == nil { listenPick = nil }
+        let app = m.listeningApp
+        let short: (String, Int) -> String = { t, n in t.count > n ? String(t.prefix(n)) + "…" : t }
+        var title: String?
+        switch listenPick {
+        case .live(let mins)?:
+            title = mins == nil ? "🎧 正在收听「\(short(app, 20))」· 整场"
+                                : "🎧 正在收听「\(short(app, 20))」· 刚才 \(Int(mins!)) 分钟"
+        case .record(_, let t)?:
+            title = "🎧 喵传记录「\(short(t, 20))」"
+        case nil:
+            if m.running {
+                title = "⚪️ 正在收听「\(short(app, 20))」· 点这里带上"
+            } else if Billing.isUnlocked("miao") && !MiaoRecords.all().isEmpty {
+                title = "🎧 选一段喵传记录来聊"
+            }
+        }
+        bubble.setListen(title: title, active: listenPick != nil)
+    }
+
+    private func showListenMenu(_ v: NSView) {
+        let m = NSMenu()
+        m.autoenablesItems = false
+        let pick: (ListenPick?) -> Void = { [weak self] p in
+            guard let self = self else { return }
+            self.listenPick = p
+            if p == nil { self.listenUserOff = true }
+            self.refreshListen()
+        }
+        let mc = MiaoChuan.shared
+        if mc.running {
+            let head = NSMenuItem(title: L10n.t("正在收听「\(mc.listeningApp)」"), action: nil, keyEquivalent: "")
+            head.isEnabled = false
+            m.addItem(head)
+            m.addItem(BlockMenuItem("刚才 5 分钟", on: listenPick == .live(5)) { pick(.live(5)) })
+            m.addItem(BlockMenuItem("整场", on: listenPick == .live(nil)) { pick(.live(nil)) })
+        }
+        let recs = MiaoRecords.all().prefix(8)
+        if !recs.isEmpty {
+            if m.numberOfItems > 0 { m.addItem(.separator()) }
+            let head = NSMenuItem(title: L10n.t("喵传记录"), action: nil, keyEquivalent: "")
+            head.isEnabled = false
+            m.addItem(head)
+            let df = DateFormatter(); df.dateFormat = "M/d HH:mm"
+            for r in recs {
+                let t = (r.title.count > 24 ? String(r.title.prefix(24)) + "…" : r.title) + " · " + df.string(from: r.start)
+                let on: Bool = { if case .record(let id, _)? = listenPick { return id == r.id }; return false }()
+                let it = BlockMenuItem(t, on: on) { pick(.record(r.id, r.title)) }
+                m.addItem(it)
+            }
+            m.addItem(BlockMenuItem("📂 全部喵传记录…") { MiaoRecordsWindow.shared.show() })
+        }
+        if listenPick != nil {
+            m.addItem(.separator())
+            m.addItem(BlockMenuItem("不带收听内容") { pick(nil) })
+        }
+        if m.numberOfItems == 0 { return }
+        m.popUp(positioning: nil, at: NSPoint(x: 0, y: v.bounds.height + 4), in: v)
+    }
     private func startShareWatch() {
+        refreshListen()
         shareWatch?.invalidate()
         shareWatch = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] t in
             guard let self = self else { t.invalidate(); return }
             guard self.bubble.isShown && self.bubble.chatMode else { t.invalidate(); return }
+            self.refreshListen()
             guard Prefs.pageShare else { return }
             let page = self.hub.shareableWindow()
             if page?.title != self.bubble.shareTitle {
@@ -4399,6 +4621,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         let gen = bubbleGen
+        let listenCtx: String? = (inBubble && bubble.chatMode && pageOverride == nil) ? listenPick.flatMap { ListenContext.text(for: $0) } : nil
         let pointish = ["重点", "关键", "在哪", "哪里", "哪儿", "标出", "圈", "指出", "找到", "highlight", "circle", "point"]
             .contains { text.lowercased().contains($0) }
         // Asked where something is on screen (a summary that merely says 重点 doesn't count).
@@ -4457,6 +4680,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if let x = extra, !x.isEmpty {
                 context = context.map { x + "\n\n" + $0 } ?? x
+            }
+            if let lc = listenCtx {
+                context = context.map { lc + "\n\n" + $0 } ?? lc
             }
             // A project's standing note is kept in mind for every chat inside it.
             if let p = project, !p.note.isEmpty {

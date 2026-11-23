@@ -1,3 +1,13 @@
+# OrdCat v0.2.57
+
+- 小猫弹窗的输入框左边多了 ➕：可以发图片、PDF、文本或代码文件，也可以直接发剪贴板里的图片
+- 喵传开着时，「正在分享」下面多一行 🎧 正在收听「应用」：点开可以选刚才 5 分钟、整场，或一条保存过的喵传记录，小猫会拿这段内容跟你聊；点 ✕ 就不带
+
+**English**
+
+- The bubble's input box now has a ➕ on the left: send images, PDFs, text or code files, or the image on your clipboard
+- While MiaoChuan is on, a 🎧 Listening to "app" row appears under Sharing: pick the last 5 minutes, the whole session, or a saved MiaoChuan record, and the cat chats about it; ✕ leaves it out
+
 # OrdCat v0.2.56
 
 - 喵手设置更完整：

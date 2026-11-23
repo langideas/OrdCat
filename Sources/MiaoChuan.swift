@@ -478,6 +478,28 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
         })
     }
 
+    // MARK: 小猫弹窗里的「正在收听」
+
+    /// The app 喵传 is listening to (empty when it isn't running).
+    var listeningApp: String { running ? appName : "" }
+
+    /// What was heard, for the cat to talk about. lastMinutes nil = the whole session.
+    func transcript(lastMinutes: Double?) -> String {
+        let from = lastMinutes.map { Date().addingTimeInterval(-$0 * 60) } ?? .distantPast
+        let df = DateFormatter(); df.dateFormat = "HH:mm:ss"
+        var out: [String] = []
+        for l in lines where l.at >= from {
+            var s = "[\(df.string(from: l.at))] " + l.orig
+            if !sameLanguage && !l.tr.isEmpty { s += "\n    译：" + l.tr }
+            out.append(s)
+        }
+        let tail = latestText.count > committed ? String(latestText.dropFirst(committed)).trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        if !tail.isEmpty { out.append("（正在说）" + tail) }
+        var text = out.joined(separator: "\n")
+        if text.count > 16000 { text = "…" + String(text.suffix(16000)) }
+        return text
+    }
+
     // MARK: 刚才在说什么
 
     func summarize() {
