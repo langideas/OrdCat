@@ -178,11 +178,29 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
         let b = bar ?? MiaoBar()
         b.onStop = { [weak self] in self?.stop() }
         b.onSummary = { [weak self] in self?.summarize() }
+        b.onLanguages = { [weak self] src, dst in self?.changeLanguages(source: src, target: dst) }
         bar = b
+        b.syncLanguages()
         b.setStatus(L10n.english ? "● Listening to \(appName)" : "● 正在听 \(appName)")
         b.setLines(prev: nil, orig: L10n.t("等有人说话…"), tr: "")
         b.show()
         tick = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in self?.onTick() }
+    }
+
+    /// Languages changed from the subtitle bar while listening: a new source restarts recognition.
+    func changeLanguages(source: String, target: String) {
+        let srcChanged = source != Prefs.miaoSource
+        Prefs.miaoSource = source
+        Prefs.miaoTarget = target
+        guard running, srcChanged else { return }
+        guard let rec = SFSpeechRecognizer(locale: Locale(identifier: source)), rec.isAvailable else {
+            bar?.setStatus(L10n.t("这台 Mac 现在用不了这个语言的语音识别，换一个语言试试。"))
+            return
+        }
+        commitTail()
+        recognizer = rec
+        restartRecognition()
+        bar?.setStatus(L10n.english ? "● Listening to \(appName)" : "● 正在听 \(appName)")
     }
 
     func stop() {
@@ -378,20 +396,57 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
 
 // MARK: - 字幕条
 
+/// Subtitle look, kept between sessions: size, weight and colour of the translated line.
+enum MiaoStyle {
+    private static let d = UserDefaults.standard
+    static let colors: [(String, NSColor)] = [
+        ("白色", NSColor(white: 1, alpha: 0.96)),
+        ("琥珀", kAmber),
+        ("浅黄", NSColor(srgbRed: 1, green: 0.93, blue: 0.62, alpha: 1)),
+        ("浅蓝", NSColor(srgbRed: 0.62, green: 0.83, blue: 1, alpha: 1)),
+        ("浅绿", NSColor(srgbRed: 0.62, green: 0.94, blue: 0.72, alpha: 1))
+    ]
+    static let weights: [(String, NSFont.Weight)] = [("常规", .regular), ("中等", .medium), ("粗", .bold)]
+    static var size: CGFloat {
+        get { let v = d.double(forKey: "miao.fontSize"); return v > 0 ? CGFloat(v) : 18 }
+        set { d.set(Double(min(40, max(12, newValue))), forKey: "miao.fontSize") }
+    }
+    static var weight: Int {
+        get { d.object(forKey: "miao.fontWeight") == nil ? 1 : min(2, max(0, d.integer(forKey: "miao.fontWeight"))) }
+        set { d.set(newValue, forKey: "miao.fontWeight") }
+    }
+    static var color: Int {
+        get { min(colors.count - 1, max(0, d.integer(forKey: "miao.fontColor"))) }
+        set { d.set(newValue, forKey: "miao.fontColor") }
+    }
+}
+
 /// A floating subtitle bar at the bottom of the screen: original line small, translation large. Draggable.
+/// The header holds the language pickers and Aa (font size, weight, colour); the bar grows and shrinks with the font.
 final class MiaoBar: NSObject {
     var onStop: (() -> Void)?
     var onSummary: (() -> Void)?
+    var onLanguages: ((String, String) -> Void)?
     private let panel: NSPanel
+    private let card = NSView()
+    private let grad = CAGradientLayer()
+    private let title = NSTextField(labelWithString: "")
     private let status = NSTextField(labelWithString: "")
     private let prevLabel = NSTextField(wrappingLabelWithString: "")
     private let origLabel = NSTextField(wrappingLabelWithString: "")
     private let trLabel = NSTextField(wrappingLabelWithString: "")
+    private let srcPop = NSPopUpButton()
+    private let arrow = NSTextField(labelWithString: "→")
+    private let dstPop = NSPopUpButton()
+    private var styleButton: OCButton!
     private var sumButton: OCButton!
+    private var stopButton: OCButton!
+    private let stylePop = NSPopover()
+    private var sizeLabel: NSTextField?
+    private var texts: (prev: String, orig: String, tr: String, status: String) = ("", "", "", "")
 
     override init() {
-        let w: CGFloat = 760, h: CGFloat = 150
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: w, height: h),
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 760, height: 150),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         super.init()
         panel.level = .floating
@@ -401,51 +456,198 @@ final class MiaoBar: NSObject {
         panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
+        panel.appearance = NSAppearance(named: .vibrantDark)
 
-        let card = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
         card.wantsLayer = true
-        let g = CAGradientLayer()
-        g.frame = card.bounds
         // Graphite, never pure black.
-        g.colors = [NSColor(srgbRed: 0.17, green: 0.18, blue: 0.19, alpha: 0.94).cgColor,
-                    NSColor(srgbRed: 0.11, green: 0.12, blue: 0.13, alpha: 0.94).cgColor]
-        g.cornerRadius = 16
-        card.layer?.addSublayer(g)
+        grad.colors = [NSColor(srgbRed: 0.17, green: 0.18, blue: 0.19, alpha: 0.94).cgColor,
+                       NSColor(srgbRed: 0.11, green: 0.12, blue: 0.13, alpha: 0.94).cgColor]
+        grad.cornerRadius = 16
+        card.layer?.addSublayer(grad)
         card.layer?.cornerRadius = 16
         card.layer?.borderWidth = 1
         card.layer?.borderColor = kAmber.withAlphaComponent(0.25).cgColor
-        card.autoresizingMask = [.width, .height]
 
-        let title = NSTextField(labelWithString: "")
         title.attributedStringValue = NSAttributedString(string: "🎧 喵传", attributes: [
             .font: NSFont.systemFont(ofSize: 12, weight: .bold), .foregroundColor: kAmber])
-        title.frame = NSRect(x: 16, y: h - 28, width: 70, height: 16)
         status.font = .systemFont(ofSize: 11)
         status.textColor = NSColor(white: 0.62, alpha: 1)
-        status.frame = NSRect(x: 86, y: h - 28, width: 380, height: 16)
         status.lineBreakMode = .byTruncatingTail
 
+        for (pop, list, tip) in [(srcPop, MiaoChuan.sources.map { $0.1 }, "他们说的语言"), (dstPop, MiaoChuan.targets.map { $0.1 }, "翻译成")] {
+            pop.controlSize = .small
+            pop.font = .systemFont(ofSize: 11)
+            pop.isBordered = false
+            for t in list { pop.addItem(withTitle: L10n.t(t)) }
+            pop.target = self
+            pop.action = #selector(languageChanged)
+            pop.toolTip = L10n.t(tip)
+            (pop.cell as? NSPopUpButtonCell)?.arrowPosition = .arrowAtBottom
+        }
+        arrow.font = .systemFont(ofSize: 11)
+        arrow.textColor = NSColor(white: 0.55, alpha: 1)
+
+        styleButton = OCButton(title: "Aa", target: self, action: #selector(doStyle))
+        styleButton.chip = true
+        styleButton.style = .neutral
+        styleButton.toolTip = L10n.t("字幕字体：大小、粗细、颜色")
         sumButton = OCButton(title: "刚才在说什么", target: self, action: #selector(doSummary))
         sumButton.chip = true
         sumButton.style = .secondary
-        let stop = OCButton(title: "停止", target: self, action: #selector(doStop))
-        stop.chip = true
-        stop.style = .neutral
-        let sw = max(96, ceil(sumButton.intrinsicContentSize.width)), tw = max(48, ceil(stop.intrinsicContentSize.width))
-        stop.frame = NSRect(x: w - 16 - tw, y: h - 32, width: tw, height: 20)
-        sumButton.frame = NSRect(x: stop.frame.minX - 6 - sw, y: h - 32, width: sw, height: 20)
+        stopButton = OCButton(title: "停止", target: self, action: #selector(doStop))
+        stopButton.chip = true
+        stopButton.style = .neutral
 
-        for (l, size, alpha) in [(prevLabel, 12.0, 0.38), (origLabel, 13.0, 0.62), (trLabel, 18.0, 0.96)] {
-            l.font = .systemFont(ofSize: size, weight: l === trLabel ? .semibold : .regular)
-            l.textColor = NSColor(white: 1, alpha: alpha)
+        for l in [prevLabel, origLabel, trLabel] {
             l.maximumNumberOfLines = l === trLabel ? 2 : 1
             l.lineBreakMode = .byTruncatingHead
             l.isSelectable = false
         }
-        prevLabel.frame = NSRect(x: 16, y: h - 54, width: w - 32, height: 16)
-        origLabel.frame = NSRect(x: 16, y: h - 76, width: w - 32, height: 18)
-        trLabel.frame = NSRect(x: 16, y: 12, width: w - 32, height: 48)
-        for v in [card, title, status, sumButton!, stop, prevLabel, origLabel, trLabel] as [NSView] { panel.contentView?.addSubview(v) }
+        for v in [card, title, status, srcPop, arrow, dstPop, styleButton!, sumButton!, stopButton!, prevLabel, origLabel, trLabel] as [NSView] {
+            panel.contentView?.addSubview(v)
+        }
+        stylePop.behavior = .transient
+        stylePop.appearance = NSAppearance(named: .vibrantDark)
+        applyStyle()
+    }
+
+    func syncLanguages() {
+        srcPop.selectItem(at: MiaoChuan.sources.firstIndex { $0.0 == Prefs.miaoSource } ?? 0)
+        dstPop.selectItem(at: MiaoChuan.targets.firstIndex { $0.0 == Prefs.miaoTarget } ?? 0)
+        layout()
+    }
+
+    @objc private func languageChanged() {
+        let s = MiaoChuan.sources[max(0, srcPop.indexOfSelectedItem)].0
+        let t = MiaoChuan.targets[max(0, dstPop.indexOfSelectedItem)].0
+        onLanguages?(s, t)
+        layout()
+    }
+
+    // MARK: font
+
+    private var trFont: NSFont { .systemFont(ofSize: MiaoStyle.size, weight: MiaoStyle.weights[MiaoStyle.weight].1) }
+    private var origSize: CGFloat { max(11, round(MiaoStyle.size * 0.72)) }
+    private var prevSize: CGFloat { max(10, round(MiaoStyle.size * 0.66)) }
+
+    private func applyStyle() {
+        trLabel.font = trFont
+        trLabel.textColor = MiaoStyle.colors[MiaoStyle.color].1
+        origLabel.font = .systemFont(ofSize: origSize)
+        origLabel.textColor = NSColor(white: 1, alpha: 0.62)
+        prevLabel.font = .systemFont(ofSize: prevSize)
+        prevLabel.textColor = NSColor(white: 1, alpha: 0.38)
+        put(prevLabel, texts.prev); put(origLabel, texts.orig); put(trLabel, texts.tr)
+        layout()
+    }
+
+    @objc private func doStyle() {
+        if stylePop.isShown { stylePop.close(); return }
+        let col = NSStackView()
+        col.orientation = .vertical
+        col.alignment = .leading
+        col.spacing = 10
+        col.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
+        func head(_ t: String) -> NSTextField {
+            let l = NSTextField(labelWithString: L10n.t(t))
+            l.font = .systemFont(ofSize: 11, weight: .semibold)
+            l.textColor = kAmber
+            return l
+        }
+        // 大小
+        let sizeRow = NSStackView()
+        sizeRow.orientation = .horizontal
+        sizeRow.spacing = 8
+        let slider = NSSlider(value: Double(MiaoStyle.size), minValue: 12, maxValue: 40, target: self, action: #selector(sizeChanged(_:)))
+        slider.controlSize = .small
+        slider.widthAnchor.constraint(equalToConstant: 150).isActive = true
+        let sl = NSTextField(labelWithString: "\(Int(MiaoStyle.size))")
+        sl.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        sl.textColor = .secondaryLabelColor
+        sizeLabel = sl
+        sizeRow.addArrangedSubview(slider); sizeRow.addArrangedSubview(sl)
+        // 粗细
+        let seg = NSSegmentedControl(labels: MiaoStyle.weights.map { L10n.t($0.0) }, trackingMode: .selectOne,
+                                     target: self, action: #selector(weightChanged(_:)))
+        seg.controlSize = .small
+        seg.selectedSegment = MiaoStyle.weight
+        // 颜色
+        let colors = NSStackView()
+        colors.orientation = .horizontal
+        colors.spacing = 8
+        for (i, c) in MiaoStyle.colors.enumerated() {
+            let b = NSButton(title: "", target: self, action: #selector(colorChanged(_:)))
+            b.tag = i
+            b.isBordered = false
+            b.wantsLayer = true
+            b.layer?.cornerRadius = 10
+            b.layer?.backgroundColor = c.1.cgColor
+            b.layer?.borderWidth = i == MiaoStyle.color ? 2 : 0
+            b.layer?.borderColor = NSColor.white.cgColor
+            b.toolTip = L10n.t(c.0)
+            b.widthAnchor.constraint(equalToConstant: 20).isActive = true
+            b.heightAnchor.constraint(equalToConstant: 20).isActive = true
+            colors.addArrangedSubview(b)
+        }
+        for v in [head("大小"), sizeRow, head("粗细"), seg, head("颜色"), colors] as [NSView] { col.addArrangedSubview(v) }
+        let vc = NSViewController()
+        vc.view = col
+        stylePop.contentViewController = vc
+        stylePop.show(relativeTo: styleButton.bounds, of: styleButton, preferredEdge: .maxY)
+    }
+
+    @objc private func sizeChanged(_ s: NSSlider) {
+        MiaoStyle.size = CGFloat(s.doubleValue.rounded())
+        sizeLabel?.stringValue = "\(Int(MiaoStyle.size))"
+        applyStyle()
+    }
+    @objc private func weightChanged(_ s: NSSegmentedControl) { MiaoStyle.weight = s.selectedSegment; applyStyle() }
+    @objc private func colorChanged(_ b: NSButton) {
+        MiaoStyle.color = b.tag
+        for v in b.superview?.subviews ?? [] { v.layer?.borderWidth = v === b ? 2 : 0 }
+        applyStyle()
+    }
+
+    // MARK: layout
+
+    /// Size follows the font: wider and taller for big text, never wider than the screen.
+    private func layout() {
+        let fs = MiaoStyle.size
+        let scr = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let w = min(scr.width - 40, max(760, round(fs * 42)))
+        let trLine = ceil(trFont.ascender - trFont.descender + trFont.leading) + 2
+        let origH = ceil(origSize * 1.35), prevH = ceil(prevSize * 1.35)
+        let headH: CGFloat = 40
+        let h = headH + prevH + 4 + origH + 8 + trLine * 2 + 12
+
+        // Keep the bottom edge and the centre where they are while resizing.
+        let old = panel.frame
+        var f = NSRect(x: old.midX - w / 2, y: old.minY, width: w, height: h)
+        if panel.isVisible { f.origin.x = min(max(scr.minX + 8, f.origin.x), scr.maxX - w - 8) }
+        panel.setFrame(f, display: true)
+        card.frame = NSRect(x: 0, y: 0, width: w, height: h)
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        grad.frame = card.bounds
+        CATransaction.commit()
+
+        let y0 = h - 28
+        title.frame = NSRect(x: 16, y: y0, width: 70, height: 16)
+        let fit: (NSControl, CGFloat) -> CGFloat = { c, minW in max(minW, ceil(c.intrinsicContentSize.width)) }
+        let tw = fit(stopButton, 48), sw = fit(sumButton, 96), aw = fit(styleButton, 32)
+        stopButton.frame = NSRect(x: w - 16 - tw, y: y0 - 4, width: tw, height: 20)
+        sumButton.frame = NSRect(x: stopButton.frame.minX - 6 - sw, y: y0 - 4, width: sw, height: 20)
+        styleButton.frame = NSRect(x: sumButton.frame.minX - 6 - aw, y: y0 - 4, width: aw, height: 20)
+        let dw = fit(dstPop, 70), pw = fit(srcPop, 70)
+        dstPop.frame = NSRect(x: styleButton.frame.minX - 10 - dw, y: y0 - 4, width: dw, height: 22)
+        arrow.frame = NSRect(x: dstPop.frame.minX - 16, y: y0, width: 14, height: 16)
+        srcPop.frame = NSRect(x: arrow.frame.minX - 2 - pw, y: y0 - 4, width: pw, height: 22)
+        status.frame = NSRect(x: 86, y: y0, width: max(40, srcPop.frame.minX - 8 - 86), height: 16)
+
+        var y = h - headH - prevH
+        prevLabel.frame = NSRect(x: 16, y: y, width: w - 32, height: prevH)
+        y -= 4 + origH
+        origLabel.frame = NSRect(x: 16, y: y, width: w - 32, height: origH)
+        trLabel.frame = NSRect(x: 16, y: 12, width: w - 32, height: trLine * 2)
     }
 
     /// Set text without the English-mode auto-translation (these are the meeting's own words).
@@ -453,26 +655,30 @@ final class MiaoBar: NSObject {
         l.attributedStringValue = NSAttributedString(string: s, attributes: [.font: l.font ?? NSFont.systemFont(ofSize: 13), .foregroundColor: l.textColor ?? NSColor.white])
     }
 
-    func setStatus(_ s: String) { put(status, s) }
+    func setStatus(_ s: String) { texts.status = s; put(status, s) }
     func setLines(prev: String?, orig: String, tr: String) {
-        put(prevLabel, prev ?? "")
-        put(origLabel, orig)
-        put(trLabel, tr.isEmpty ? (orig.isEmpty ? "" : "…") : tr)
+        texts.prev = prev ?? ""
+        texts.orig = orig
+        texts.tr = tr.isEmpty ? (orig.isEmpty ? "" : "…") : tr
+        put(prevLabel, texts.prev)
+        put(origLabel, texts.orig)
+        put(trLabel, texts.tr)
     }
     /// The sentence still being spoken.
-    func setLive(_ s: String) { put(origLabel, s) }
+    func setLive(_ s: String) { texts.orig = s; put(origLabel, s) }
     func setSummaryBusy(_ busy: Bool) {
         sumButton.isEnabled = !busy
         sumButton.title = busy ? "正在想…" : "刚才在说什么"
     }
 
     func show() {
+        layout()
         if !panel.isVisible, let scr = NSScreen.main?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: scr.midX - panel.frame.width / 2, y: scr.minY + 40))
         }
         panel.orderFrontRegardless()
     }
-    func hide() { panel.orderOut(nil) }
+    func hide() { stylePop.close(); panel.orderOut(nil) }
 
     @objc private func doStop() { onStop?() }
     @objc private func doSummary() { onSummary?() }

@@ -1,3 +1,15 @@
+# OrdCat v0.2.53
+
+- 喵传字幕条加了语言选择：右上角直接改「他们说的语言 → 翻译成」，听的语言改了会马上换。
+- 字幕字体可调：点 Aa 调大小（12 到 40）、粗细（常规、中等、粗）和颜色（白色、琥珀、浅黄、浅蓝、浅绿），下次打开还记得。
+- 字幕条大小跟着字体自动变宽变高，底边位置不动，不会超出屏幕。
+
+**English**
+
+- The MiaoChuan subtitle bar now has language pickers at the top right ("They speak → Translate into"). Changing the spoken language switches right away.
+- Subtitle font is adjustable: click Aa for size (12–40), weight (Regular, Medium, Bold) and colour (White, Amber, Light yellow, Light blue, Light green). Your choice is remembered.
+- The bar grows and shrinks with the font, keeps its bottom edge in place and stays on screen.
+
 # OrdCat v0.2.52
 
 - 小猫弹窗左侧新增竖版技能栏：只显示技能图标，点亮的会发琥珀色光圈。鼠标悬停看介绍和点亮条件，点一下就能打开或关闭这个技能（还没订阅的会打开订阅）。
