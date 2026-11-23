@@ -2753,7 +2753,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
                           SK.button("发布页", self, #selector(openReleases))]))
 
         p.header("客服与反馈")
-        p.hint("有问题或建议，直接在 app 里找客服聊，或者发邮件到 hello@ordcat.de。")
+        p.hint("有问题或建议，直接在 app 里找客服聊，或者发邮件到 support@ordcat.de。")
         p.add(SK.buttons([SK.button("💬 在线客服", self, #selector(supportChat)),
                           SK.button("✉️ 发邮件", self, #selector(supportMail))]))
 

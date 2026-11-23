@@ -78,7 +78,7 @@ enum Social {
     }
 
     // MARK: 客服
-    static let supportEmail = "hello@ordcat.de"
+    static let supportEmail = "support@ordcat.de"
 
     /// In-app support: a private chat with the OrdCat support account when the server has one, else email.
     static func openSupport() {

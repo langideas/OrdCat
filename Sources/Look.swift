@@ -958,7 +958,7 @@ enum L10n {
         "当前密码不对": "Current password is wrong",
         "🛟 联系客服": "🛟 Contact support",
         "客服与反馈": "Support & feedback",
-        "有问题或建议，直接在 app 里找客服聊，或者发邮件到 hello@ordcat.de。": "Questions or ideas? Chat with support right here, or email hello@ordcat.de.",
+        "有问题或建议，直接在 app 里找客服聊，或者发邮件到 support@ordcat.de。": "Questions or ideas? Chat with support right here, or email support@ordcat.de.",
         "💬 在线客服": "💬 Live support",
         "✉️ 发邮件": "✉️ Email us",
         "保存个人资料？": "Save your profile?",
