@@ -1,3 +1,19 @@
+# OrdCat v0.2.56
+
+- 喵手设置更完整：
+  - 怎么执行：每一步先问我、速度（慢/正常/快）、最多走几步（10/25/50）、操作前在要点的按钮上亮一圈琥珀色
+  - 安全：不让小猫碰的应用（默认钥匙串访问、系统设置、终端，可添加或移除）、也要先问我的词；发送/付款/删除/提交和不碰密码框一直开着
+  - 隐私和提醒：可以不读输入框里已有的文字；做完或停下时在 🔔 里提醒
+  - 操作记录：每次操作自动存在本机，📋 操作记录 窗口可查看步骤、再做一次、删除、清空；保留 7 天 / 30 天 / 一直
+
+**English**
+
+- MiaoShou has fuller settings:
+  - How it runs: ask before every step, speed (slow / normal / fast), max steps (10 / 25 / 50), and an amber ring on the button before it's clicked
+  - Safety: apps the cat never touches (Keychain Access, System Settings and Terminal by default; add or remove any), plus your own words that always need a yes. Send, pay, delete, submit and the password-box rule stay on
+  - Privacy and reminders: skip reading text already in input boxes; a 🔔 reminder when a run is done or stops
+  - Activity log: every run is kept on this Mac; the 📋 Activity log window shows the steps and lets you do it again, delete or clear; keep for 7 days, 30 days or forever
+
 # OrdCat v0.2.55
 
 - 技能的「点亮」和「开启」分开了：点亮只表示你拥有这个技能（免费、已订阅或试用中），会发琥珀色光圈；开启中的技能右下角有绿点。

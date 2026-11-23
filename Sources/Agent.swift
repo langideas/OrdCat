@@ -39,7 +39,9 @@ final class DesktopAgent {
     private var auto = false
     private(set) var running = false
     private var stepCount = 0
-    private let maxSteps = 25
+    private var maxSteps: Int { Prefs.agentMaxSteps }
+    private var runStart = Date()
+    private var runApp = ""
     private var escMonitor: Any?
     private var lastExternalApp: NSRunningApplication?
     private let queue = DispatchQueue(label: "app.ordcat.agent", qos: .userInitiated)
@@ -86,7 +88,9 @@ final class DesktopAgent {
         stepCount = 0
         auto = !Prefs.agentConfirm
         running = true
+        runStart = Date()
         app = lastExternalApp ?? NSWorkspace.shared.frontmostApplication
+        runApp = app?.localizedName ?? ""
         escMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] e in
             if e.keyCode == 53 { DispatchQueue.main.async { self?.stop() } }   // Esc
         }
@@ -103,13 +107,33 @@ final class DesktopAgent {
             present?("🤖 已停下。" + (log.isEmpty ? "" : "做了 \(log.count) 步。"), [])
             onFinish?(summary(done: false))
         }
+        record(result: "stopped", note: "")
     }
 
-    private func finish(_ say: String) {
+    /// `ok` false = it ended because something went wrong (model error, blocked app…).
+    private func finish(_ say: String, ok: Bool = true) {
         running = false
         if let m = escMonitor { NSEvent.removeMonitor(m); escMonitor = nil }
         present?("🤖 " + say, [])
         onFinish?(summary(done: true, say: say))
+        record(result: ok ? "done" : "failed", note: say)
+    }
+
+    /// 操作记录 + 🔔 reminder.
+    private func record(result: String, note: String) {
+        guard !goal.isEmpty else { return }
+        AgentLog.add(AgentRun(id: UUID().uuidString, goal: goal, app: runApp.isEmpty ? (app?.localizedName ?? "") : runApp,
+                              start: runStart, end: Date(), steps: log, result: result, note: note))
+        if Prefs.agentNotify {
+            let word = result == "done" ? "完成" : (result == "failed" ? "没成功" : "停下了")
+            let en = result == "done" ? "done" : (result == "failed" ? "didn't work" : "stopped")
+            NotifCenter.shared.add(L10n.english ? "🤖 MiaoShou \(en): \(goal)" : "🤖 喵手\(word)：\(goal)", open: "agentlog")
+        }
+        goal = ""
+    }
+
+    private func blockedNote(_ name: String) -> String {
+        "「\(name)」在不让小猫碰的应用里，我不操作它。可以在 设置 → 技能 → 喵手 里修改。"
     }
 
     private func summary(done: Bool, say: String = "") -> String {
@@ -122,7 +146,8 @@ final class DesktopAgent {
     private func nextStep() {
         guard running else { return }
         stepCount += 1
-        guard stepCount <= maxSteps else { finish("步骤太多了，我先停下。你看看现在的样子，要继续就再告诉我。"); return }
+        guard stepCount <= maxSteps else { finish("已经走了 \(maxSteps) 步，我先停下。你看看现在的样子，要继续就再告诉我。", ok: false); return }
+        if AgentRules.isBlocked(app) { finish(blockedNote(app?.localizedName ?? ""), ok: false); return }
         let target = app
         queue.async { [weak self] in
             guard let self = self else { return }
@@ -198,7 +223,7 @@ final class DesktopAgent {
                 if role == "AXStaticText" || role == "AXCell" || role == "AXRow" || role == "AXCheckBox" {
                     if label.isEmpty, let v = attr(el, kAXValueAttribute as String) as? String { label = v }
                 }
-                if role == "AXTextField" || role == "AXTextArea" || role == "AXSearchField" || role == "AXComboBox" {
+                if Prefs.agentReadFields, role == "AXTextField" || role == "AXTextArea" || role == "AXSearchField" || role == "AXComboBox" {
                     if let v = attr(el, kAXValueAttribute as String) as? String, !v.isEmpty {
                         label += (label.isEmpty ? "" : " ") + "（现有内容：\(v.prefix(40))）"
                     }
@@ -240,8 +265,8 @@ final class DesktopAgent {
         present?("🤖 第 \(stepCount) 步：在看「\(appName)」…", [("停止", { [weak self] in self?.stop() })])
         llm.stream([["role": "user", "content": prompt]], onDelta: { _ in }, onDone: { [weak self] t, err in
             guard let self = self, self.running else { return }
-            if let e = err { self.finish("模型出错了：\(e)"); return }
-            guard let a = Self.parse(t ?? "") else { self.finish("我没想明白下一步，先停下。你可以换个说法再试。"); return }
+            if let e = err { self.finish("模型出错了：\(e)", ok: false); return }
+            guard let a = Self.parse(t ?? "") else { self.finish("我没想明白下一步，先停下。你可以换个说法再试。", ok: false); return }
             self.propose(a)
         })
     }
@@ -270,6 +295,12 @@ final class DesktopAgent {
     private func isRisky(_ a: Action) -> Bool {
         let label = a.id.flatMap { id in targets.first { $0.id == id }?.label.lowercased() } ?? ""
         if a.kind == "click" && Self.riskyWords.contains(where: { label.contains($0) }) { return true }
+        // The user's own words (设置 → 喵手 → 也要先问我的词) count for clicks and typed text.
+        let extra = AgentRules.extraWords
+        if !extra.isEmpty {
+            let typed = (a.text ?? "").lowercased()
+            if extra.contains(where: { label.contains($0) || typed.contains($0) }) { return true }
+        }
         if a.kind == "key", let k = a.keys?.lowercased(), k.contains("enter") || k.contains("return") {
             if let b = app?.bundleIdentifier, Self.chatApps.contains(b) { return true }
             if label.contains("回") || (app?.localizedName ?? "").contains("X") { return true }
@@ -296,6 +327,8 @@ final class DesktopAgent {
         switch a.kind {
         case "done": finish(a.say.isEmpty ? "做完啦。" : a.say); return
         case "ask": finish(a.say.isEmpty ? "这一步需要你自己来。" : a.say); return
+        case "open":
+            if let n = a.app, AgentRules.isBlocked(openName: n) { finish(blockedNote(n), ok: false); return }
         default: break
         }
         let step = describe(a)
@@ -318,7 +351,14 @@ final class DesktopAgent {
         guard running else { return }
         if let target = app, a.kind != "open" { target.activate(options: []) }
         let t = a.id.flatMap { id in targets.first { $0.id == id } }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+        let f = AgentRules.speedFactor
+        var lead = 0.25
+        if Prefs.agentMark, let r = t?.rect, a.kind == "click" || a.kind == "type" {
+            let hold = 0.55 * f
+            AgentMark.flash(r, for: hold + 0.2)
+            lead = hold
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + lead) { [weak self] in
             guard let self = self, self.running else { return }
             var ok = true
             switch a.kind {
@@ -342,7 +382,7 @@ final class DesktopAgent {
                 break
             }
             self.log.append(ok ? step : "⚠️ 没成功：" + step)
-            let wait: Double = a.kind == "open" ? 1.8 : (a.kind == "wait" ? 1.5 : 0.9)
+            let wait: Double = (a.kind == "open" ? 1.8 : (a.kind == "wait" ? 1.5 : 0.9)) * (a.kind == "open" ? max(1, f) : f)
             DispatchQueue.main.asyncAfter(deadline: .now() + wait) { self.nextStep() }
         }
     }

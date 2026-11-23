@@ -5,6 +5,7 @@
 // switch getter/setter and a settings-view builder. Nothing else needs to change.
 
 import Cocoa
+import UniformTypeIdentifiers
 
 
 struct Skill {
@@ -389,6 +390,7 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
     private let xWords = NSTextField()
     private let xAccounts = NSTextField()
     private let xGap = NSPopUpButton()
+    private let agentWords = NSTextField()
     private let xStats = SK.WrapLabel()
     private let gapOptions: [(String, Double)] = [("少：30 秒最多一次", 30), ("正常：8 秒最多一次", 8), ("多：随时提醒", 2)]
 
@@ -728,13 +730,75 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
 
     private func agentSettings() -> NSView {
         let v = column()
-        let s = NSSwitch()
-        s.state = Prefs.agentConfirm ? .on : .off
-        s.target = self
-        s.action = #selector(agentConfirmToggled(_:))
-        let g = SK.Group()
-        g.add(SK.toggle("每一步都先问我（推荐）", s))
-        put(g, in: v, gap: 14)
+        func sw(_ on: Bool, _ sel: Selector) -> NSSwitch {
+            let s = NSSwitch()
+            s.state = on ? .on : .off
+            s.target = self
+            s.action = sel
+            return s
+        }
+        func pop(_ items: [String], _ index: Int, _ sel: Selector) -> NSPopUpButton {
+            let p = NSPopUpButton()
+            for t in items { p.addItem(withTitle: L10n.t(t)) }
+            p.selectItem(at: index)
+            p.target = self
+            p.action = sel
+            return p
+        }
+
+        // 怎么执行
+        put(sectionLabel("怎么执行"), in: v, full: false, gap: 8)
+        let g1 = SK.Group()
+        g1.add(SK.toggle("每一步都先问我（推荐）", sw(Prefs.agentConfirm, #selector(agentConfirmToggled(_:))),
+                         sub: "关掉后安全的步骤自动做，发送、付款、删除这类一定先问你"))
+        g1.add(SK.row("速度", pop(AgentRules.speeds.map { $0.0 }, Prefs.agentSpeed, #selector(agentSpeedChanged(_:))), fill: false))
+        let stepIdx = AgentRules.stepChoices.firstIndex(of: Prefs.agentMaxSteps) ?? 1
+        g1.add(SK.row("最多走几步", pop(AgentRules.stepChoices.map { L10n.english ? "\($0) steps" : "\($0) 步" }, stepIdx,
+                                     #selector(agentStepsChanged(_:))), fill: false))
+        g1.add(SK.toggle("操作前标出位置", sw(Prefs.agentMark, #selector(agentMarkToggled(_:))),
+                         sub: "要点的按钮先亮一圈琥珀色，再点"))
+        put(g1, in: v, gap: 22)
+
+        // 安全
+        put(sectionLabel("安全"), in: v, full: false, gap: 8)
+        let g2 = SK.Group()
+        let blocked = Prefs.agentBlocked
+        if blocked.isEmpty {
+            g2.add(SK.info(SK.WrapLabel("没有不让碰的应用", size: 13)))
+        }
+        for (i, e) in blocked.enumerated() {
+            let b = SK.button("移除", self, #selector(agentUnblock(_:)))
+            b.tag = i
+            g2.add(SK.info(SK.WrapLabel("🚫 " + AgentRules.displayName(e), size: 13, secondary: false), b))
+        }
+        let add = SK.button("＋ 添加应用…", self, #selector(agentAddBlocked(_:)))
+        g2.add(SK.info(SK.WrapLabel("不让小猫碰的应用：它在这些应用里不点也不输入", size: 11), add))
+        agentWords.placeholderString = L10n.t("例如：转发, 退款, 确认（逗号分隔）")
+        agentWords.stringValue = Prefs.agentExtraWords
+        agentWords.delegate = self
+        g2.add(SK.row("也要先问我的词", agentWords))
+        g2.add(SK.info(SK.WrapLabel("发送、发布、付款、删除、提交这类步骤和「不碰密码框」一直开着，不能关。", size: 11)))
+        put(g2, in: v, gap: 22)
+
+        // 隐私和提醒
+        put(sectionLabel("隐私和提醒"), in: v, full: false, gap: 8)
+        let g3 = SK.Group()
+        g3.add(SK.toggle("读取输入框里已有的文字", sw(Prefs.agentReadFields, #selector(agentReadToggled(_:))),
+                         sub: "关掉后只看按钮和输入框的名字，发给模型的内容更少"))
+        g3.add(SK.toggle("做完或停下时在 🔔 里提醒", sw(Prefs.agentNotify, #selector(agentNotifyToggled(_:)))))
+        put(g3, in: v, gap: 22)
+
+        // 操作记录
+        put(sectionLabel("操作记录"), in: v, full: false, gap: 8)
+        let g4 = SK.Group()
+        g4.add(SK.toggle("保存操作记录", sw(Prefs.agentKeepLog, #selector(agentKeepToggled(_:))),
+                         sub: "每次做了什么、在哪个应用、结果怎样，只存在这台 Mac 上"))
+        let keepIdx = AgentRules.keepChoices.firstIndex { $0.1 == Prefs.agentKeepDays } ?? 1
+        g4.add(SK.row("保留多久", pop(AgentRules.keepChoices.map { $0.0 }, keepIdx, #selector(agentKeepDaysChanged(_:))), fill: false))
+        g4.add(SK.info(SK.buttons([SK.button("📋 操作记录", self, #selector(agentOpenLog)),
+                                   SK.button("清空记录", self, #selector(agentClearLog))])))
+        put(g4, in: v, gap: 22)
+
         let info = SK.WrapLabel("""
         怎么用：在聊天里说「帮我……」，比如「帮我在备忘录里新建一条：明天买猫粮」「帮我打开 Safari 搜索今天的天气」。也可以用「/做 」开头。
 
@@ -748,6 +812,92 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
         return v
     }
     @objc private func agentConfirmToggled(_ b: NSSwitch) { Prefs.agentConfirm = b.state == .on }
+    @objc private func agentSpeedChanged(_ p: NSPopUpButton) { Prefs.agentSpeed = max(0, p.indexOfSelectedItem) }
+    @objc private func agentStepsChanged(_ p: NSPopUpButton) {
+        Prefs.agentMaxSteps = AgentRules.stepChoices[min(max(0, p.indexOfSelectedItem), AgentRules.stepChoices.count - 1)]
+    }
+    @objc private func agentMarkToggled(_ b: NSSwitch) { Prefs.agentMark = b.state == .on }
+    @objc private func agentReadToggled(_ b: NSSwitch) { Prefs.agentReadFields = b.state == .on }
+    @objc private func agentNotifyToggled(_ b: NSSwitch) { Prefs.agentNotify = b.state == .on }
+    @objc private func agentKeepToggled(_ b: NSSwitch) {
+        let on = b.state == .on
+        if !on && AgentLog.count > 0 {
+            let clear = OCConfirm.ask(L10n.t("不再保存操作记录"), L10n.t("以后的操作不会再记下来。要不要顺便删掉已经保存的记录？"),
+                                      ok: L10n.t("一起删掉"), danger: true)
+            if clear { AgentLog.clear() }
+        }
+        Prefs.agentKeepLog = on
+    }
+    @objc private func agentKeepDaysChanged(_ p: NSPopUpButton) {
+        let new = AgentRules.keepChoices[min(max(0, p.indexOfSelectedItem), AgentRules.keepChoices.count - 1)].1
+        if new > 0 && (Prefs.agentKeepDays == 0 || new < Prefs.agentKeepDays) {
+            let ok = OCConfirm.ask(L10n.t("改短保留时间？"), L10n.english ? "Runs older than \(new) days will be deleted." : "超过 \(new) 天的记录会被删掉。",
+                                   ok: L10n.t("确认"))
+            if !ok {
+                p.selectItem(at: AgentRules.keepChoices.firstIndex { $0.1 == Prefs.agentKeepDays } ?? 1)
+                return
+            }
+        }
+        Prefs.agentKeepDays = new
+        _ = AgentLog.all()   // applies the new limit
+    }
+    @objc private func agentOpenLog() { AgentLogWindow.shared.show() }
+    @objc private func agentClearLog() {
+        guard AgentLog.count > 0 else { return }
+        guard OCConfirm.ask(L10n.t("清空全部操作记录？"), L10n.t("删除后找不回来。"), ok: L10n.t("清空"), danger: true) else { return }
+        AgentLog.clear()
+    }
+    @objc private func agentUnblock(_ b: NSButton) {
+        var list = Prefs.agentBlocked
+        guard b.tag < list.count else { return }
+        let name = AgentRules.displayName(list[b.tag])
+        guard OCConfirm.ask(L10n.english ? "Let the cat use \(name) again?" : "让小猫可以操作「\(name)」？",
+                            L10n.t("移除后，喵手可以在这个应用里点按钮和输入。"), ok: L10n.t("移除")) else { return }
+        list.remove(at: b.tag)
+        Prefs.agentBlocked = list
+        select(selected)
+    }
+    @objc private func agentAddBlocked(_ b: NSButton) {
+        let menu = NSMenu()
+        let have = Set(Prefs.agentBlocked.map { $0.lowercased() })
+        let apps = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil && $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+            .filter { !have.contains(($0.bundleIdentifier ?? "").lowercased()) }
+            .sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
+        for a in apps {
+            let it = NSMenuItem(title: a.localizedName ?? a.bundleIdentifier ?? "?", action: #selector(agentBlockPicked(_:)), keyEquivalent: "")
+            it.target = self
+            it.representedObject = a.bundleIdentifier
+            if let ic = a.icon { ic.size = NSSize(width: 16, height: 16); it.image = ic }
+            menu.addItem(it)
+        }
+        if !apps.isEmpty { menu.addItem(.separator()) }
+        let other = NSMenuItem(title: L10n.t("从「应用程序」里选…"), action: #selector(agentBlockChoose), keyEquivalent: "")
+        other.target = self
+        menu.addItem(other)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: b.bounds.height + 4), in: b)
+    }
+    @objc private func agentBlockPicked(_ it: NSMenuItem) {
+        guard let id = it.representedObject as? String else { return }
+        addBlocked(id, name: it.title)
+    }
+    @objc private func agentBlockChoose() {
+        let p = NSOpenPanel()
+        p.allowedContentTypes = [.applicationBundle]
+        p.directoryURL = URL(fileURLWithPath: "/Applications")
+        p.canChooseDirectories = false
+        guard p.runModal() == .OK, let url = p.url else { return }
+        let id = Bundle(url: url)?.bundleIdentifier ?? url.deletingPathExtension().lastPathComponent
+        addBlocked(id, name: FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: ""))
+    }
+    private func addBlocked(_ id: String, name: String) {
+        guard OCConfirm.ask(L10n.english ? "Stop the cat from using \(name)?" : "不让小猫操作「\(name)」？",
+                            L10n.t("喵手不会在这个应用里点按钮或输入，也不会打开它。"), ok: L10n.t("添加")) else { return }
+        var list = Prefs.agentBlocked
+        if !list.contains(where: { $0.lowercased() == id.lowercased() }) { list.append(id) }
+        Prefs.agentBlocked = list
+        select(selected)
+    }
 
     private func miaoSettings() -> NSView {
         let v = column()
@@ -830,6 +980,7 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
     private func saveFields() {
         Prefs.xSignalWords = xWords.stringValue
         Prefs.xSignalAccounts = xAccounts.stringValue
+        if agentWords.superview != nil { Prefs.agentExtraWords = agentWords.stringValue }
     }
 
     @objc private func checkX() {

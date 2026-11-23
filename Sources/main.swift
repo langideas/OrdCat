@@ -3390,7 +3390,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "signal": { SignalStation.shared.showWindow() },
             "square": { TaskSquare.shared.showWindow() },
             "square.mine": { TaskSquare.shared.showWindow(tab: 1) },
-            "update": { [weak self] in self?.installFromMenu() }]
+            "update": { [weak self] in self?.installFromMenu() },
+            "agentlog": { AgentLogWindow.shared.show() }]
+        AgentLogWindow.shared.onRerun = { [weak self] goal in
+            guard let self = self else { return }
+            guard Prefs.agentOn else { self.bubble.notify(L10n.t("「喵手」现在是关着的，先在技能栏打开它。"), hold: 6); return }
+            self.agent.start(goal: goal)
+        }
         Social.startUnreadWatch()
         CatLevel.shared.refresh()
         Account.shared.observe { [weak self] in
