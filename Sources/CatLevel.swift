@@ -119,7 +119,8 @@ final class CatLevel {
     var hoursToNextDay: Int { Int(ceil(Double(86400 - onlineSeconds % 86400) / 3600)) }
 
     /// Any active subscription (account-bound or license key) → 订阅会员.
-    static var isMember: Bool { ["x", "agent"].contains { Billing.isSubscribed($0) } }
+    /// 徽章只看会员 / 会员 Pro；技能只在技能栏用光圈区分点亮（Lang 2026-11-23）
+    static var isMember: Bool { ["member", "pro"].contains { Billing.isSubscribed($0) } }
 
     // MARK: online clock
 

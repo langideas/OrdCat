@@ -1382,8 +1382,16 @@ final class Bubble: NSObject {
     var onLevel: (() -> Void)?
     var onMic: (() -> Void)?
     var anchor: () -> NSPoint = { .zero }   // cat head centre, screen coords
+    /// 技能栏: a slim column of skill icons on the card's left edge, chat mode only (Lang 2026-11-23).
+    var skillItems: () -> [SkillsPane.RailItem] = { [] }
+    var onSkillToggle: ((String) -> Void)?
+    private var railIcons: [SkillRailIcon] = []
+    private let railLine = NSBox()
+    private let railW: CGFloat = 46
+    private var railShown: Bool { chatMode && !railIcons.isEmpty }
     /// Roomier in chat (header buttons + input row), a little narrower for one-off hints.
-    var width: CGFloat { chatMode ? 420 : 360 }
+    /// The rail adds its own width, so the text area stays as wide as before.
+    var width: CGFloat { chatMode ? 420 + (railIcons.isEmpty ? 0 : railW) : 360 }
 
     var isShown: Bool { panel.isVisible && panel.alphaValue > 0.01 }
     var hasDraft: Bool { !input.stringValue.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -1516,6 +1524,33 @@ final class Bubble: NSObject {
         shareClose.action = #selector(closeShare)
         shareClose.toolTip = "这次对话不分享这个页面"
         card.addSubview(shareClose)
+
+        railLine.boxType = .custom
+        railLine.borderWidth = 0
+        railLine.fillColor = Theme.fg.withAlphaComponent(0.10)
+        railLine.isHidden = true
+        card.addSubview(railLine)
+        NotificationCenter.default.addObserver(forName: SkillsPane.changed, object: nil, queue: .main) { [weak self] _ in
+            guard let self = self else { return }
+            self.refreshRail()
+            if self.isShown && self.chatMode { self.layout(scrollToEnd: false) }
+        }
+    }
+
+    /// Build or update the rail icons from the skills list.
+    private func refreshRail() {
+        let items = skillItems()
+        if railIcons.map({ $0.id }) != items.map({ $0.id }) {
+            railIcons.forEach { $0.removeFromSuperview() }
+            railIcons = items.map { it in
+                let v = SkillRailIcon(id: it.id)
+                v.onClick = { [weak self] id in self?.onSkillToggle?(id) }
+                v.isHidden = true
+                card.addSubview(v)
+                return v
+            }
+        }
+        for (v, it) in zip(railIcons, items) { v.update(it) }
     }
 
     @objc private func chipClicked() { if !sharing { setShare(title: shareTitle, on: true); onShareChanged?(true) } }
@@ -1578,6 +1613,8 @@ final class Bubble: NSObject {
         }
         shareChip.layer?.backgroundColor = Theme.fg.withAlphaComponent(0.10).cgColor
         shareChip.contentTintColor = Theme.fg
+        railLine.fillColor = Theme.fg.withAlphaComponent(0.10)
+        refreshRail()
         for b in choiceButtons {
             b.layer?.backgroundColor = Theme.fg.withAlphaComponent(0.09).cgColor
             let at = NSMutableAttributedString(attributedString: b.attributedTitle)
@@ -1752,7 +1789,9 @@ final class Bubble: NSObject {
 
     func layout(scrollToEnd: Bool = true) {
         let pad: CGFloat = 16
-        let inner = width - pad * 2
+        if chatMode && railIcons.isEmpty { refreshRail() }
+        let left = pad + (railShown ? railW : 0)
+        let inner = width - left - pad
         textView.frame = NSRect(x: 0, y: 0, width: inner, height: 10)
         textView.textContainer?.containerSize = NSSize(width: inner, height: .greatestFiniteMagnitude)
         var used: CGFloat = 18
@@ -1766,7 +1805,7 @@ final class Bubble: NSObject {
                                    options: [.usesLineFragmentOrigin, .usesFontLeading])
             used = max(used, ceil(r.height))
         }
-        let textH = min(max(used, 18), 300)
+        var textH = min(max(used, 18), 300)
         // Action buttons: equal widths filling the row (up to 4 per row; 2 per row when a title is long).
         let actGap: CGFloat = 6
         let longest = actionButtons.map { ceil($0.intrinsicContentSize.width) }.max() ?? 0
@@ -1785,10 +1824,13 @@ final class Bubble: NSObject {
         let chatH: CGFloat = chatMode ? 44 : 0
         let showChip = chatMode && shareTitle != nil
         let chipH: CGFloat = showChip ? 32 : 0
-        let h = pad + 18 + 10 + textH + choicesH + actionH + chipH + chatH + pad
+        var h = pad + 18 + 10 + textH + choicesH + actionH + chipH + chatH + pad
+        // The rail never gets cut off: grow the text area if the card would be shorter than the icons.
+        let railH = pad * 2 + CGFloat(railIcons.count) * 42 - 10
+        if railShown && h < railH { textH += railH - h; h = railH }
 
         var y = h - pad - 16
-        title.frame = NSRect(x: pad, y: y, width: 120, height: 16)
+        title.frame = NSRect(x: left, y: y, width: 120, height: 16)
         // Header buttons hug their text (right to left) so 📶 and the level icons fit next to them.
         // Amber chips (OCButton.chip) with a small gap between them.
         let fitW: (NSButton, CGFloat) -> CGFloat = { b, maxW in min(maxW, ceil(b.intrinsicContentSize.width)) }
@@ -1808,17 +1850,17 @@ final class Bubble: NSObject {
         speakPause.isHidden = !speaking
         speakStop.isHidden = !speaking
         if speaking {
-            speakPause.frame = NSRect(x: pad + 58, y: y - 2, width: 22, height: 20)
-            speakStop.frame = NSRect(x: pad + 82, y: y - 2, width: 22, height: 20)
+            speakPause.frame = NSRect(x: left + 58, y: y - 2, width: 22, height: 20)
+            speakStop.frame = NSRect(x: left + 82, y: y - 2, width: 22, height: 20)
         }
         y -= 10 + textH
-        scroll.frame = NSRect(x: pad, y: y, width: inner, height: textH)
+        scroll.frame = NSRect(x: left, y: y, width: inner, height: textH)
         textView.frame = NSRect(x: 0, y: 0, width: inner, height: max(used, textH))
         if !choiceButtons.isEmpty {
             y -= 4
             for (i, b) in choiceButtons.enumerated() {
                 y -= choiceHs[i] + 6
-                b.frame = NSRect(x: pad, y: y + 3, width: choiceW, height: choiceHs[i])
+                b.frame = NSRect(x: left, y: y + 3, width: choiceW, height: choiceHs[i])
             }
         }
         if !actionButtons.isEmpty {
@@ -1827,7 +1869,7 @@ final class Bubble: NSObject {
             for (i, b) in actionButtons.enumerated() {
                 let row = i / perRow, col = i % perRow
                 let by = y + actionH - 4 - CGFloat(row + 1) * 30 - CGFloat(row) * actGap
-                b.frame = NSRect(x: pad + CGFloat(col) * (bw + actGap), y: by, width: bw, height: 30)
+                b.frame = NSRect(x: left + CGFloat(col) * (bw + actGap), y: by, width: bw, height: 30)
             }
         }
         shareChip.isHidden = !showChip
@@ -1836,8 +1878,8 @@ final class Bubble: NSObject {
             y -= chipH
             shareChip.sizeToFit()
             let cw = min(inner - 28, shareChip.frame.width + 14)
-            shareChip.frame = NSRect(x: pad, y: y + 6, width: cw, height: 22)
-            shareClose.frame = NSRect(x: pad + cw + 4, y: y + 6, width: 22, height: 22)
+            shareChip.frame = NSRect(x: left, y: y + 6, width: cw, height: 22)
+            shareClose.frame = NSRect(x: left + cw + 4, y: y + 6, width: 22, height: 22)
         }
         input.isHidden = !chatMode
         sendButton.isHidden = !chatMode
@@ -1846,9 +1888,17 @@ final class Bubble: NSObject {
         if chatMode {
             y -= chatH
             // Input, voice and send share one 30pt row with even 6pt gaps.
-            input.frame = NSRect(x: pad, y: y + 8, width: inner - 6 - 40 - 6 - 64, height: 30)
-            micButton.frame = NSRect(x: pad + inner - 64 - 6 - 40, y: y + 8, width: 40, height: 30)
-            sendButton.frame = NSRect(x: pad + inner - 64, y: y + 8, width: 64, height: 30)
+            input.frame = NSRect(x: left, y: y + 8, width: inner - 6 - 40 - 6 - 64, height: 30)
+            micButton.frame = NSRect(x: left + inner - 64 - 6 - 40, y: y + 8, width: 40, height: 30)
+            sendButton.frame = NSRect(x: left + inner - 64, y: y + 8, width: 64, height: 30)
+        }
+
+        railLine.isHidden = !railShown
+        for v in railIcons { v.isHidden = !railShown }
+        if railShown {
+            railLine.frame = NSRect(x: railW + 4, y: pad, width: 1, height: h - pad * 2)
+            var ry = h - pad - 30   // first icon lines up with the title row
+            for v in railIcons { v.frame = NSRect(x: 9, y: ry, width: 32, height: 32); ry -= 42 }
         }
 
         let head = anchor()
@@ -3324,6 +3374,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         SignalStation.shared.start()
         bubble.onLevel = { [weak self] in self?.settings.show(page: .user) }
+        bubble.skillItems = { [weak self] in self?.settings.skillsPane.railItems() ?? [] }
+        bubble.onSkillToggle = { [weak self] id in self?.settings.skillsPane.toggle(id) }
         catView.setMember(CatLevel.isMember)
         CatLevel.shared.startClock()
         Social.onUnread = { [weak self] n in

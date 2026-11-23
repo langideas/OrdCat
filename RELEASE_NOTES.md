@@ -1,3 +1,13 @@
+# OrdCat v0.2.52
+
+- 小猫弹窗左侧新增竖版技能栏：只显示技能图标，点亮的会发琥珀色光圈。鼠标悬停看介绍和点亮条件，点一下就能打开或关闭这个技能（还没订阅的会打开订阅）。
+- 头像上的会员徽章现在只给会员和会员 Pro 显示；技能是否点亮只看技能栏的光圈。
+
+**English**
+
+- A slim skill bar now sits on the left of the cat's bubble: just the skill icons, with lit ones glowing amber. Hover for what a skill does and how to light it up; click to turn it on or off (or subscribe, if it still needs that).
+- The member badge on your avatar now shows only for Member and Member Pro. Whether a skill is lit shows only by its glow in the skill bar.
+
 # OrdCat v0.2.51
 
 - 技能页换成技能栏：每个技能有自己的图标，点亮的技能会发出琥珀色光圈。点一个技能会弹出它的介绍和点亮条件，开关也在里面。

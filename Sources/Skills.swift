@@ -157,6 +157,115 @@ private final class SkillTile: NSView {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 }
 
+/// One icon in the bubble's left rail: small round disc, amber glow when lit, card on hover, click to switch.
+final class SkillRailIcon: NSView {
+    let id: String
+    var onClick: ((String) -> Void)?
+    private let disc = NSView()
+    private let icon = NSImageView()
+    private let lock = NSTextField(labelWithString: "🔒")
+    private var item: SkillsPane.RailItem?
+    private let popover = NSPopover()
+    private var hovering = false
+
+    init(id: String) {
+        self.id = id
+        super.init(frame: NSRect(x: 0, y: 0, width: 32, height: 32))
+        wantsLayer = true
+        disc.wantsLayer = true
+        disc.frame = bounds
+        disc.layer?.cornerRadius = 16
+        disc.layer?.borderWidth = 1.5
+        disc.layer?.masksToBounds = false
+        icon.frame = bounds.insetBy(dx: 7, dy: 7)
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        lock.font = .systemFont(ofSize: 8)
+        lock.frame = NSRect(x: 20, y: -3, width: 14, height: 12)
+        addSubview(disc); disc.addSubview(icon); addSubview(lock)
+        popover.behavior = .applicationDefined
+        popover.animates = false
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func update(_ it: SkillsPane.RailItem) {
+        item = it
+        let c = it.lit ? kAmber : Theme.fg.withAlphaComponent(0.45)
+        icon.image = SkillIcon.image(id, size: 18, color: c)
+        disc.layer?.backgroundColor = (it.lit ? kAmber.withAlphaComponent(0.14) : Theme.fg.withAlphaComponent(0.06)).cgColor
+        disc.layer?.borderColor = (it.lit ? kAmber : Theme.fg.withAlphaComponent(0.14)).cgColor
+        lock.isHidden = !it.locked
+        disc.layer?.removeAnimation(forKey: "glow")
+        if it.lit {
+            disc.layer?.shadowColor = kAmber.cgColor
+            disc.layer?.shadowOffset = .zero
+            disc.layer?.shadowRadius = 6
+            disc.layer?.shadowOpacity = 0.7
+            let g = CABasicAnimation(keyPath: "shadowOpacity")
+            g.fromValue = 0.3; g.toValue = 0.85; g.duration = 1.8
+            g.autoreverses = true; g.repeatCount = .infinity
+            g.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            disc.layer?.add(g, forKey: "glow")
+        } else {
+            disc.layer?.shadowOpacity = 0
+        }
+        if popover.isShown { popover.contentViewController = card(it) }
+    }
+
+    /// Hover card: name, intro, how to light it up, and what a click does.
+    private func card(_ it: SkillsPane.RailItem) -> NSViewController {
+        let vc = NSViewController()
+        let col = NSStackView()
+        col.orientation = .vertical
+        col.alignment = .leading
+        col.spacing = 6
+        col.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
+        let head = NSStackView()
+        head.orientation = .horizontal
+        head.spacing = 6
+        let ic = NSImageView(image: SkillIcon.image(id, size: 18, color: kAmber))
+        let nm = NSTextField(labelWithString: it.name)
+        nm.font = .systemFont(ofSize: 13, weight: .bold)
+        let st = NSTextField(labelWithString: L10n.t(it.lit ? "已点亮" : "未点亮"))
+        st.font = .systemFont(ofSize: 11, weight: .medium)
+        st.textColor = it.lit ? kAmber : .secondaryLabelColor
+        for v in [ic, nm, st] as [NSView] { head.addArrangedSubview(v) }
+        let sm = NSTextField(wrappingLabelWithString: it.summary)
+        sm.font = .systemFont(ofSize: 12)
+        let ct = NSTextField(labelWithString: L10n.t("点亮条件"))
+        ct.font = .systemFont(ofSize: 11, weight: .semibold)
+        ct.textColor = kAmber
+        let cd = NSTextField(wrappingLabelWithString: it.condition)
+        cd.font = .systemFont(ofSize: 11)
+        cd.textColor = .secondaryLabelColor
+        let hint = NSTextField(labelWithString: L10n.t(it.lit ? "点一下关闭" : (it.locked ? "点一下订阅" : "点一下打开")))
+        hint.font = .systemFont(ofSize: 11, weight: .medium)
+        hint.textColor = .tertiaryLabelColor
+        for v in [head, sm, ct, cd, hint] as [NSView] { col.addArrangedSubview(v) }
+        for v in [sm, cd] { v.widthAnchor.constraint(equalToConstant: 230).isActive = true }
+        col.setCustomSpacing(10, after: sm)
+        col.setCustomSpacing(10, after: cd)
+        vc.view = col
+        return vc
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for t in trackingAreas { removeTrackingArea(t) }
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+    }
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        guard let it = item else { return }
+        popover.appearance = Theme.bubbleAppearance
+        popover.contentViewController = card(it)
+        popover.show(relativeTo: bounds, of: self, preferredEdge: .minX)
+    }
+    override func mouseExited(with event: NSEvent) { hovering = false; popover.close() }
+    override func viewWillMove(toWindow newWindow: NSWindow?) { if newWindow == nil { popover.close() } }
+    override func mouseDown(with event: NSEvent) { onClick?(id) }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+}
+
 final class SkillsPane: NSObject, NSTextFieldDelegate {
     weak var xbuddy: XCompanion?
     /// Called when a skill is switched (so the app can react right away).
@@ -279,6 +388,40 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
 
     private func lit(_ sk: Skill) -> Bool { sk.isOn() && (!sk.paid || Billing.isUnlocked(sk.id)) }
 
+    // MARK: 弹窗左侧的竖版技能栏 (bubble rail)
+
+    /// Posted after any skill switch changes, so the bubble's rail can follow.
+    static let changed = Notification.Name("OrdCat.skillsChanged")
+    struct RailItem { let id: String; let name: String; let summary: String; let condition: String; let lit: Bool; let locked: Bool }
+
+    private func ensureSkills() { if skills.isEmpty { skills = makeSkills() } }
+
+    func railItems() -> [RailItem] {
+        ensureSkills()
+        return skills.map { sk in
+            RailItem(id: sk.id, name: sk.name, summary: L10n.t(sk.summary), condition: condition(sk), lit: lit(sk),
+                     locked: sk.paid && Billing.enabled && !Billing.isUnlocked(sk.id))
+        }
+    }
+
+    /// One click on the rail: lit → off; off → on; still locked → the subscribe sheet.
+    func toggle(_ id: String) {
+        ensureSkills()
+        guard let sk = skills.first(where: { $0.id == id }) else { return }
+        if lit(sk) {
+            sk.setOn(false)
+        } else if sk.paid && !Billing.isUnlocked(id) {
+            Billing.showSubscribe(id, name: sk.name) { [weak self] in
+                if Billing.isUnlocked(id) { sk.setOn(true) }
+                self?.refresh()
+            }
+            return
+        } else {
+            sk.setOn(true)
+        }
+        refresh()
+    }
+
     /// The card that pops up from a tile: name, intro, condition, and the switch (or subscribe).
     private func showCard(_ i: Int, from tile: NSView) {
         let sk = skills[i]
@@ -360,6 +503,7 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
             }
         }
         if let xb = xbuddy { xStats.stringValue = "\(xb.stats)\n订阅：\(Billing.statusLine("x"))" }
+        NotificationCenter.default.post(name: SkillsPane.changed, object: nil)
     }
 
     // MARK: the skills
