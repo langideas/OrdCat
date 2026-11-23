@@ -760,25 +760,34 @@ final class ContextHub {
                     .filter { $0.1.0 >= 0.8 && Double($0.0.text.count) < Double(t.el.text.count) * 1.6 + 10 }
                 hit = close.min(by: { dist($0.0) < dist($1.0) })?.0.rect
             }
-            if hit == nil && onScreen(t.el.rect, c.windowRect) { hit = t.el.rect }
+            // Fall back to where it was only when the re-read itself came back nearly empty. If the page was
+            // read fine and the text is gone, it scrolled away or the user moved on: no ring at all.
+            if hit == nil && c.elements.count < 10 && onScreen(t.el.rect, c.windowRect) { hit = t.el.rect }
             if let h = hit {
                 let r = h.intersection(c.windowRect == .zero ? h : c.windowRect)
                 if !r.isNull && r.height > 2 { found.append((r, t)) }
             }
         }
-        // Narrow tall blocks (a whole post, a paragraph) to the line the point quotes.
-        var lines: [ScreenElement]?
+        guard !found.isEmpty else { return [] }
+        // What is really on screen right now (on-device OCR of the window, nothing leaves the Mac).
+        // Used twice: to check the text is actually where the ring would go, and to narrow tall blocks to a line.
+        var lines: [ScreenElement] = []
+        if let (img, frame) = await reader.captureWindowImage(pid: app.processIdentifier, maxWidth: 2400) {
+            lines = reader.ocr(img, frame: frame, accurate: true)
+        }
         var out: [(CGRect, Int)] = []
         for (r, t) in found {
             var rect = r
-            if r.height > 44 && t.hint.count >= 4 {
-                if lines == nil {
-                    lines = []
-                    if let (img, frame) = await reader.captureWindowImage(pid: app.processIdentifier, maxWidth: 2400) {
-                        lines = reader.ocr(img, frame: frame, accurate: true)
-                    }
-                }
-                if let l = lines, let narrow = ContextHub.bestLines(in: r, hint: t.hint, lines: l) { rect = narrow }
+            if !lines.isEmpty {
+                // Some apps (X, long feeds) report stale positions for recycled rows. Only ring a place whose
+                // pixels show the text we mean; otherwise leave it out rather than ring the wrong lines.
+                guard ContextHub.textVisible(t.el.text, hint: t.hint, in: r, lines: lines) else { continue }
+            }
+            if r.height > 44 && t.hint.count >= 4, let narrow = ContextHub.bestLines(in: r, hint: t.hint, lines: lines) {
+                rect = narrow
+            } else if r.height > 44, let tight = ContextHub.textBounds(of: t.el.text, in: r, lines: lines) {
+                // Hug the text: a block's frame can run far past it (sidebars, empty margins).
+                rect = tight
             }
             out.append((rect, t.n))
         }
@@ -810,6 +819,44 @@ final class ContextHub {
     /// Older callers: plain rects.
     func relocate(_ targets: [ScreenElement]) async -> [CGRect] {
         await relocate(targets.enumerated().map { GroundTarget(el: $0.element, hint: "", n: $0.offset + 1) }).map { $0.0 }
+    }
+
+    /// OCR lines that sit inside `block`.
+    static func linesInside(_ block: CGRect, _ lines: [ScreenElement]) -> [ScreenElement] {
+        lines.filter { l in
+            let i = l.rect.intersection(block.insetBy(dx: -4, dy: -4))
+            return !i.isNull && i.width * i.height >= 0.6 * l.rect.width * l.rect.height
+        }
+    }
+
+    /// True when the pixels inside `block` show (part of) the element's text or the answer's quote.
+    static func textVisible(_ text: String, hint: String, in block: CGRect, lines: [ScreenElement]) -> Bool {
+        let inside = linesInside(block, lines)
+        guard !inside.isEmpty else { return false }
+        let seen = inside.map { $0.text }.joined(separator: " ")
+        let probe = String(text.prefix(400))
+        let (a, na) = overlap(probe, seen)
+        if na >= 3 && a >= 0.35 { return true }
+        if hint.count >= 4 {
+            let (b, nb) = overlap(hint, seen)
+            if nb >= 3 && b >= 0.35 { return true }
+        }
+        // Very short labels (a button, "5m"): exact containment is enough.
+        let compact = { (s: String) in s.lowercased().filter { !$0.isWhitespace } }
+        let pt = compact(probe)
+        return pt.count >= 2 && pt.count <= 6 && compact(seen).contains(pt)
+    }
+
+    /// The box around the OCR lines inside `block` that belong to `text` (nil when none do).
+    static func textBounds(of text: String, in block: CGRect, lines: [ScreenElement]) -> CGRect? {
+        let probe = String(text.prefix(2000))
+        let inside = linesInside(block, lines).filter { l in
+            let (sc, n) = overlap(l.text, probe)
+            return n >= 2 && sc >= 0.5
+        }
+        guard var r = inside.first?.rect else { return nil }
+        for l in inside.dropFirst() { r = r.union(l.rect) }
+        return r.insetBy(dx: -2, dy: -1)
     }
 
     /// The OCR line(s) inside `block` that best match `hint`: the best line, plus the next line when the point

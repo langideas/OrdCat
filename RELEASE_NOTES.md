@@ -1,3 +1,11 @@
+# OrdCat v0.2.58
+
+- 圈重点更准：画圈前先用本机文字识别核对那里真的是这段文字，对不上就不圈；不再在页面换了以后沿用旧位置；圈只包住文字本身，不会拉到侧边栏
+
+**English**
+
+- More accurate rings: before drawing, the cat checks on-device that the text really is there and skips the ring if it isn't; no more reusing old positions after the page changed; rings hug the text instead of stretching into sidebars
+
 # OrdCat v0.2.57
 
 - 小猫弹窗的输入框左边多了 ➕：可以发图片、PDF、文本或代码文件，也可以直接发剪贴板里的图片
