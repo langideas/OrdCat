@@ -247,6 +247,46 @@ final class Account {
         }
     }
 
+    // MARK: 会员 · OrdCat 托管模型（额度）
+
+    /// Model address that means "OrdCat's hosted models, paid by membership credits".
+    static let hostedBase = "ordcat://hosted"
+
+    /// Where the hosted proxy is and the headers it needs (fresh login token, region for the model choice).
+    func hostedEndpoint(_ f: @escaping (URL?, [String: String], String?) -> Void) {
+        guard let base = baseURL, let anon = anonKey else { f(nil, [:], "账号服务还在开通中"); return }
+        guard signedIn else { f(nil, [:], "用 OrdCat 托管模型要先登录（设置 → 用户）"); return }
+        withFreshSession { [weak self] err in
+            DispatchQueue.main.async {
+                if let e = err { f(nil, [:], e); return }
+                let cc = (Locale.current as NSLocale).countryCode ?? ""
+                let cn = cc == "CN" || TimeZone.current.identifier == "Asia/Shanghai" || TimeZone.current.identifier == "Asia/Urumqi"
+                f(URL(string: base + "/functions/v1/chat-proxy/v1/chat/completions"),
+                  ["apikey": anon, "Authorization": "Bearer \(self?.session?.access ?? "")", "x-ordcat-region": cn ? "cn" : "intl"], nil)
+            }
+        }
+    }
+
+    /// Plan and credits left: plan (free | member | pro), monthly_left, monthly_total, bonus, period_end,
+    /// today_used, daily_cap, slow_today, slow_cap.
+    func credits(_ done: @escaping ([String: Any]?, String?) -> Void) {
+        guard signedIn else { done(nil, "还没登录"); return }
+        request("POST", "/rest/v1/rpc/credits_status", json: [:]) { obj, err in done(obj as? [String: Any], err) }
+    }
+
+    /// Stripe checkout page for 会员 (member) / 会员 Pro (pro) / 加油包 (topup) / a skill, or the
+    /// subscription management page (portal).
+    func stripeLink(item: String?, yearly: Bool = false, portal: Bool = false, done: @escaping (URL?, String?) -> Void) {
+        guard signedIn else { done(nil, "先登录账号（设置 → 用户）"); return }
+        var body: [String: Any] = portal ? ["portal": true] : ["item": item ?? "member", "interval": yearly ? "year" : "month"]
+        if portal { body["item"] = "" }
+        request("POST", "/functions/v1/stripe-checkout", json: body) { obj, err in
+            let o = obj as? [String: Any]
+            if let u = (o?["url"] as? String).flatMap(URL.init(string:)) { done(u, nil); return }
+            done(nil, (o?["error"] as? String) ?? err ?? "付款服务还没开通")
+        }
+    }
+
     // MARK: cloud profile + subscriptions
 
     /// Load the cloud profile and subscriptions (called after sign-in and on launch).

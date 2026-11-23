@@ -1,3 +1,17 @@
+# OrdCat v0.2.46
+
+- 选中文字后让小猫看、翻译或问这段时，屏幕上会先把你选中的那段圈出来；问「重点」时会圈到选中内容里对应的那几行。页面内容稍有变化（比如时间、点赞数）也能圈到原位置。实在找不到能圈的地方，会在回答下面直接告诉你。
+- 聊天气泡顶部的信号站按钮现在显示名称「📶 信号站」。
+- 模型预设新增 15 家：通义千问（百炼）、智谱 GLM、硅基流动、Kimi、MiniMax、豆包、Mistral、Grok、OpenRouter、LM Studio，以及通义、智谱、Kimi、MiniMax 的国际站；OpenAI、Gemini、Claude 的默认模型换成新版。通义、智谱、Gemini 聊天时自动关掉长思考，回答更快更省。
+- 会员（即将开放）：设置 → 用户 → 会员，可以开通会员 / 会员 Pro / 加油包，通过 Stripe 付款。会员不用填 Key，在 设置 → 模型 选「OrdCat 托管」就能直接聊。
+
+**English**
+
+- When you ask the cat about text you selected (look, translate, ask about it), the selection is ringed on screen first; asking for the key points rings the matching lines inside it. Rings also find their spot when the page changes a little (timestamps, like counts). If nothing can be ringed, the answer says so.
+- The Signal Station button in the chat bubble now shows its name.
+- 15 more model presets: Qwen (Model Studio), Zhipu GLM, SiliconFlow, Kimi, MiniMax, Doubao, Mistral, Grok, OpenRouter, LM Studio, plus the international sites of Qwen, Z.ai, Kimi and MiniMax. OpenAI, Gemini and Claude default to newer models. Long thinking is switched off for Qwen, GLM and Gemini so answers come faster and cheaper.
+- Membership (coming soon): Settings → Profile → Membership for Member, Member Pro and top-ups, paid through Stripe. Members need no key: pick "OrdCat hosted" in Settings → Model.
+
 # OrdCat v0.2.45
 
 - 屏幕重点圈重新做了：不会再圈到浏览器的书签栏、标签页和工具栏；长段落会精确圈到说的那一行；小猫回答到哪一点就马上圈出哪里，每个圈带编号 ①②③，和回答里的编号一一对应。

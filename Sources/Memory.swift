@@ -751,8 +751,18 @@ final class ContextHub {
         var found: [(CGRect, GroundTarget)] = []
         for t in targets {
             let same = c.elements.filter { $0.text == t.el.text && !$0.chrome && onScreen($0.rect, c.windowRect) }
-            if let near = same.min(by: { hypot($0.rect.midY - t.el.rect.midY, $0.rect.midX - t.el.rect.midX) < hypot($1.rect.midY - t.el.rect.midY, $1.rect.midX - t.el.rect.midX) }) {
-                let r = near.rect.intersection(c.windowRect == .zero ? near.rect : c.windowRect)
+            func dist(_ e: ScreenElement) -> CGFloat { hypot(e.rect.midY - t.el.rect.midY, e.rect.midX - t.el.rect.midX) }
+            // Exact text first; then text that changed a little (a counter, "5m" → "6m"); then where it was.
+            var hit = same.min(by: { dist($0) < dist($1) })?.rect
+            if hit == nil {
+                let close = c.elements.filter { !$0.chrome && onScreen($0.rect, c.windowRect) && $0.text.count >= 4 }
+                    .map { ($0, ContextHub.overlap(t.el.text, $0.text)) }
+                    .filter { $0.1.0 >= 0.8 && Double($0.0.text.count) < Double(t.el.text.count) * 1.6 + 10 }
+                hit = close.min(by: { dist($0.0) < dist($1.0) })?.0.rect
+            }
+            if hit == nil && onScreen(t.el.rect, c.windowRect) { hit = t.el.rect }
+            if let h = hit {
+                let r = h.intersection(c.windowRect == .zero ? h : c.windowRect)
                 if !r.isNull && r.height > 2 { found.append((r, t)) }
             }
         }
@@ -773,6 +783,28 @@ final class ContextHub {
             out.append((rect, t.n))
         }
         return out
+    }
+
+    /// Rings inside the text the user selected: each point of the answer goes on the selected line it talks
+    /// about (on-device OCR of that window). When nothing matches, or the user didn't ask for points, the whole
+    /// selection is ringed so they still see what the answer is about.
+    func selectionMarks(rect: CGRect, pid: pid_t, reply: String, wantLines: Bool) async -> [(CGRect, Int)] {
+        guard rect.width > 2, rect.height > 2 else { return [] }
+        if wantLines, rect.height > 30, let (img, frame) = await reader.captureWindowImage(pid: pid, maxWidth: 2400) {
+            let lines = reader.ocr(img, frame: frame, accurate: true)
+            let parts = reply.components(separatedBy: CharacterSet(charactersIn: "\n。；;！？!?"))
+                .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " •-*·0123456789.、：:①②③④⑤⑥⑦⑧⑨👉")) }
+                .filter { $0.count >= 4 }
+            var out: [(CGRect, Int)] = []
+            for p in parts {
+                guard let r = ContextHub.bestLines(in: rect, hint: p, lines: lines),
+                      !out.contains(where: { $0.0.intersects(r) }) else { continue }
+                out.append((r, out.count + 1))
+                if out.count >= 4 { break }
+            }
+            if !out.isEmpty { return out }
+        }
+        return [(rect, 0)]
     }
 
     /// Older callers: plain rects.

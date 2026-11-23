@@ -19,14 +19,42 @@ let kRim = NSColor(calibratedWhite: 1.0, alpha: 0.22)
 
 struct Preset { let name: String; let base: String; let model: String }
 let kPresets: [Preset] = [
+    // 本地（离线，不用 Key）
     Preset(name: "Ollama（本地离线）", base: "http://localhost:11434/v1", model: "qwen2.5:7b"),
-    Preset(name: "Groq", base: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-120b"),
+    Preset(name: "LM Studio（本地离线）", base: "http://localhost:1234/v1", model: ""),
+    // 会员额度，不用 Key（要登录；设置 → 用户 → 会员）
+    Preset(name: "OrdCat 托管（会员额度，不用 Key）", base: Account.hostedBase, model: "ordcat"),
+    // 国内可直连
+    Preset(name: "通义千问 · 阿里云百炼", base: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen3.8-flash"),
+    Preset(name: "智谱 GLM", base: "https://open.bigmodel.cn/api/paas/v4", model: "glm-5.3-flash"),
     Preset(name: "DeepSeek", base: "https://api.deepseek.com/v1", model: "deepseek-chat"),
-    Preset(name: "OpenAI", base: "https://api.openai.com/v1", model: "gpt-4o-mini"),
-    Preset(name: "Gemini", base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.0-flash"),
-    Preset(name: "Claude", base: "https://api.anthropic.com/v1", model: "claude-3-5-haiku-latest"),
+    Preset(name: "硅基流动 SiliconFlow", base: "https://api.siliconflow.cn/v1", model: "deepseek-ai/DeepSeek-V4.1-Flash"),
+    Preset(name: "Kimi · 月之暗面", base: "https://api.moonshot.cn/v1", model: "kimi-k3.1-pro"),
+    Preset(name: "MiniMax", base: "https://api.minimaxi.com/v1", model: "MiniMax-M3.1-Flash"),
+    Preset(name: "豆包 · 火山方舟", base: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seed-2-1-turbo-260628"),
+    // 海外
+    Preset(name: "Groq（极快，听写便宜）", base: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-120b"),
+    Preset(name: "OpenAI", base: "https://api.openai.com/v1", model: "gpt-6-luna"),
+    Preset(name: "Gemini", base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-3.1-flash-lite"),
+    Preset(name: "Claude", base: "https://api.anthropic.com/v1", model: "claude-haiku-5-5"),
+    Preset(name: "Mistral（欧盟）", base: "https://api.mistral.ai/v1", model: "mistral-small-latest"),
+    Preset(name: "Grok · xAI", base: "https://api.x.ai/v1", model: "grok-4.3"),
+    Preset(name: "OpenRouter（一个 Key 用几百个模型）", base: "https://openrouter.ai/api/v1", model: "openrouter/auto"),
+    // 海外节点（同一家的国际站，Key 和国内站不通用）
+    Preset(name: "通义千问 · 国际站（新加坡）", base: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", model: "qwen3.8-flash"),
+    Preset(name: "智谱 Z.ai · 国际站", base: "https://api.z.ai/api/paas/v4", model: "glm-5.3-flash"),
+    Preset(name: "Kimi · 国际站", base: "https://api.moonshot.ai/v1", model: "kimi-k3.1-pro"),
+    Preset(name: "MiniMax · 国际站", base: "https://api.minimax.io/v1", model: "MiniMax-M3.1-Flash"),
     Preset(name: "自定义（OpenAI 兼容）", base: "", model: "")
 ]
+
+/// The preset whose address the user is on (presets are matched by address, so adding presets never
+/// changes what someone picked). Unknown address → 自定义.
+func presetIndex(forBase b: String) -> Int {
+    let t = b.trimmingCharacters(in: CharacterSet(charactersIn: " /"))
+    if let i = kPresets.firstIndex(where: { !$0.base.isEmpty && $0.base == t }) { return i }
+    return kPresets.count - 1
+}
 
 struct HotKeyOption { let title: String; let code: UInt32; let mods: UInt32 }
 let kHotKeys: [HotKeyOption] = [
@@ -220,12 +248,22 @@ final class LLM {
     }
 
     func stream(_ history: [[String: Any]], context: String? = nil, attempt: Int = 0,
+                hosted: (URL, [String: String])? = nil,
                 onDelta: @escaping (String) -> Void,
                 onDone: @escaping (String?, String?) -> Void) {
         cancel()
         var base = Prefs.base.trimmingCharacters(in: .whitespacesAndNewlines)
         while base.hasSuffix("/") { base.removeLast() }
-        guard !base.isEmpty, let url = URL(string: base + "/chat/completions") else {
+        // OrdCat 托管: get the proxy address and a fresh login token first.
+        if base == Account.hostedBase && hosted == nil {
+            Account.shared.hostedEndpoint { [weak self] url, headers, err in
+                guard let u = url else { onDone(nil, err ?? "OrdCat 托管模型暂时用不了"); return }
+                self?.stream(history, context: context, attempt: attempt, hosted: (u, headers), onDelta: onDelta, onDone: onDone)
+            }
+            return
+        }
+        let target = hosted?.0 ?? URL(string: base + "/chat/completions")
+        guard !base.isEmpty, let url = target else {
             onDone(nil, "还没设置模型哦～右键点我 → 设置，就能和我聊天啦。")
             return
         }
@@ -234,7 +272,8 @@ final class LLM {
         req.timeoutInterval = 120
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let key = Keychain.get()
-        if !key.isEmpty { req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        if !key.isEmpty && hosted == nil { req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        for (k, v) in hosted?.1 ?? [:] { req.setValue(v, forHTTPHeaderField: k) }
         var system = RemoteConfig.shared.systemPrompt ?? kSystemPrompt
         if let c = context, !c.isEmpty { system += "\n\n" + c }
         if L10n.english { system += "\n\nThe user's interface language is English: reply in English unless they write to you in another language or ask otherwise." }
@@ -242,6 +281,11 @@ final class LLM {
         var body: [String: Any] = ["model": Prefs.model, "messages": messages, "stream": true, "max_tokens": 1500]
         // Reasoning models (e.g. gpt-oss on Groq) would otherwise spend the budget thinking.
         if base.contains("groq.com") && Prefs.model.contains("gpt-oss") { body["reasoning_effort"] = "low" }
+        // Chatting with a cat needs no long thinking: switch it off (or low) where the provider allows,
+        // which keeps answers fast and cheap.
+        if base.contains("dashscope") { body["enable_thinking"] = false }
+        if base.contains("bigmodel.cn") || base.contains("z.ai") { body["thinking"] = ["type": "disabled"] }
+        if base.contains("generativelanguage.googleapis.com") { body["reasoning_effort"] = "low" }
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         task = Task {
@@ -253,6 +297,13 @@ final class LLM {
                     for try await line in bytes.lines {
                         errText += line
                         if errText.count > 600 { break }
+                    }
+                    // OrdCat 托管: the proxy explains itself (额度用完 / 太快 / 没登录).
+                    if hosted != nil {
+                        let o = (try? JSONSerialization.jsonObject(with: Data(errText.utf8))) as? [String: Any]
+                        let m = ((o?["error"] as? [String: Any])?["message"] as? String) ?? "OrdCat 托管模型返回了错误（\(h.statusCode)）"
+                        DispatchQueue.main.async { onDone(nil, m) }
+                        return
                     }
                     // Per-minute token quota (e.g. Groq free tier: "Limit 8000, Used 4412, Requested 3671").
                     // Wait the time the provider asks for and try again quietly, with a smaller context if needed.
@@ -701,6 +752,10 @@ final class SelectionWatcher {
     var onNeedsPermission: (() -> Void)?
     var isOwnPoint: ((NSPoint) -> Bool)?
     var ignoreChangeCount = -1
+    /// Where the last selection sits on screen (top-left global points), which app it is in, and when.
+    private(set) var lastRect: CGRect?
+    private(set) var lastPid: pid_t = 0
+    private var dragRect: CGRect?
     private var downPoint = NSPoint.zero
     private var monitor: Any?
     private var asked = false
@@ -724,6 +779,11 @@ final class SelectionWatcher {
         let shiftClick = e.modifierFlags.contains(.shift)
         guard dragged || e.clickCount >= 2 || shiftClick else { return }
         if isOwnPoint?(p) == true { return }
+        // The dragged area, in case the app can't tell us the selection's bounds.
+        let h = NSScreen.screens.first?.frame.height ?? 0
+        let a = CGPoint(x: downPoint.x, y: h - downPoint.y), b = CGPoint(x: p.x, y: h - p.y)
+        dragRect = dragged ? CGRect(x: min(a.x, b.x), y: min(a.y, b.y) - 10,
+                                    width: max(abs(a.x - b.x), 24), height: abs(a.y - b.y) + 20) : nil
         guard SelectionWatcher.trusted(prompt: false) else {
             if !asked { asked = true; onNeedsPermission?() }
             return
@@ -738,7 +798,9 @@ final class SelectionWatcher {
 
     private func grab(_ gen: Int, retry: Bool) {
         guard gen == generation else { return }   // a newer selection superseded this one
-        if let s = axSelectedText(), !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let (s, r) = axSelectedText(), !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lastRect = r ?? dragRect
+            lastPid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
             onSelect?(s)
             return
         }
@@ -753,6 +815,8 @@ final class SelectionWatcher {
         copyFallback { [weak self] s in
             guard let self = self, gen == self.generation,
                   let s = s, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            self.lastRect = self.dragRect
+            self.lastPid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
             self.onSelect?(s)
         }
     }
@@ -775,7 +839,7 @@ final class SelectionWatcher {
 
     private var enhanced = Set<pid_t>()
 
-    private func axSelectedText() -> String? {
+    private func axSelectedText() -> (String, CGRect?)? {
         // Chromium browsers only build the web-page tree for assistive clients: ask once per app.
         if let front = NSWorkspace.shared.frontmostApplication,
            ScreenReader.chromiumBrowsers.contains(front.bundleIdentifier ?? ""), !enhanced.contains(front.processIdentifier) {
@@ -790,19 +854,50 @@ final class SelectionWatcher {
         let el = f as! AXUIElement
         var sel: CFTypeRef?
         if AXUIElementCopyAttributeValue(el, kAXSelectedTextAttribute as CFString, &sel) == .success,
-           let s = sel as? String, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return s }
+           let s = sel as? String, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return (s, SelectionWatcher.rangeBounds(el) ?? SelectionWatcher.markerBounds(el))
+        }
         // Web pages (Chrome, Edge, Safari…): plain page text has no AXSelectedText, but the page keeps the
         // selection as a text-marker range. Try the focused node, then walk up to its web area.
         var node: AXUIElement? = el
         for _ in 0..<14 {
             guard let n = node else { break }
-            if let s = SelectionWatcher.markerSelection(n) { return s }
+            if let s = SelectionWatcher.markerSelection(n) { return (s, SelectionWatcher.markerBounds(n)) }
             var parent: CFTypeRef?
             guard AXUIElementCopyAttributeValue(n, kAXParentAttribute as CFString, &parent) == .success,
                   let p = parent, CFGetTypeID(p) == AXUIElementGetTypeID() else { break }
             node = (p as! AXUIElement)
         }
         return nil
+    }
+
+    private static func rectValue(_ v: CFTypeRef?) -> CGRect? {
+        guard let v = v, CFGetTypeID(v) == AXValueGetTypeID() else { return nil }
+        var r = CGRect.zero
+        guard AXValueGetValue(v as! AXValue, .cgRect, &r), r.width > 1, r.height > 1 else { return nil }
+        return r
+    }
+
+    /// Bounds of the selected range in a text field / text view (top-left global points).
+    private static func rangeBounds(_ el: AXUIElement) -> CGRect? {
+        var range: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &range) == .success,
+              let r = range else { return nil }
+        var b: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(el, kAXBoundsForRangeParameterizedAttribute as CFString, r, &b) == .success
+        else { return nil }
+        return rectValue(b)
+    }
+
+    /// Bounds of a web page's selection (text-marker range).
+    private static func markerBounds(_ el: AXUIElement) -> CGRect? {
+        var range: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, "AXSelectedTextMarkerRange" as CFString, &range) == .success,
+              let r = range else { return nil }
+        var b: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(el, "AXBoundsForTextMarkerRange" as CFString, r, &b) == .success
+        else { return nil }
+        return rectValue(b)
     }
 
     private static func markerSelection(_ el: AXUIElement) -> String? {
@@ -1342,7 +1437,7 @@ final class Bubble: NSObject {
         squareButton.toolTip = "打开猫帮圈"
         card.addSubview(squareButton)
 
-        signalButton = OCButton(title: "📶", target: self, action: #selector(doSignal))
+        signalButton = OCButton(title: L10n.english ? "📶 Signals" : "📶 信号站", target: self, action: #selector(doSignal))
         (signalButton as? OCButton)?.chip = true
         (signalButton as? OCButton)?.style = .secondary
         signalButton.toolTip = "打开信号站"
@@ -1688,7 +1783,7 @@ final class Bubble: NSObject {
         // Amber chips (OCButton.chip) with a small gap between them.
         let fitW: (NSButton, CGFloat) -> CGFloat = { b, maxW in min(maxW, ceil(b.intrinsicContentSize.width)) }
         let gap: CGFloat = 6
-        let ew = fitW(expandButton, 110), tw = fitW(topicsButton, 120), qw = fitW(squareButton, 90), sw = fitW(signalButton, 30)
+        let ew = fitW(expandButton, 110), tw = fitW(topicsButton, 120), qw = fitW(squareButton, 90), sw = fitW(signalButton, 96)
         expandButton.frame = NSRect(x: width - pad - ew, y: y - 2, width: ew, height: 20)
         expandButton.isHidden = !chatMode
         topicsButton.frame = NSRect(x: expandButton.frame.minX - gap - tw, y: y - 2, width: tw, height: 20)
@@ -2229,12 +2324,12 @@ final class SettingsController: NSObject, NSWindowDelegate {
         base.stringValue = Prefs.base
         model.stringValue = Prefs.model
         key.stringValue = Keychain.get()
-        preset.selectItem(at: min(Prefs.presetIndex, kPresets.count - 1))
-        visionPreset.selectItem(at: min(Prefs.visionPreset, kVisionPresets.count - 1))
+        preset.selectItem(at: presetIndex(forBase: Prefs.base))
+        visionPreset.selectItem(at: capPresetIndex(kVisionPresets, stored: Prefs.visionPreset, base: Prefs.visionBase))
         visionBase.stringValue = Prefs.visionBase
         visionModel.stringValue = Prefs.visionModel
         visionKey.stringValue = Keychain.get(service: Keychain.visionService)
-        sttPreset.selectItem(at: min(Prefs.sttPreset, kSTTPresets.count - 1))
+        sttPreset.selectItem(at: capPresetIndex(kSTTPresets, stored: Prefs.sttPreset, base: Prefs.sttBase))
         sttBase.stringValue = Prefs.sttBase
         sttModel.stringValue = Prefs.sttModel
         sttKey.stringValue = Keychain.get(service: Keychain.sttService)
@@ -3056,6 +3151,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var nudgedLong = false
     private var nudgedNight: String?
     private var lastPrompted = ""
+    /// The text the user last selected, where it is on screen and when (for ringing what the answer is about).
+    private var selectionMark: (rect: CGRect, pid: pid_t, text: String, at: Date)?
     private var voiceFromWindow = false
     private var bubbleGen = 0
 
@@ -4131,7 +4228,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func ask(_ text: String, images: [Data] = [], spoken: Bool = false, inBubble: Bool = true,
-                     pageOverride: String? = nil, extra: String? = nil, after: ((String) -> String?)? = nil) {
+                     pageOverride: String? = nil, extra: String? = nil, after: ((String) -> String?)? = nil,
+                     aboutSelection: Bool = false) {
         xGreetingLive = false
         CatLevel.shared.touch()
         // 信号站: "发信号：……" / "/信号" opens the review window (never shares by itself).
@@ -4208,6 +4306,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         let gen = bubbleGen
+        let pointish = ["重点", "关键", "在哪", "哪里", "哪儿", "标出", "圈", "指出", "找到", "highlight", "circle", "point"]
+            .contains { text.lowercased().contains($0) }
+        // The user's recent selection counts when they act on it, or ask to ring/point within 3 minutes of making it.
+        let selMark: (rect: CGRect, pid: pid_t, text: String, at: Date)? = {
+            guard let m = selectionMark, Date().timeIntervalSince(m.at) < 180 else { return nil }
+            return (aboutSelection || pointish || text.contains(String(m.text.prefix(12)))) ? m : nil
+        }()
         Task { @MainActor in
             var context: String?
             // Pictures the user attached: a text-only chat model gets the vision model's description instead.
@@ -4265,6 +4370,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             var liveRinged = 0
             let ringLive = (usePerception || sharePage) && Prefs.highlight
             if ringLive { self.highlighter.clear() }
+            // The text the user just selected: ring it right away, so they see what the cat is looking at.
+            if let m = selMark, Prefs.highlight { self.highlighter.add(m.rect, number: 0, seconds: 20) }
             self.llm.stream(history, context: context, onDelta: { [weak self] t in
                 guard let self = self else { return }
                 // Ring each place the moment the answer points at it (positions from the capture just taken);
@@ -4291,17 +4398,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard err == nil else { return }
                 self.hub.recordChat(user: text, reply: final)
                 self.autoTitle(user: text, reply: final)
-                if (usePerception || sharePage) && Prefs.highlight {
+                if (usePerception || sharePage || selMark != nil) && Prefs.highlight {
                     // Rings go exactly on the lines the answer talks about: tagged lines first, otherwise the
-                    // on-screen line each point matches. Positions are re-read right before drawing.
-                    var targets = self.hub.taggedTargets(in: raw)
-                    let pointish = ["重点", "关键", "在哪", "哪里", "哪儿", "标", "圈", "指", "找"].contains { text.contains($0) }
-                    if targets.isEmpty && pointish { targets = self.hub.fallbackTargets(for: final) }
-                    let points = self.hub.pointTargets(in: raw)
+                    // on-screen line each point matches, otherwise the lines inside the user's selection.
+                    // Positions are re-read right before drawing.
+                    let pageRead = usePerception || sharePage
+                    var targets = pageRead ? self.hub.taggedTargets(in: raw) : []
+                    if targets.isEmpty && pointish && pageRead { targets = self.hub.fallbackTargets(for: final) }
+                    let points = pageRead ? self.hub.pointTargets(in: raw) : []
                     Task { @MainActor in
-                        let marks = await self.hub.relocate(targets) + points
-                        if !marks.isEmpty { self.highlighter.show(marks: marks.sorted { $0.1 < $1.1 }, seconds: 12) }
+                        var marks = await self.hub.relocate(targets) + points
+                        if marks.isEmpty, let m = selMark {
+                            marks = await self.hub.selectionMarks(rect: m.rect, pid: m.pid, reply: final, wantLines: pointish)
+                        }
+                        if !marks.isEmpty { self.highlighter.show(marks: marks.sorted { $0.1 < $1.1 }, seconds: 15) }
                         else if liveRinged > 0 { self.highlighter.clear() }   // everything scrolled away
+                        if marks.isEmpty && pointish && inBubble && self.bubble.isShown && gen == self.bubbleGen {
+                            self.bubble.setText(final + "\n\n" + L10n.t("（这次没在屏幕上找到能圈出来的位置。先选中那段文字，或打开「分享页面」再问我。）"))
+                        }
                     }
                 }
                 var said = final
@@ -4386,6 +4500,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         selection.onSelect = { [weak self] s in
             guard let self = self else { return }
             if Prefs.perception { self.hub.recordSelection(s) }
+            if let r = self.selection.lastRect {
+                self.selectionMark = (r, self.selection.lastPid, s, Date())
+            } else { self.selectionMark = nil }
             self.offerHelp(with: s, verb: "选中")
         }
         selection.onNeedsPermission = { [weak self] in
@@ -4408,10 +4525,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let preview = s.count > 36 ? String(s.prefix(36)) + "…" : s
         let acts: [(String, () -> Void)] = [
             ("帮我看看 🐾", { [weak self] in
-                self?.ask("请帮我看看下面这段内容：如果是报错或代码，告诉我问题和改法；如果是普通文字，用一两句话解释或接个话。\n\n\(s)")
+                self?.ask("请帮我看看下面这段内容：如果是报错或代码，告诉我问题和改法；如果是普通文字，用一两句话解释或接个话。\n\n\(s)", aboutSelection: true)
             }),
             (L10n.english ? "Translate" : "翻译", { [weak self] in
-                self?.ask("把下面的内容翻译成中文（如果原文已经是中文，就翻译成英文），只给译文：\n\n\(s)")
+                self?.ask("把下面的内容翻译成中文（如果原文已经是中文，就翻译成英文），只给译文：\n\n\(s)", aboutSelection: true)
             }),
             ("问这段", { [weak self] in self?.bubble.prefill("关于「\(preview)」：") })
         ]

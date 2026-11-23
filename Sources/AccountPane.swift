@@ -32,6 +32,9 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
     private let logoutBtn = OCButton(title: "退出登录", target: nil, action: nil)
     private let loginStatus = SK.WrapLabel()
     private let subLines = SK.WrapLabel()
+    private let memberLine = SK.WrapLabel()
+    private let memberStatus = SK.WrapLabel()
+    private let billingCycle = NSSegmentedControl(labels: ["月付", "年付（约 8 折）"], trackingMode: .selectOne, target: nil, action: nil)
     private let dataStatus = SK.WrapLabel()
     private var loginFold: SK.Fold?
     var onOpenSkills: (() -> Void)?
@@ -124,6 +127,19 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
         passwordBtn.target = self; passwordBtn.action = #selector(changePassword)
         p.add(SK.buttons([passwordBtn]))
         p.add(loginStatus)
+
+        // 会员: 托管模型额度（不用自己的 Key）
+        p.header("会员")
+        memberLine.font = .systemFont(ofSize: 12.5)
+        memberLine.textColor = .labelColor
+        billingCycle.selectedSegment = 0
+        let gm = SK.Group()
+        gm.add(SK.info(memberLine))
+        gm.add(SK.row("付款方式", billingCycle, fill: false))
+        p.add(gm)
+        p.add(SK.buttons([button("开通会员", #selector(buyMember)), button("开通会员 Pro", #selector(buyPro)),
+                          button("加油包", #selector(buyTopup)), button("管理会员", #selector(manageMember))]))
+        p.add(memberStatus)
 
         // 订阅与付款
         p.header("订阅与付款")
@@ -245,6 +261,93 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
             lines.append("• \(name)：\(Billing.statusLine(id))")
         }
         subLines.stringValue = lines.joined(separator: "\n")
+        refreshMember()
+    }
+
+    // MARK: 会员
+
+    private static let plans: [String: (zh: String, en: String)] = [
+        "member": ("会员 ¥30/月（年付 ¥298）· 每月 2000 条", "Member €3.99/mo (€39/yr) · 2,000 messages a month"),
+        "pro": ("会员 Pro ¥68/月（年付 ¥648）· 每月 6000 条，可选高级模型", "Member Pro €8.99/mo (€89/yr) · 6,000 messages a month, premium models"),
+    ]
+
+    private func refreshMember() {
+        let base = L10n.english
+            ? "Free: bring your own model key and everything works. Members get OrdCat's hosted models with no key: pick 「OrdCat 托管」 in Settings → Model."
+            : "免费版：填自己的模型 Key，所有功能都能用。会员不用 Key，直接用 OrdCat 托管模型（设置 → 模型 选「OrdCat 托管」）。"
+        let offer = L10n.english ? "\n• \(AccountPane.plans["member"]!.en)\n• \(AccountPane.plans["pro"]!.en)\n• Top-up: 1,200 messages, never expire"
+                                 : "\n• \(AccountPane.plans["member"]!.zh)\n• \(AccountPane.plans["pro"]!.zh)\n• 加油包：1200 条，不过期"
+        guard acc.signedIn else { memberLine.stringValue = base + offer; return }
+        acc.credits { [weak self] o, err in
+            guard let self = self else { return }
+            guard let o = o else { self.memberLine.stringValue = base + offer; return }
+            let plan = o["plan"] as? String ?? "free"
+            let left = o["monthly_left"] as? Int ?? 0, total = o["monthly_total"] as? Int ?? 0
+            let bonus = o["bonus"] as? Int ?? 0
+            let today = o["today_used"] as? Int ?? 0, cap = o["daily_cap"] as? Int ?? 0
+            var reset = ""
+            if let e = o["period_end"] as? String {
+                let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                if let d = f.date(from: e) ?? ISO8601DateFormatter().date(from: e) {
+                    let df = DateFormatter(); df.dateFormat = L10n.english ? "MMM d" : "M月d日"
+                    reset = df.string(from: d)
+                }
+            }
+            var line: String
+            switch plan {
+            case "member", "pro":
+                let name = plan == "pro" ? (L10n.english ? "Member Pro" : "会员 Pro") : (L10n.english ? "Member" : "会员")
+                line = L10n.english
+                    ? "✨ \(name) · \(left) of \(total) left this month (resets \(reset)) · top-up \(bonus) · today \(today)/\(cap)"
+                    : "✨ \(name) · 本月还剩 \(left) / \(total) 条（\(reset) 重置）· 加油包 \(bonus) 条 · 今天已用 \(today) / \(cap)"
+            default:
+                line = L10n.english ? "Free plan · hosted trial \(bonus) messages left" : "免费版 · 托管模型试用还剩 \(bonus) 条"
+                line += offer
+            }
+            if err != nil { line = base + offer }
+            self.memberLine.stringValue = line
+        }
+    }
+
+    private func openStripe(item: String?, title: String, info: String, portal: Bool = false) {
+        guard acc.signedIn else { memberStatus.stringValue = L10n.t("先登录账号（设置 → 用户）"); return }
+        guard OCConfirm.ask(title, info, ok: L10n.english ? "Continue" : "去付款") else { return }
+        memberStatus.stringValue = L10n.english ? "Opening the payment page…" : "正在打开付款页面…"
+        acc.stripeLink(item: item, yearly: billingCycle.selectedSegment == 1, portal: portal) { [weak self] url, err in
+            guard let self = self else { return }
+            if let u = url {
+                NSWorkspace.shared.open(u)
+                self.memberStatus.stringValue = L10n.english ? "Finish paying in your browser, then come back here: your plan updates by itself."
+                                                             : "在浏览器里付完款回来就好，会员会自动生效（没变就点「刷新订阅」）。"
+            } else {
+                self.memberStatus.stringValue = "⚠️ " + (err ?? "")
+            }
+        }
+    }
+
+    @objc private func buyMember() {
+        let y = billingCycle.selectedSegment == 1
+        openStripe(item: "member", title: L10n.english ? "Become a member?" : "开通会员？",
+                   info: L10n.english ? (y ? "€39 a year" : "€3.99 a month") + ". 2,000 messages a month with OrdCat's hosted models, no key needed. Paid securely with Stripe; cancel anytime."
+                                      : (y ? "¥298/年" : "¥30/月") + "，每月 2000 条托管模型额度，不用自己的 Key。通过 Stripe 安全付款，随时可以取消。")
+    }
+
+    @objc private func buyPro() {
+        let y = billingCycle.selectedSegment == 1
+        openStripe(item: "pro", title: L10n.english ? "Get Member Pro?" : "开通会员 Pro？",
+                   info: L10n.english ? (y ? "€89 a year" : "€8.99 a month") + ". 6,000 messages a month and premium models. Paid securely with Stripe; cancel anytime."
+                                      : (y ? "¥648/年" : "¥68/月") + "，每月 6000 条额度，可选高级模型。通过 Stripe 安全付款，随时可以取消。")
+    }
+
+    @objc private func buyTopup() {
+        openStripe(item: "topup", title: L10n.english ? "Buy a top-up?" : "买一个加油包？",
+                   info: L10n.english ? "1,200 messages that never expire, used after your monthly credits." : "¥18 = 1200 条，不过期，月额度用完后自动接着用。")
+    }
+
+    @objc private func manageMember() {
+        openStripe(item: nil, title: L10n.english ? "Manage membership?" : "管理会员？",
+                   info: L10n.english ? "Opens Stripe's page to change plan, update your card, see invoices or cancel."
+                                      : "打开 Stripe 的管理页面：换方案、换卡、看发票或取消订阅。", portal: true)
     }
 
     @objc private func methodChanged() {

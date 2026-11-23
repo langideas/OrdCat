@@ -21,6 +21,8 @@ let kVisionPresets: [CapPreset] = [
     CapPreset(name: "OpenAI gpt-4o-mini", base: "https://api.openai.com/v1", model: "gpt-4o-mini"),
     CapPreset(name: "Gemini 2.0 Flash", base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.0-flash"),
     CapPreset(name: "Ollama 本地 qwen2.5vl（离线）", base: "http://localhost:11434/v1", model: "qwen2.5vl:7b"),
+    CapPreset(name: "通义千问 Qwen3.7-Plus 看图（百炼）", base: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen3.7-plus"),
+    CapPreset(name: "Mistral Small 看图（欧盟）", base: "https://api.mistral.ai/v1", model: "mistral-small-latest"),
     CapPreset(name: "自定义（OpenAI 兼容）", base: "", model: "")
 ]
 
@@ -31,6 +33,16 @@ let kSTTPresets: [CapPreset] = [
     CapPreset(name: "OpenAI gpt-4o-mini-transcribe", base: "https://api.openai.com/v1", model: "gpt-4o-mini-transcribe"),
     CapPreset(name: "自定义（OpenAI 兼容 /audio/transcriptions）", base: "", model: "")
 ]
+
+/// Which row of a 看图 / 听写 list to show: the stored row when its address still matches (or it is the
+/// first, built-in one), else the row with the same address, else 自定义 (last).
+func capPresetIndex(_ list: [CapPreset], stored: Int, base: String) -> Int {
+    if stored == 0 { return 0 }
+    let t = base.trimmingCharacters(in: CharacterSet(charactersIn: " /"))
+    if stored < list.count - 1, list[stored].base == t { return stored }
+    if let i = list.indices.dropFirst().first(where: { !list[$0].base.isEmpty && list[$0].base == t }) { return i }
+    return list.count - 1
+}
 
 extension Keychain {
     static let visionService = "app.ordcat.visionkey"
@@ -69,7 +81,7 @@ enum Cap {
     /// Chat models we know cannot read images.
     static var chatModelIsTextOnly: Bool {
         let m = Prefs.model.lowercased()
-        let textOnly = ["gpt-oss", "deepseek-chat", "deepseek-reasoner", "qwen2.5:", "qwen3:", "llama3", "llama-3", "kimi", "compound", "minimax"]
+        let textOnly = ["gpt-oss", "deepseek-chat", "deepseek-reasoner", "qwen2.5:", "qwen3:", "llama3", "llama-3", "kimi-k2", "moonshot-v1", "compound", "minimax-m1", "minimax-text", "abab", "glm-4.7-flash"]
         return textOnly.contains { m.contains($0) } && !m.contains("vl") && !m.contains("vision")
     }
 
@@ -80,6 +92,8 @@ enum Cap {
         guard Prefs.visionOn else { return nil }
         let chatBase = clean(Prefs.base)
         if Prefs.visionPreset == 0 {
+            // OrdCat 托管 sees pictures itself (they go along with the chat message).
+            if chatBase == Account.hostedBase { return Endpoint(base: chatBase, model: "ordcat", key: "") }
             if !chatModelIsTextOnly { return chatBase.isEmpty ? nil : Endpoint(base: chatBase, model: Prefs.model, key: Keychain.get()) }
             // Text-only chat model: borrow the same provider's vision model when we know one.
             if let p = kVisionPresets.dropFirst().first(where: { !$0.base.isEmpty && URL(string: $0.base)?.host == URL(string: chatBase)?.host }) {
