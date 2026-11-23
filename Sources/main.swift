@@ -1292,31 +1292,27 @@ final class Bubble: NSObject {
         title.textColor = kAmber
         card.addSubview(title)
 
-        expandButton = NSButton(title: "↗ 完整对话", target: self, action: #selector(doExpand))
-        expandButton.isBordered = false
-        expandButton.font = .systemFont(ofSize: 11)
-        expandButton.contentTintColor = .secondaryLabelColor
+        expandButton = OCButton(title: "↗ 完整对话", target: self, action: #selector(doExpand))
+        (expandButton as? OCButton)?.chip = true
+        (expandButton as? OCButton)?.style = .secondary
         expandButton.toolTip = "打开独立聊天窗口（聊天记录、发送图片和文件）"
         card.addSubview(expandButton)
 
-        topicsButton = NSButton(title: "🗂 之前的话题", target: self, action: #selector(doTopics))
-        topicsButton.isBordered = false
-        topicsButton.font = .systemFont(ofSize: 11)
-        topicsButton.contentTintColor = .secondaryLabelColor
+        topicsButton = OCButton(title: "🗂 之前的话题", target: self, action: #selector(doTopics))
+        (topicsButton as? OCButton)?.chip = true
+        (topicsButton as? OCButton)?.style = .secondary
         topicsButton.toolTip = "默认只参考当前页面；想接着聊以前的内容，在这里选"
         card.addSubview(topicsButton)
 
-        squareButton = NSButton(title: "🐟 猫帮圈", target: self, action: #selector(doSquare))
-        squareButton.isBordered = false
-        squareButton.font = .systemFont(ofSize: 11)
-        squareButton.contentTintColor = .secondaryLabelColor
+        squareButton = OCButton(title: "🐟 猫帮圈", target: self, action: #selector(doSquare))
+        (squareButton as? OCButton)?.chip = true
+        (squareButton as? OCButton)?.style = .secondary
         squareButton.toolTip = "打开猫帮圈"
         card.addSubview(squareButton)
 
-        signalButton = NSButton(title: "📶", target: self, action: #selector(doSignal))
-        signalButton.isBordered = false
-        signalButton.font = .systemFont(ofSize: 11)
-        signalButton.contentTintColor = .secondaryLabelColor
+        signalButton = OCButton(title: "📶", target: self, action: #selector(doSignal))
+        (signalButton as? OCButton)?.chip = true
+        (signalButton as? OCButton)?.style = .secondary
         signalButton.toolTip = "打开信号站"
         card.addSubview(signalButton)
 
@@ -1630,17 +1626,19 @@ final class Bubble: NSObject {
         var y = h - pad - 16
         title.frame = NSRect(x: pad, y: y, width: 120, height: 16)
         // Header buttons hug their text (right to left) so 📶 and the level icons fit next to them.
-        let fitW: (NSButton, CGFloat) -> CGFloat = { b, maxW in min(maxW, ceil(b.intrinsicContentSize.width) + 6) }
-        let ew = fitW(expandButton, 92), tw = fitW(topicsButton, 90), qw = fitW(squareButton, 60)
-        expandButton.frame = NSRect(x: width - pad + 2 - ew, y: y - 2, width: ew, height: 20)
+        // Amber chips (OCButton.chip) with a small gap between them.
+        let fitW: (NSButton, CGFloat) -> CGFloat = { b, maxW in min(maxW, ceil(b.intrinsicContentSize.width)) }
+        let gap: CGFloat = 4
+        let ew = fitW(expandButton, 110), tw = fitW(topicsButton, 120), qw = fitW(squareButton, 90), sw = fitW(signalButton, 30)
+        expandButton.frame = NSRect(x: width - pad - ew, y: y - 2, width: ew, height: 20)
         expandButton.isHidden = !chatMode
-        topicsButton.frame = NSRect(x: expandButton.frame.minX - tw, y: y - 2, width: tw, height: 20)
+        topicsButton.frame = NSRect(x: expandButton.frame.minX - gap - tw, y: y - 2, width: tw, height: 20)
         topicsButton.isHidden = !chatMode
         // Read-aloud controls sit right after the "OrdCat" title.
         let speaking = speakState != 0
-        squareButton.frame = NSRect(x: topicsButton.frame.minX - qw, y: y - 2, width: qw, height: 20)
+        squareButton.frame = NSRect(x: topicsButton.frame.minX - gap - qw, y: y - 2, width: qw, height: 20)
         squareButton.isHidden = !chatMode || speaking
-        signalButton.frame = NSRect(x: squareButton.frame.minX - 24, y: y - 2, width: 24, height: 20)
+        signalButton.frame = NSRect(x: squareButton.frame.minX - gap - sw, y: y - 2, width: sw, height: 20)
         signalButton.isHidden = !chatMode || speaking
         layoutLevel(titleY: y, speaking: speaking)
         speakPause.isHidden = !speaking

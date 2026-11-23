@@ -17,6 +17,14 @@ final class OCButton: NSButton {
         set { forcedStyle = newValue }
     }
     private var small = false
+    /// Compact pill for tight spots (chat bubble header): 20pt tall, 11pt text, small padding.
+    var chip = false {
+        didSet {
+            layer?.cornerRadius = chip ? 6 : 8
+            font = .systemFont(ofSize: chip ? 11 : (small ? 11 : 13), weight: .medium)
+            invalidateIntrinsicContentSize(); refresh()
+        }
+    }
     /// The title as the code set it (before the English swizzle translates it), for picking the style.
     private var rawTitle: String?
     private var hovering = false
@@ -44,7 +52,7 @@ final class OCButton: NSButton {
     override var controlSize: NSControl.ControlSize {
         didSet {
             small = controlSize == .small || controlSize == .mini
-            font = .systemFont(ofSize: small ? 11 : 13, weight: .medium)
+            font = .systemFont(ofSize: (small || chip) ? 11 : 13, weight: .medium)
             invalidateIntrinsicContentSize(); refresh()
         }
     }
@@ -68,6 +76,7 @@ final class OCButton: NSButton {
 
     override var intrinsicContentSize: NSSize {
         let s = super.intrinsicContentSize
+        if chip { return NSSize(width: ceil(s.width + (title.count <= 1 ? 8 : 12)), height: 20) }
         let pad: CGFloat = (title.isEmpty && image != nil) ? 16 : (small ? 20 : 28)
         return NSSize(width: ceil(s.width + pad), height: small ? 24 : 30)
     }

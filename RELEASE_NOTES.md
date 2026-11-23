@@ -1,3 +1,11 @@
+# OrdCat v0.2.44
+
+- 聊天气泡顶部的「完整对话」「之前的话题」「猫帮圈」「📶」换成了琥珀色小按钮，和整个 app 的按钮风格统一。鼠标移上去会变亮，按下去有回弹动效。
+
+**English**
+
+- The buttons at the top of the chat bubble (Full chat, Earlier topics, Cat Circle, 📶) are now small amber buttons that match the rest of the app. They brighten on hover and spring back when pressed.
+
 # OrdCat v0.2.43
 
 - 「任务广场」改名「猫帮圈」：设置、菜单、聊天气泡按钮、窗口、提醒里都换成了新名字。聊天里说「/猫帮 ……」也能发任务，原来的「发任务：」「/任务」照样能用。
