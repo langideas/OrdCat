@@ -79,8 +79,8 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
     /// Pick the app and languages, check permissions, then listen.
     func begin() {
         guard !running else { bar?.show(); return }
-        guard Prefs.miaoOn, Billing.isUnlocked("miao") || !Billing.enabled else {
-            present?(L10n.t("先在 设置 → 技能 打开「喵传」再用哦。"))
+        guard Billing.isUnlocked("miao") else {
+            present?(L10n.t("「喵传」还没点亮，先在 设置 → 技能 订阅或免费试用。"))
             return
         }
         guard ScreenReader.screenRecordingAllowed() else {
@@ -177,6 +177,8 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
         }
         stream = s
         running = true
+        Prefs.miaoOn = true
+        NotificationCenter.default.post(name: SkillsPane.changed, object: nil)
         lines = []; queue = []; latestText = ""; committed = 0
         startedAt = Date()
         startRecognition()
@@ -236,6 +238,7 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
         if save { commitTail() }
         let snapshot = lines
         running = false
+        NotificationCenter.default.post(name: SkillsPane.changed, object: nil)
         tick?.invalidate(); tick = nil
         let s = stream; stream = nil
         Task { try? await s?.stopCapture() }
@@ -523,7 +526,7 @@ enum MiaoStyle {
 
 /// A floating subtitle bar at the bottom of the screen: original line small, translation large. Draggable.
 /// The header holds the language pickers and Aa (font size, weight, colour); the bar grows and shrinks with the font.
-final class MiaoBar: NSObject {
+final class MiaoBar: NSObject, NSPopoverDelegate {
     var onStop: (() -> Void)?
     var onSummary: (() -> Void)?
     var onLanguages: ((String, String) -> Void)?
@@ -614,6 +617,8 @@ final class MiaoBar: NSObject {
         }
         stylePop.behavior = .transient
         stylePop.appearance = NSAppearance(named: .vibrantDark)
+        stylePop.animates = false
+        stylePop.delegate = self
         applyStyle()
     }
 
@@ -703,10 +708,14 @@ final class MiaoBar: NSObject {
     }
 
     @objc private func sizeChanged(_ s: NSSlider) {
-        MiaoStyle.size = CGFloat(s.doubleValue.rounded())
+        let v = CGFloat(s.doubleValue.rounded())
+        guard v != MiaoStyle.size else { return }      // the slider fires many times per step
+        MiaoStyle.size = v
         sizeLabel?.stringValue = "\(Int(MiaoStyle.size))"
         applyStyle()
     }
+    /// The width waits until the Aa card closes, so the card and its slider don't move while dragging.
+    func popoverDidClose(_ notification: Notification) { layout() }
     @objc private func weightChanged(_ s: NSSegmentedControl) { MiaoStyle.weight = s.selectedSegment; applyStyle() }
     @objc private func colorChanged(_ b: NSButton) {
         MiaoStyle.color = b.tag
@@ -720,21 +729,35 @@ final class MiaoBar: NSObject {
     private func layout() {
         let fs = MiaoStyle.size
         let scr = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let w = min(scr.width - 40, max(760, round(fs * 42)))
+        let wantW = min(scr.width - 40, max(760, round(fs * 42)))
+        // While the Aa card is open only the height follows the font; the width catches up when it closes.
+        let w = (stylePop.isShown && panel.isVisible) ? panel.frame.width : wantW
         let trLine = ceil(trFont.ascender - trFont.descender + trFont.leading) + 2
         let origH = ceil(origSize * 1.35), prevH = ceil(prevSize * 1.35)
         let headH: CGFloat = 40
         let h = headH + prevH + 4 + origH + 8 + trLine * 2 + 12
 
-        // Keep the bottom edge and the centre where they are while resizing.
+        // Keep the top edge (where the header buttons are) and the centre still while resizing,
+        // and never push the bar off the bottom of the screen.
         let old = panel.frame
-        var f = NSRect(x: old.midX - w / 2, y: old.minY, width: w, height: h)
-        if panel.isVisible { f.origin.x = min(max(scr.minX + 8, f.origin.x), scr.maxX - w - 8) }
-        panel.setFrame(f, display: true)
-        card.frame = NSRect(x: 0, y: 0, width: w, height: h)
+        var f = NSRect(x: old.midX - w / 2, y: old.maxY - h, width: w, height: h)
+        if panel.isVisible {
+            f.origin.x = min(max(scr.minX + 8, f.origin.x), scr.maxX - w - 8)
+            f.origin.y = max(scr.minY + 8, f.origin.y)
+        } else {
+            f.origin.y = old.minY
+        }
+        let sameFrame = panel.isVisible && f.equalTo(old)
+
+        // Move everything in one go with no implicit animations, then show one frame: no flicker, no jumping.
         CATransaction.begin(); CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        if !sameFrame {
+            panel.disableScreenUpdatesUntilFlush()
+            panel.setFrame(f, display: false)
+        }
+        card.frame = NSRect(x: 0, y: 0, width: w, height: h)
         grad.frame = card.bounds
-        CATransaction.commit()
 
         let y0 = h - 28
         title.frame = NSRect(x: 16, y: y0, width: 70, height: 16)
@@ -755,6 +778,8 @@ final class MiaoBar: NSObject {
         y -= 4 + origH
         origLabel.frame = NSRect(x: 16, y: y, width: w - 32, height: origH)
         trLabel.frame = NSRect(x: 16, y: 12, width: w - 32, height: trLine * 2)
+        panel.contentView?.needsDisplay = true
+        panel.displayIfNeeded()
     }
 
     /// Set text without the English-mode auto-translation (these are the meeting's own words).

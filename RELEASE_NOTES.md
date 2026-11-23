@@ -1,3 +1,19 @@
+# OrdCat v0.2.55
+
+- 技能的「点亮」和「开启」分开了：点亮只表示你拥有这个技能（免费、已订阅或试用中），会发琥珀色光圈；开启中的技能右下角有绿点。
+- 弹窗左侧技能栏点一下就是开启或关闭；喵传点一下直接开始（只问听哪个应用），再点一下停止。还没点亮的技能点一下打开订阅。
+- 设置 → 技能 的卡片按钮改成开启/关闭开关；喵传是「开始喵传 / 停止喵传」按钮。
+- 喵传字幕条调字体大小时不再闪烁乱跳：顶边和按钮位置保持不动，宽度在关掉 Aa 卡片后再跟着调整。
+- 技能介绍卡片重新排版：统一宽度和边距，标题旁显示「已点亮」标签，点亮条件和开启状态分区显示，不再挤在一起。
+
+**English**
+
+- "Lit" and "on" are now separate: lit only means you own the skill (free, subscribed or on trial) and shows an amber glow; a skill that's on has a green dot.
+- In the bubble's skill bar, one click turns a skill on or off. MiaoChuan starts right away (it only asks which app to listen to) and stops on the next click. A skill that isn't lit opens the subscribe sheet.
+- In Settings → Skills the card's control is now an on/off switch; MiaoChuan has a Start / Stop button.
+- Resizing the MiaoChuan subtitle font no longer flickers or jumps: the top edge and buttons stay put, and the width catches up once the Aa card closes.
+- Skill cards have a cleaner layout: fixed width and margins, a "Lit" tag next to the name, and separate sections for how to light it up and whether it's on.
+
 # OrdCat v0.2.54
 
 - 喵传点「停止」会先问：保存记录并结束、不保存结束、或继续听。
