@@ -1,3 +1,15 @@
+# OrdCat v0.2.50
+
+- 新技能「喵传」🎧（设置 → 技能）：实时听 Mac 里的会议、视频会议和 X Spaces。屏幕下方的字幕条会显示原话和译文，点「刚才在说什么」可以总结最近几分钟。声音只在本机转成文字，字幕不保存。
+- 聊天气泡里的「之前的话题」改名为「对话记录」。
+- 点「重点+核实」后，答案不会再跳到「打开分享页面」的提示。
+
+**English**
+
+- New skill MiaoChuan 🎧 (Settings → Skills) listens to meetings, video calls and X Spaces on your Mac. A subtitle bar at the bottom of the screen shows the original words and a translation, and "What did they just say?" sums up the last few minutes. Speech is turned into text on your Mac, and subtitles aren't saved.
+- "Earlier topics" in the chat bubble is now "Chat history".
+- After "Key points + fact-check", the answer no longer jumps to the "turn on page sharing" note.
+
 # OrdCat v0.2.46
 
 - 选中文字后让小猫看、翻译或问这段时，屏幕上会先把你选中的那段圈出来；问「重点」时会圈到选中内容里对应的那几行。页面内容稍有变化（比如时间、点赞数）也能圈到原位置。实在找不到能圈的地方，会在回答下面直接告诉你。

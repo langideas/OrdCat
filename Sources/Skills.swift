@@ -208,6 +208,17 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
                   },
                   settings: { [weak self] in self?.agentSettings() ?? NSView() })
 
+,
+            Skill(id: "miao", emoji: "🎧", name: "喵传",
+                  summary: "实时听 Mac 里的会议、视频会议和 X Spaces，原话加翻译显示成字幕",
+                  paid: true,
+                  isOn: { Prefs.miaoOn },
+                  setOn: { on in
+                      Prefs.miaoOn = on
+                      if !on { MiaoChuan.shared.stop() }
+                  },
+                  settings: { [weak self] in self?.miaoSettings() ?? NSView() })
+
             // 以后的新技能加在这里。
         ]
     }
@@ -310,6 +321,23 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
         return v
     }
     @objc private func agentConfirmToggled(_ b: NSSwitch) { Prefs.agentConfirm = b.state == .on }
+
+    private func miaoSettings() -> NSView {
+        let v = column()
+        put(SK.buttons([SK.button("🎧 开始喵传", self, #selector(miaoStart))]), in: v, gap: 14)
+        let info = SK.WrapLabel("""
+        怎么用：先打开会议、视频会议或 X Spaces，再点「开始喵传」（菜单栏的小猫菜单里也有）。选好要听的应用和语言，屏幕下方会出现字幕条：上面一行是原话，下面一行是译文。
+
+        • 点「刚才在说什么」，小猫总结最近几分钟
+        • 声音只在本机转成文字，翻译只把文字发给你设置的模型
+        • 字幕不保存，点「停止」就清掉
+        • 需要「屏幕录制」和「语音识别」权限
+        • 多人抢话、口音重的时候可能识别错
+        """, size: 12)
+        put(info, in: v)
+        return v
+    }
+    @objc private func miaoStart() { MiaoChuan.shared.begin() }
 
     @objc private func xAlertToggled(_ b: NSSwitch) {
         Prefs.setXAlert(b.identifier?.rawValue ?? "", b.state == .on)

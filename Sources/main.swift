@@ -3284,10 +3284,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.store.updateLast(log)
             self.store.save()
         }
+        MiaoChuan.shared.present = { [weak self] text in self?.bubble.notify(text, hold: 45) }
         settings.skillsPane.onChanged = { [weak self] id, on in
             guard let self = self else { return }
             if id == "agent" {
                 self.bubble.notify(on ? "「帮我操作电脑」开啦 🤖 跟我说「帮我……」试试，每一步我都会先问你。" : "「帮我操作电脑」关掉啦。", hold: 5)
+                return
+            }
+            if id == "miao" {
+                self.bubble.notify(on ? "「喵传」开啦 🎧 打开会议或 X Spaces，在菜单栏小猫菜单点「喵传」开始。" : "「喵传」关掉啦。", hold: 6)
                 return
             }
             if id == "square" {
@@ -3431,6 +3436,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(withTitle: "查看当前上下文", action: #selector(previewContextMenu), keyEquivalent: "").target = self
         m.addItem(withTitle: "🐟 猫帮圈", action: #selector(menuSquare), keyEquivalent: "").target = self
         m.addItem(withTitle: "📶 信号站", action: #selector(menuSignal), keyEquivalent: "").target = self
+        m.addItem(withTitle: "🎧 喵传（开始 / 停止）", action: #selector(menuMiao), keyEquivalent: "").target = self
         m.addItem(withTitle: "💬 私信", action: #selector(menuDM), keyEquivalent: "").target = self
         m.addItem(withTitle: "🎁 邀请好友", action: #selector(menuInvite), keyEquivalent: "").target = self
         m.addItem(withTitle: "🛟 联系客服", action: #selector(menuSupport), keyEquivalent: "").target = self
@@ -3451,6 +3457,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openSettings() { settings.show() }
     @objc private func menuSquare() { TaskSquare.shared.showWindow() }
     @objc private func menuSignal() { SignalStation.shared.showWindow() }
+    @objc private func menuMiao() { MiaoChuan.shared.toggle() }
     @objc private func menuDM() { DMWindow.shared.show() }
     @objc private func menuInvite() { InviteWindow.shared.show() }
     @objc private func menuSupport() { Social.openSupport() }
