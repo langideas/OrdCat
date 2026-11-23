@@ -122,8 +122,8 @@ final class TaskSquare: NSObject {
         var parts = ["聊天模型 \(Prefs.model)"]
         parts.append(c.contains("vision") ? "能看图" : "不能看图")
         var skills: [String] = []
-        if Prefs.xMode { skills.append("陪你刷推") }
-        if Prefs.agentOn { skills.append("帮我操作电脑") }
+        if Prefs.xMode { skills.append("喵推") }
+        if Prefs.agentOn { skills.append("喵手") }
         if !skills.isEmpty { parts.append("技能：" + skills.joined(separator: "、")) }
         return parts.joined(separator: " · ")
     }
@@ -165,6 +165,7 @@ final class TaskSquare: NSObject {
             seen.append(contentsOf: fresh.map { "n:" + $0.id })
             Prefs.squareSeen = seen
             let more = fresh.count > 1 ? "等 \(fresh.count) 个新任务" : ""
+            NotifCenter.shared.add("🐟 猫帮圈上有「\(first.title)」\(more)（\(first.kind) · \(first.reward) 条小鱼干）", open: "square")
             self.present?("🐟 猫帮圈上有「\(first.title)」\(more)（\(first.kind) · \(first.reward) 条小鱼干），要我接吗？",
                           [("接这个", { [weak self] in self?.take(first) }),
                            ("看看猫帮圈", { [weak self] in self?.showWindow() }),
@@ -233,6 +234,7 @@ final class TaskSquare: NSObject {
             for t in ts where t.status == "answered" && !seen.contains("a:" + t.id) {
                 seen.append("a:" + t.id)
                 Prefs.squareSeen = seen
+                NotifCenter.shared.add("📬 你发到猫帮圈的「\(t.title)」有小猫回答啦", open: "square.mine")
                 self.present?("📬 你发到猫帮圈的「\(t.title)」有小猫回答啦，去看看？",
                               [("看回答", { [weak self] in self?.showAnswer(t) })], 20)
                 return
@@ -242,6 +244,7 @@ final class TaskSquare: NSObject {
                     seen.append("d:" + t.id)
                     Prefs.squareSeen = seen
                     self?.refreshBalance()
+                    NotifCenter.shared.add("🎉 「\(t.title)」的回答被采纳了，收到 \(t.reward) 条小鱼干 🐟", open: "square")
                     self?.present?("🎉 「\(t.title)」的回答被采纳了，收到 \(t.reward) 条小鱼干 🐟", [], 8)
                     return
                 }

@@ -1,3 +1,17 @@
+# OrdCat v0.2.51
+
+- 技能页换成技能栏：每个技能有自己的图标，点亮的技能会发出琥珀色光圈。点一个技能会弹出它的介绍和点亮条件，开关也在里面。
+- 技能改名：「陪你刷推」改叫「喵推」，「帮我操作电脑」改叫「喵手」，介绍也重新写了。
+- 设置窗口右上角新增 🔔：私信和提醒（新信号、猫帮圈任务和回答、新版本）都在这里看。用户资料卡上的「私信」按钮去掉了，菜单栏的「私信」改成「🔔 通知」。
+- 设置密码时会显示密码要求（8 到 72 位，区分大小写），并实时检查长度和两次输入是否一致，不符合时不能保存。
+
+**English**
+
+- The Skills page is now a skill bar: each skill has its own icon, and lit skills glow amber. Click a skill to see what it does and how to light it up; its switch is there too.
+- Skills renamed: "X Buddy" is now MiaoFeed and "Operate my Mac" is now MiaoHands, with rewritten descriptions.
+- A new 🔔 at the top right of Settings collects private messages and reminders (new signals, Cat Circle tasks and answers, new versions). The "Message" button on your profile card is gone, and "Messages" in the menu bar is now "🔔 Notifications".
+- Setting a password now shows the rules (8–72 characters, case-sensitive) and checks the length and that both entries match as you type. Save stays off until they do.
+
 # OrdCat v0.2.50
 
 - 新技能「喵传」🎧（设置 → 技能）：实时听 Mac 里的会议、视频会议和 X Spaces。屏幕下方的字幕条会显示原话和译文，点「刚才在说什么」可以总结最近几分钟。声音只在本机转成文字，字幕不保存。

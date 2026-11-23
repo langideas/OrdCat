@@ -23,16 +23,138 @@ struct Skill {
 /// Top-down layout (y grows downward), so rows stack naturally.
 final class FlipView: NSView { override var isFlipped: Bool { true } }
 
-/// A clickable row in the skills list: emoji + name + one-line summary + badge + switch.
-private final class SkillRow: NSView {
-    var onSelect: (() -> Void)?
+// MARK: - 技能栏 (v0.2.51)
+
+/// Each skill's own icon, drawn in the same amber style as the rank icons (64×64 box).
+enum SkillIcon {
+    static func image(_ id: String, size: CGFloat, color: NSColor) -> NSImage {
+        NSImage(size: NSSize(width: size, height: size), flipped: true) { _ in
+            let k = size / 64
+            func p(_ x: CGFloat, _ y: CGFloat) -> NSPoint { NSPoint(x: x * k, y: y * k) }
+            func capsule(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) {
+                let r = min(w, h) / 2 * k
+                NSBezierPath(roundedRect: NSRect(x: x * k, y: y * k, width: w * k, height: h * k), xRadius: r, yRadius: r).fill()
+            }
+            color.setFill(); color.setStroke()
+            switch id {
+            case "x":      // 喵推: a speech bubble with cat ears and two pupils
+                let b = NSBezierPath()
+                b.move(to: p(14, 22)); b.line(to: p(17, 8)); b.line(to: p(26, 18))
+                b.line(to: p(38, 18)); b.line(to: p(47, 8)); b.line(to: p(50, 22))
+                b.curve(to: p(54, 32), controlPoint1: p(53, 25), controlPoint2: p(54, 28))
+                b.line(to: p(54, 40))
+                b.curve(to: p(44, 50), controlPoint1: p(54, 46), controlPoint2: p(50, 50))
+                b.line(to: p(30, 50)); b.line(to: p(20, 58)); b.line(to: p(22, 50))
+                b.curve(to: p(10, 40), controlPoint1: p(14, 50), controlPoint2: p(10, 46))
+                b.line(to: p(10, 32))
+                b.curve(to: p(14, 22), controlPoint1: p(10, 28), controlPoint2: p(11, 25))
+                b.close()
+                b.lineWidth = 3.2 * k; b.lineJoinStyle = .round
+                b.stroke()
+                capsule(23, 27, 6, 15); capsule(35, 27, 6, 15)
+            case "agent":  // 喵手: a paw
+                let pad = NSBezierPath()
+                pad.move(to: p(32, 33))
+                pad.curve(to: p(48, 50), controlPoint1: p(41, 33), controlPoint2: p(50, 42))
+                pad.curve(to: p(32, 55), controlPoint1: p(46, 56), controlPoint2: p(38, 55))
+                pad.curve(to: p(16, 50), controlPoint1: p(26, 55), controlPoint2: p(18, 56))
+                pad.curve(to: p(32, 33), controlPoint1: p(14, 42), controlPoint2: p(23, 33))
+                pad.close(); pad.fill()
+                capsule(9, 22, 9, 13); capsule(19.5, 10, 9, 14); capsule(35.5, 10, 9, 14); capsule(46, 22, 9, 13)
+            default:       // 喵传: a cat pupil with sound waves on both sides
+                capsule(27, 14, 10, 36)
+                for r in [13.0, 22.0] as [CGFloat] {
+                    for side in [-1.0, 1.0] as [CGFloat] {
+                        let arc = NSBezierPath()
+                        let start: CGFloat = side < 0 ? 140 : -40, end: CGFloat = side < 0 ? 220 : 40
+                        arc.appendArc(withCenter: p(32, 32), radius: r * k + 6 * k, startAngle: start, endAngle: end)
+                        arc.lineWidth = 3 * k; arc.lineCapStyle = .round
+                        arc.stroke()
+                    }
+                }
+            }
+            return true
+        }
+    }
+}
+
+/// One skill in the bar: round icon, glow ring when lit, lock when it still needs something, name below.
+private final class SkillTile: NSView {
+    var onClick: ((SkillTile) -> Void)?
     var selected = false { didSet { needsDisplay = true } }
+    private let disc = NSView()
+    private let icon = NSImageView()
+    private let lock = NSTextField(labelWithString: "🔒")
+    private let label = NSTextField(labelWithString: "")
+    private let id: String
+
+    init(skill: Skill) {
+        id = skill.id
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        disc.wantsLayer = true
+        disc.layer?.cornerRadius = 30
+        disc.layer?.borderWidth = 2
+        disc.translatesAutoresizingMaskIntoConstraints = false
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        lock.font = .systemFont(ofSize: 12)
+        lock.translatesAutoresizingMaskIntoConstraints = false
+        label.stringValue = skill.name
+        label.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(disc); disc.addSubview(icon); addSubview(lock); addSubview(label)
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 96),
+            heightAnchor.constraint(equalToConstant: 108),
+            disc.widthAnchor.constraint(equalToConstant: 60), disc.heightAnchor.constraint(equalToConstant: 60),
+            disc.centerXAnchor.constraint(equalTo: centerXAnchor),
+            disc.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            icon.widthAnchor.constraint(equalToConstant: 34), icon.heightAnchor.constraint(equalToConstant: 34),
+            icon.centerXAnchor.constraint(equalTo: disc.centerXAnchor), icon.centerYAnchor.constraint(equalTo: disc.centerYAnchor),
+            lock.trailingAnchor.constraint(equalTo: disc.trailingAnchor, constant: 4),
+            lock.bottomAnchor.constraint(equalTo: disc.bottomAnchor, constant: 2),
+            label.topAnchor.constraint(equalTo: disc.bottomAnchor, constant: 8),
+            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+            label.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor)])
+        toolTip = L10n.t(skill.summary)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// lit = switched on and usable; locked = still needs a subscription.
+    func show(lit: Bool, locked: Bool) {
+        let c = lit ? kAmber : NSColor.secondaryLabelColor.withAlphaComponent(0.55)
+        icon.image = SkillIcon.image(id, size: 34, color: c)
+        disc.layer?.backgroundColor = (lit ? kAmber.withAlphaComponent(0.12) : NSColor.white.withAlphaComponent(0.05)).cgColor
+        disc.layer?.borderColor = (lit ? kAmber : NSColor.white.withAlphaComponent(0.12)).cgColor
+        label.textColor = lit ? .labelColor : .secondaryLabelColor
+        lock.isHidden = !locked
+        disc.layer?.removeAnimation(forKey: "glow")
+        if lit {
+            disc.layer?.masksToBounds = false
+            disc.layer?.shadowColor = kAmber.cgColor
+            disc.layer?.shadowOffset = .zero
+            disc.layer?.shadowRadius = 10
+            disc.layer?.shadowOpacity = 0.75
+            let g = CABasicAnimation(keyPath: "shadowOpacity")
+            g.fromValue = 0.35; g.toValue = 0.9; g.duration = 1.8
+            g.autoreverses = true; g.repeatCount = .infinity
+            g.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            disc.layer?.add(g, forKey: "glow")
+        } else {
+            disc.layer?.shadowOpacity = 0
+        }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard selected else { return }
         NSColor.controlAccentColor.withAlphaComponent(0.14).setFill()
-        NSBezierPath(roundedRect: bounds.insetBy(dx: 4, dy: 2), xRadius: 8, yRadius: 8).fill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 12, yRadius: 12).fill()
     }
-    override func mouseDown(with event: NSEvent) { onSelect?() }
+    override func mouseDown(with event: NSEvent) { onClick?(self) }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 }
 
 final class SkillsPane: NSObject, NSTextFieldDelegate {
@@ -41,9 +163,12 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
     var onChanged: ((String, Bool) -> Void)?
 
     private var skills: [Skill] = []
-    private var rows: [SkillRow] = []
+    private var tiles: [SkillTile] = []
     private var switches: [String: NSSwitch] = [:]
     private var badges: [String: NSButton] = [:]
+    private var conditionLabels: [String: NSTextField] = [:]
+    private var statusLabels: [String: NSTextField] = [:]
+    private let popover = NSPopover()
     private var selected = 0
     private let detailHost = NSStackView()
     private let detailTitle = NSTextField(labelWithString: "")
@@ -59,69 +184,37 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
     func build(xbuddy: XCompanion?, into page: SK.Page) {
         self.xbuddy = xbuddy
         skills = makeSkills()
-        page.hint("基础功能免费，技能按订阅开启。打开开关就生效，点一行看它的设置。")
+        page.hint("点亮的技能会发光。点一个技能，看它的介绍和点亮条件。")
         page.space(14)
 
-        // Every skill is one full row; the list grows with the skills (the page scrolls, not the list).
-        let list = SK.Group()
+        // 技能栏: one tile per skill, left to right; the settings of the selected skill show below.
+        let bar = NSStackView()
+        bar.orientation = .horizontal
+        bar.spacing = 10
+        bar.alignment = .top
         for (i, sk) in skills.enumerated() {
-            let r = SkillRow()
-            r.translatesAutoresizingMaskIntoConstraints = false
-            let em = NSTextField(labelWithString: sk.emoji)
-            em.font = .systemFont(ofSize: 24)
-            em.translatesAutoresizingMaskIntoConstraints = false
-            let col = NSStackView()
-            col.orientation = .vertical
-            col.alignment = .leading
-            col.spacing = 2
-            col.translatesAutoresizingMaskIntoConstraints = false
-            let nm = SK.WrapLabel(sk.name, size: 13.5, secondary: false, weight: .semibold)
-            let sm = SK.WrapLabel(sk.summary, size: 11.5)
-            col.addArrangedSubview(nm); col.addArrangedSubview(sm)
-            nm.widthAnchor.constraint(equalTo: col.widthAnchor).isActive = true
-            sm.widthAnchor.constraint(equalTo: col.widthAnchor).isActive = true
-            let right = NSStackView()
-            right.orientation = .horizontal
-            right.spacing = 10
-            right.alignment = .centerY
-            right.translatesAutoresizingMaskIntoConstraints = false
-            if sk.paid {
-                let b = NSButton(title: "", target: self, action: #selector(subscribe(_:)))
-                b.bezelStyle = .inline
-                b.font = .systemFont(ofSize: 11, weight: .medium)
-                b.identifier = NSUserInterfaceItemIdentifier(sk.id)
-                b.toolTip = "订阅、试用或输入订阅码"
-                right.addArrangedSubview(b)
-                badges[sk.id] = b
+            let t = SkillTile(skill: sk)
+            t.onClick = { [weak self] tile in
+                self?.select(i)
+                self?.showCard(i, from: tile)
             }
-            let sw = NSSwitch()
-            sw.controlSize = .small
-            sw.state = sk.isOn() ? .on : .off
-            sw.identifier = NSUserInterfaceItemIdentifier(sk.id)
-            sw.target = self
-            sw.action = #selector(switched(_:))
-            right.addArrangedSubview(sw)
-            right.setContentHuggingPriority(.required, for: .horizontal)
-            right.setContentCompressionResistancePriority(.required, for: .horizontal)
-            switches[sk.id] = sw
-            r.addSubview(em); r.addSubview(col); r.addSubview(right)
-            NSLayoutConstraint.activate([
-                r.heightAnchor.constraint(greaterThanOrEqualToConstant: 58),
-                em.leadingAnchor.constraint(equalTo: r.leadingAnchor, constant: 14),
-                em.centerYAnchor.constraint(equalTo: r.centerYAnchor),
-                em.widthAnchor.constraint(equalToConstant: 32),
-                col.leadingAnchor.constraint(equalTo: em.trailingAnchor, constant: 8),
-                col.trailingAnchor.constraint(equalTo: right.leadingAnchor, constant: -12),
-                col.topAnchor.constraint(greaterThanOrEqualTo: r.topAnchor, constant: 10),
-                col.bottomAnchor.constraint(lessThanOrEqualTo: r.bottomAnchor, constant: -10),
-                col.centerYAnchor.constraint(equalTo: r.centerYAnchor),
-                right.trailingAnchor.constraint(equalTo: r.trailingAnchor, constant: -14),
-                right.centerYAnchor.constraint(equalTo: r.centerYAnchor)])
-            r.onSelect = { [weak self] in self?.select(i) }
-            list.add(r)
-            rows.append(r)
+            bar.addArrangedSubview(t)
+            tiles.append(t)
         }
-        page.add(list)
+        let barWrap = NSView()
+        barWrap.translatesAutoresizingMaskIntoConstraints = false
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        barWrap.addSubview(bar)
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: barWrap.leadingAnchor, constant: 8),
+            bar.topAnchor.constraint(equalTo: barWrap.topAnchor, constant: 6),
+            bar.bottomAnchor.constraint(equalTo: barWrap.bottomAnchor, constant: -6),
+            bar.trailingAnchor.constraint(lessThanOrEqualTo: barWrap.trailingAnchor, constant: -8)])
+        let group = SK.Group()
+        group.add(barWrap)
+        page.add(group)
+        popover.behavior = .transient
+        refresh()
 
         detailTitle.font = .systemFont(ofSize: 15, weight: .semibold)
         page.space(26)
@@ -135,8 +228,8 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
     private func select(_ i: Int) {
         guard i < skills.count else { return }
         selected = i
-        for (k, r) in rows.enumerated() { r.selected = k == i }
-        detailTitle.stringValue = "\(skills[i].emoji) \(skills[i].name) · 设置"
+        for (k, t) in tiles.enumerated() { t.selected = k == i }
+        detailTitle.stringValue = "\(skills[i].name) · 设置"
         for v in detailHost.arrangedSubviews { detailHost.removeArrangedSubview(v); v.removeFromSuperview() }
         let d = skills[i].settings()
         d.translatesAutoresizingMaskIntoConstraints = false
@@ -162,6 +255,85 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
         refresh()
     }
 
+    /// What it takes to light this skill up, in plain words.
+    private func condition(_ sk: Skill) -> String {
+        var lines: [String] = []
+        if !sk.paid || !Billing.enabled {
+            lines.append(L10n.t("公测期间免费，打开开关就能点亮。"))
+        } else if Billing.isSubscribed(sk.id) {
+            lines.append(L10n.t("已订阅，打开开关就能点亮。"))
+        } else if Billing.trialStart(sk.id) != nil && Billing.trialLeft(sk.id) > 0 {
+            lines.append(L10n.english ? "On trial, \(Billing.trialLeft(sk.id)) days left. Turn it on to light it up."
+                                      : "试用中，还剩 \(Billing.trialLeft(sk.id)) 天，打开开关就能点亮。")
+        } else {
+            lines.append(L10n.english ? "Subscribe separately (\(Billing.price(sk.id))). Free trial for \(Billing.trialDays) days first."
+                                      : "单独订阅 \(Billing.price(sk.id))，可以先免费试用 \(Billing.trialDays) 天。")
+        }
+        switch sk.id {
+        case "x", "agent": lines.append(L10n.t("还需要：系统设置里的「辅助功能」权限。"))
+        case "miao": lines.append(L10n.t("还需要：「屏幕录制」和「语音识别」权限。"))
+        default: break
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func lit(_ sk: Skill) -> Bool { sk.isOn() && (!sk.paid || Billing.isUnlocked(sk.id)) }
+
+    /// The card that pops up from a tile: name, intro, condition, and the switch (or subscribe).
+    private func showCard(_ i: Int, from tile: NSView) {
+        let sk = skills[i]
+        let vc = NSViewController()
+        let col = NSStackView()
+        col.orientation = .vertical
+        col.alignment = .leading
+        col.spacing = 8
+        col.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
+        let head = NSStackView()
+        head.orientation = .horizontal
+        head.spacing = 8
+        let ic = NSImageView(image: SkillIcon.image(sk.id, size: 22, color: kAmber))
+        let nm = NSTextField(labelWithString: sk.name)
+        nm.font = .systemFont(ofSize: 15, weight: .bold)
+        head.addArrangedSubview(ic); head.addArrangedSubview(nm)
+        let sm = NSTextField(wrappingLabelWithString: L10n.t(sk.summary))
+        sm.font = .systemFont(ofSize: 12)
+        let ct = NSTextField(labelWithString: L10n.t("点亮条件"))
+        ct.font = .systemFont(ofSize: 12, weight: .semibold)
+        ct.textColor = kAmber
+        let cd = NSTextField(wrappingLabelWithString: condition(sk))
+        cd.font = .systemFont(ofSize: 12)
+        cd.textColor = .secondaryLabelColor
+        conditionLabels[sk.id] = cd
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.spacing = 10
+        let st = NSTextField(labelWithString: L10n.t(lit(sk) ? "已点亮" : "未点亮"))
+        st.font = .systemFont(ofSize: 12, weight: .medium)
+        st.textColor = lit(sk) ? kAmber : .secondaryLabelColor
+        statusLabels[sk.id] = st
+        row.addArrangedSubview(st)
+        if sk.paid && Billing.enabled && !Billing.isSubscribed(sk.id) {
+            let b = OCButton(title: "订阅", target: self, action: #selector(subscribe(_:)))
+            b.identifier = NSUserInterfaceItemIdentifier(sk.id)
+            row.addArrangedSubview(b)
+        }
+        let sw = NSSwitch()
+        sw.controlSize = .small
+        sw.state = lit(sk) ? .on : .off
+        sw.identifier = NSUserInterfaceItemIdentifier(sk.id)
+        sw.target = self
+        sw.action = #selector(switched(_:))
+        row.addArrangedSubview(sw)
+        switches[sk.id] = sw
+        for v in [head, sm, ct, cd, row] as [NSView] { col.addArrangedSubview(v) }
+        for v in [sm, cd] { v.widthAnchor.constraint(equalToConstant: 260).isActive = true }
+        col.setCustomSpacing(12, after: sm)
+        col.setCustomSpacing(12, after: cd)
+        vc.view = col
+        popover.contentViewController = vc
+        popover.show(relativeTo: tile.bounds, of: tile, preferredEdge: .maxY)
+    }
+
     /// Re-read every switch and status line (after the cat changed something itself).
     @objc private func subscribe(_ b: NSButton) {
         let id = b.identifier?.rawValue ?? ""
@@ -177,9 +349,15 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
     }
 
     func refresh() {
-        for sk in skills {
-            switches[sk.id]?.state = sk.isOn() && (!sk.paid || Billing.isUnlocked(sk.id)) ? .on : .off
+        for (i, sk) in skills.enumerated() {
+            switches[sk.id]?.state = lit(sk) ? .on : .off
             badges[sk.id]?.title = badge(sk.id)
+            conditionLabels[sk.id]?.stringValue = condition(sk)
+            statusLabels[sk.id]?.stringValue = L10n.t(lit(sk) ? "已点亮" : "未点亮")
+            statusLabels[sk.id]?.textColor = lit(sk) ? kAmber : .secondaryLabelColor
+            if i < tiles.count {
+                tiles[i].show(lit: lit(sk), locked: sk.paid && Billing.enabled && !Billing.isUnlocked(sk.id))
+            }
         }
         if let xb = xbuddy { xStats.stringValue = "\(xb.stats)\n订阅：\(Billing.statusLine("x"))" }
     }
@@ -188,8 +366,8 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
 
     private func makeSkills() -> [Skill] {
         [
-            Skill(id: "x", emoji: "🐦", name: "陪你刷推（X）",
-                  summary: "认人、信号提醒、标出营销号和水评、点回复时给建议",
+            Skill(id: "x", emoji: "🐦", name: "喵推",
+                  summary: "陪你刷 X，认人、标出营销号和水评、帮你想回复",
                   paid: true,
                   isOn: { Prefs.xMode },
                   setOn: { on in
@@ -198,8 +376,8 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
                   },
                   settings: { [weak self] in self?.xSettings() ?? NSView() })
 ,
-            Skill(id: "agent", emoji: "🤖", name: "帮我操作电脑",
-                  summary: "说「帮我……」，小猫一步步替你点、输入、打开应用",
+            Skill(id: "agent", emoji: "🤖", name: "喵手",
+                  summary: "说「帮我……」，小猫替你一步步点、输入、开应用",
                   paid: true,
                   isOn: { Prefs.agentOn },
                   setOn: { on in
@@ -210,7 +388,7 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
 
 ,
             Skill(id: "miao", emoji: "🎧", name: "喵传",
-                  summary: "实时听 Mac 里的会议、视频会议和 X Spaces，原话加翻译显示成字幕",
+                  summary: "会议和 X Spaces 实时字幕加翻译，随时问刚才在说什么",
                   paid: true,
                   isOn: { Prefs.miaoOn },
                   setOn: { on in
@@ -407,7 +585,7 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
         let report = xb.diagnose()
         refresh()
         let a = NSAlert()
-        a.messageText = "陪你刷推 · 检查结果"
+        a.messageText = "喵推 · 检查结果"
         a.informativeText = report + "\n\n提示：先切到浏览器打开 x.com，再回到这里点「检查刷推」。"
         a.addButton(withTitle: "复制结果")
         a.addButton(withTitle: "好")

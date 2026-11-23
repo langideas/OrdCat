@@ -122,6 +122,7 @@ enum Social {
         rpc("dm_unread") { o, e in
             guard e == nil else { return }
             let n = CatStats.int(o)
+            DispatchQueue.main.async { NotifCenter.shared.dmUnread = n }
             if n > lastUnread, !DMWindow.shared.isVisible { onUnread?(n) }
             lastUnread = n
         }

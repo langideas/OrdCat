@@ -2413,6 +2413,12 @@ final class SettingsController: NSObject, NSWindowDelegate {
 
     private var pages: [NSScrollView] = []
     private var sidebar: SettingsSidebar?
+    /// 🔔 at the top right: every message and reminder in one place.
+    let bell = NotifBell()
+    func showNotifications() {
+        show(page: SettingsPage(rawValue: current) ?? .model)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in self?.bell.show() }
+    }
     private var pageHost = NSView()
     private var current = 0
     private var restoredFrame = false
@@ -2453,6 +2459,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         w.title = "OrdCat 设置 · v\(Updater.shared.current)"
         w.isReleasedWhenClosed = false
+        w.addTitlebarAccessoryViewController(bell)
         w.minSize = NSSize(width: 640, height: 440)
         if let f = saved, f.width >= 640, f.height >= 440 { w.setFrame(f, display: false); restoredFrame = true }
 
@@ -2676,7 +2683,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         g2.add(SK.row("排除应用", field(excluded)))
         p.add(g2)
         p.add(memStats)
-        p.hint("「陪你刷推」等技能在 设置 → 技能 里开关。")
+        p.hint("「喵推」等技能在 设置 → 技能 里开关。")
         p.space(20)
         p.add(SK.buttons([SK.button("授权屏幕录制", self, #selector(askScreen)),
                           SK.button("查看当前上下文", self, #selector(previewContext)),
@@ -3288,7 +3295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.skillsPane.onChanged = { [weak self] id, on in
             guard let self = self else { return }
             if id == "agent" {
-                self.bubble.notify(on ? "「帮我操作电脑」开啦 🤖 跟我说「帮我……」试试，每一步我都会先问你。" : "「帮我操作电脑」关掉啦。", hold: 5)
+                self.bubble.notify(on ? "「喵手」开啦 🤖 跟我说「帮我……」试试，每一步我都会先问你。" : "「喵手」关掉啦。", hold: 5)
                 return
             }
             if id == "miao" {
@@ -3300,7 +3307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             guard id == "x" else { return }
-            self.bubble.notify(on ? "「陪你刷推」开啦 🐾 去 x.com 刷一刷，我在旁边看着。" : "「陪你刷推」关掉啦，我不看 X 了。", hold: 4)
+            self.bubble.notify(on ? "「喵推」开啦 🐾 去 x.com 刷一刷，我在旁边看着。" : "「喵推」关掉啦，我不看 X 了。", hold: 4)
         }
         xbuddy.start()
         TaskSquare.shared.present = { [weak self] text, acts, hold in self?.catPopup(text, acts, hold: hold) }
@@ -3322,8 +3329,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Social.onUnread = { [weak self] n in
             guard let self = self, !self.bubble.chatMode else { return }
             self.bubble.notify(L10n.english ? "💬 You have \(n) new private message\(n > 1 ? "s" : "")" : "💬 你有 \(n) 条新私信",
-                               actions: [(L10n.t("打开私信"), { DMWindow.shared.show() })], hold: 8)
+                               actions: [(L10n.t("打开私信"), { [weak self] in self?.settings.showNotifications() })], hold: 8)
         }
+        // 🔔 通知中心: what each kind of reminder opens.
+        NotifCenter.shared.handlers = [
+            "dms": { DMWindow.shared.show() },
+            "signal": { SignalStation.shared.showWindow() },
+            "square": { TaskSquare.shared.showWindow() },
+            "square.mine": { TaskSquare.shared.showWindow(tab: 1) },
+            "update": { [weak self] in self?.installFromMenu() }]
         Social.startUnreadWatch()
         CatLevel.shared.refresh()
         Account.shared.observe { [weak self] in
@@ -3437,7 +3451,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(withTitle: "🐟 猫帮圈", action: #selector(menuSquare), keyEquivalent: "").target = self
         m.addItem(withTitle: "📶 信号站", action: #selector(menuSignal), keyEquivalent: "").target = self
         m.addItem(withTitle: "🎧 喵传（开始 / 停止）", action: #selector(menuMiao), keyEquivalent: "").target = self
-        m.addItem(withTitle: "💬 私信", action: #selector(menuDM), keyEquivalent: "").target = self
+        m.addItem(withTitle: "🔔 通知", action: #selector(menuDM), keyEquivalent: "").target = self
         m.addItem(withTitle: "🎁 邀请好友", action: #selector(menuInvite), keyEquivalent: "").target = self
         m.addItem(withTitle: "🛟 联系客服", action: #selector(menuSupport), keyEquivalent: "").target = self
         m.addItem(.separator())
@@ -3458,7 +3472,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func menuSquare() { TaskSquare.shared.showWindow() }
     @objc private func menuSignal() { SignalStation.shared.showWindow() }
     @objc private func menuMiao() { MiaoChuan.shared.toggle() }
-    @objc private func menuDM() { DMWindow.shared.show() }
+    @objc private func menuDM() { settings.showNotifications() }
     @objc private func menuInvite() { InviteWindow.shared.show() }
     @objc private func menuSupport() { Social.openSupport() }
     @objc private func previewContextMenu() { previewContext() }
@@ -3521,6 +3535,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         versionItem?.target = self
         versionItem?.action = #selector(installFromMenu)
         settings.refreshUpdate()
+        NotifCenter.shared.add(L10n.english ? "New version v\(v) is ready. Click to update." : "有新版本 v\(v)，点这里更新。", open: "update")
         bubble.notify("有新版本 v\(v) 啦～要我现在换新吗？", actions: [
             ("立即更新", { [weak self] in self?.installFromMenu() }),
             ("稍后", { [weak self] in self?.bubble.hide() })
@@ -4259,9 +4274,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             TaskSquare.shared.postDialog(prefill: pre)
             return
         }
-        // 技能「帮我操作电脑」: "帮我……" runs the desktop agent instead of a plain chat answer.
+        // 技能「喵手」: "帮我……" runs the desktop agent instead of a plain chat answer.
         if images.isEmpty && pageOverride == nil && !Prefs.agentOn && DesktopAgent.isTask(text) {
-            catPopup("🤖 这件事要「帮我操作电脑」技能来做，它现在是关着的。去 设置 → 技能 打开开关，我就能替你动手。",
+            catPopup("🤖 这件事要「喵手」技能来做，它现在是关着的。去 设置 → 技能 打开开关，我就能替你动手。",
                      [("打开技能", { [weak self] in self?.settings.show(page: .skills) })], hold: 8)
             return
         }
@@ -4272,7 +4287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 agent.start(goal: text)
                 return
             } else {
-                catPopup("🤖 「帮我操作电脑」是订阅技能，去 设置 → 技能 可以试用或订阅。",
+                catPopup("🤖 「喵手」是订阅技能，去 设置 → 技能 可以试用或订阅。",
                          [("打开技能", { [weak self] in self?.settings.show(page: .skills) })], hold: 8)
                 return
             }

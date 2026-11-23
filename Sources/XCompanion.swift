@@ -292,7 +292,7 @@ final class XCompanion {
     func diagnose() -> String {
         var lines: [String] = []
         lines.append("版本：\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")")
-        lines.append("「陪你刷推」开关：\(Prefs.xMode ? "已打开" : "没打开")")
+        lines.append("「喵推」开关：\(Prefs.xMode ? "已打开" : "没打开")")
         guard let pg = currentPage(forceProbe: true) else { lines.append(status); return lines.joined(separator: "\n") }
         lines.append(status)
         lines.append("浏览器：\(pg.app.localizedName ?? "")（\(pg.app.bundleIdentifier ?? "")）")
@@ -405,7 +405,7 @@ final class XCompanion {
             focus = nil; lastPosts = []; return
         }
         guard Prefs.xMode && Billing.isUnlocked("x") else {
-            status += Prefs.xMode ? "，但「陪你刷推」订阅已到期" : "，但「陪你刷推」还没打开"
+            status += Prefs.xMode ? "，但「喵推」订阅已到期" : "，但「喵推」还没打开"
             if !Prefs.xOffered { Prefs.xOffered = true; onFirstVisit?() }
             return
         }

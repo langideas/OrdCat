@@ -86,7 +86,7 @@ final class SignalStation: NSObject {
     static let shared = SignalStation()
     static let grades = ["普通", "优质", "稀有", "绝密"]
     /// Skills a sharer can require (ids from Skills.swift). "Owned" = a valid subscription to it on the account.
-    static let skills: [(String, String)] = [("x", "陪你刷推"), ("agent", "帮我操作电脑")]
+    static let skills: [(String, String)] = [("x", "喵推"), ("agent", "喵手")]
 
     /// Shows a message next to the cat (set by the app delegate).
     var present: ((String, [(String, () -> Void)], Double) -> Void)?
@@ -117,7 +117,7 @@ final class SignalStation: NSObject {
         return String(repeating: "📶", count: 1) + " " + L10n.t(grades[i] + "情报")
     }
     static func skillName(_ id: String) -> String { skills.first { $0.0 == id }?.1 ?? id }
-    /// "level:5" → "小猫等级 Lv5", "followers:10" → "喵友 ≥ 10", "member" → "订阅会员", "skill:x" → "技能「陪你刷推」".
+    /// "level:5" → "小猫等级 Lv5", "followers:10" → "喵友 ≥ 10", "member" → "订阅会员", "skill:x" → "技能「喵推」".
     static func condText(_ c: String) -> String {
         if c.hasPrefix("level:") { return "\(L10n.t("小猫等级")) Lv\(c.dropFirst(6))" }
         if c.hasPrefix("followers:") { return "\(L10n.t("喵友")) ≥ \(c.dropFirst(10))" }
@@ -161,6 +161,7 @@ final class SignalStation: NSObject {
             let text = L10n.english
                 ? "📶 New signal from \(first.who): “\(first.title)”\(more)"
                 : "📶 信号站有新信号：\(first.who) 发来「\(first.title)」\(more)"
+            NotifCenter.shared.add(text, open: "signal")
             self.present?(text, [(L10n.t("查看信号"), { [weak self] in self?.showDetail(first) }),
                                  (L10n.t("打开信号站"), { [weak self] in self?.showWindow() }),
                                  (L10n.t("不再提醒"), { Prefs.signalNotify = false; SignalStation.shared.changed() })], 25)

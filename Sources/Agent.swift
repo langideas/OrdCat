@@ -1,4 +1,4 @@
-// OrdCat — 技能「帮我操作电脑」.
+// OrdCat — 技能「喵手」.
 //
 // The user says what to do ("帮我在备忘录里新建一条：明天买猫粮"). Each round the cat reads the target app's
 // clickable/typeable elements through Accessibility, asks the model for ONE next action as JSON, shows it,
@@ -222,7 +222,7 @@ final class DesktopAgent {
         if list.isEmpty { list = "（读不到这个应用的界面元素）\n" }
         let done = log.isEmpty ? "（还没有）" : log.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
         let prompt = """
-        你是桌面小猫 OrdCat 的技能「帮我操作电脑」，一次只决定下一步操作。
+        你是桌面小猫 OrdCat 的技能「喵手」，一次只决定下一步操作。
         用户的目标：\(goal)
         现在最前面的应用：\(appName)　窗口：\(window)
         已经做过的步骤：

@@ -192,10 +192,9 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
         palsBtn.target = self; palsBtn.action = #selector(showPals)
         followingBtn.target = self; followingBtn.action = #selector(showFollowing)
         let invite = OCButton(title: "🎁 邀请好友", target: self, action: #selector(showInvite))
-        let dm = OCButton(title: "💬 私信", target: self, action: #selector(showDM))
-        for b in [palsBtn, followingBtn, invite, dm] { b.chip = true; b.style = .secondary }
+        for b in [palsBtn, followingBtn, invite] { b.chip = true; b.style = .secondary }
         palsBtn.toolTip = L10n.t("看看谁关注了你")
-        let socialRow = NSStackView(views: [palsBtn, followingBtn, invite, dm])
+        let socialRow = NSStackView(views: [palsBtn, followingBtn, invite])
         socialRow.spacing = 6
         let right = NSStackView(views: [headerName, levelRow, headerStats, socialRow])
         right.orientation = .vertical
@@ -257,7 +256,7 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
         }
         methodChanged()
         var lines: [String] = ["基础功能（聊天、语音、分享页面、桌面感知、记忆）一直免费。"]
-        for (id, name) in [("x", "陪你刷推"), ("agent", "帮我操作电脑")] {
+        for (id, name) in [("x", "喵推"), ("agent", "喵手")] {
             lines.append("• \(name)：\(Billing.statusLine(id))")
         }
         subLines.stringValue = lines.joined(separator: "\n")
@@ -417,24 +416,49 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
         let change = acc.hasPassword
         let cur = NSSecureTextField(), new1 = NSSecureTextField(), new2 = NSSecureTextField()
         cur.placeholderString = L10n.t("当前密码")
-        new1.placeholderString = L10n.t("新密码（至少 8 位）")
+        new1.placeholderString = L10n.t("新密码（8 到 72 位）")
         new2.placeholderString = L10n.t("再输一次新密码")
         let fields: [NSTextField] = change ? [cur, new1, new2] : [new1, new2]
-        let box = NSStackView(views: fields)
+        // 格式要求 + 实时检查（v0.2.51）
+        let rules = NSTextField(wrappingLabelWithString: L10n.t(change
+            ? "密码要求：8 到 72 位，字母、数字、符号都可以，区分大小写，不能和旧密码一样。建议字母加数字。"
+            : "密码要求：8 到 72 位，字母、数字、符号都可以，区分大小写。建议字母加数字。"))
+        rules.font = .systemFont(ofSize: 11)
+        rules.textColor = .secondaryLabelColor
+        let check = NSTextField(labelWithString: "")
+        check.font = .systemFont(ofSize: 11)
+        let box = NSStackView(views: fields + [rules, check])
         box.orientation = .vertical
+        box.alignment = .leading
         box.spacing = 8
-        box.frame = NSRect(x: 0, y: 0, width: 260, height: CGFloat(fields.count) * 30)
-        for f in fields { f.translatesAutoresizingMaskIntoConstraints = false; f.widthAnchor.constraint(equalToConstant: 260).isActive = true }
+        box.frame = NSRect(x: 0, y: 0, width: 260, height: CGFloat(fields.count) * 30 + 64)
+        for v in (fields as [NSView]) + [rules, check] { v.translatesAutoresizingMaskIntoConstraints = false; v.widthAnchor.constraint(equalToConstant: 260).isActive = true }
         let a = NSAlert()
         a.messageText = change ? "修改密码" : "设置密码"
         a.informativeText = change ? "忘了当前密码？退出后用验证码登录，再来这里设新密码（不用填当前密码）。"
                                    : "设好后可以用邮箱 / 手机号 + 密码登录，验证码登录也照样能用。"
         a.accessoryView = box
-        a.addButton(withTitle: "保存")
+        let save = a.addButton(withTitle: "保存")
         a.addButton(withTitle: "取消").keyEquivalent = "\u{1b}"
         a.window.initialFirstResponder = fields.first
-        guard a.runModal() == .alertFirstButtonReturn else { return }
-        guard new1.stringValue.count >= 8 else { loginStatus.stringValue = "⚠️ " + L10n.t("密码至少 8 位"); return }
+        func recheck() {
+            let p = new1.stringValue, n = p.count
+            var lines: [String] = []
+            lines.append(n == 0 ? "○ " + L10n.t("8 到 72 位") : (n >= 8 && n <= 72 ? "✓ " : "✗ ") + L10n.t("8 到 72 位") + "（\(n)）")
+            if !new2.stringValue.isEmpty { lines.append((p == new2.stringValue ? "✓ " : "✗ ") + L10n.t("两次输入一致")) }
+            check.stringValue = lines.joined(separator: "   ")
+            let ok = n >= 8 && n <= 72 && p == new2.stringValue
+            check.textColor = ok ? .systemGreen : .secondaryLabelColor
+            save.isEnabled = ok
+        }
+        recheck()
+        let obs = fields.map { f in
+            NotificationCenter.default.addObserver(forName: NSControl.textDidChangeNotification, object: f, queue: .main) { _ in recheck() }
+        }
+        let answer = a.runModal()
+        obs.forEach { NotificationCenter.default.removeObserver($0) }
+        guard answer == .alertFirstButtonReturn else { return }
+        guard new1.stringValue.count >= 8, new1.stringValue.count <= 72 else { loginStatus.stringValue = "⚠️ " + L10n.t("密码要 8 到 72 位"); return }
         guard new1.stringValue == new2.stringValue else { loginStatus.stringValue = "⚠️ " + L10n.t("两次输入的新密码不一样"); return }
         loginStatus.stringValue = L10n.t("正在保存…")
         // Fresh code login (forgot flow) may change without the old password; otherwise check it.
@@ -448,7 +472,6 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
     @objc private func showPals() { FollowListWindow.shared.show(kind: 0) }
     @objc private func showFollowing() { FollowListWindow.shared.show(kind: 1) }
     @objc private func showInvite() { InviteWindow.shared.show() }
-    @objc private func showDM() { DMWindow.shared.show() }
 
     @objc private func verify() {
         if loginMode.selectedSegment == 1 {
