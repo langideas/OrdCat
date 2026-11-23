@@ -773,15 +773,46 @@ final class SelectionWatcher {
         return false
     }
 
+    private var enhanced = Set<pid_t>()
+
     private func axSelectedText() -> String? {
+        // Chromium browsers only build the web-page tree for assistive clients: ask once per app.
+        if let front = NSWorkspace.shared.frontmostApplication,
+           ScreenReader.chromiumBrowsers.contains(front.bundleIdentifier ?? ""), !enhanced.contains(front.processIdentifier) {
+            enhanced.insert(front.processIdentifier)
+            AXUIElementSetAttributeValue(AXUIElementCreateApplication(front.processIdentifier),
+                                         "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        }
         let sys = AXUIElementCreateSystemWide()
         var focused: CFTypeRef?
         guard AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
               let f = focused, CFGetTypeID(f) == AXUIElementGetTypeID() else { return nil }
         let el = f as! AXUIElement
         var sel: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(el, kAXSelectedTextAttribute as CFString, &sel) == .success else { return nil }
-        return sel as? String
+        if AXUIElementCopyAttributeValue(el, kAXSelectedTextAttribute as CFString, &sel) == .success,
+           let s = sel as? String, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return s }
+        // Web pages (Chrome, Edge, Safari…): plain page text has no AXSelectedText, but the page keeps the
+        // selection as a text-marker range. Try the focused node, then walk up to its web area.
+        var node: AXUIElement? = el
+        for _ in 0..<14 {
+            guard let n = node else { break }
+            if let s = SelectionWatcher.markerSelection(n) { return s }
+            var parent: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(n, kAXParentAttribute as CFString, &parent) == .success,
+                  let p = parent, CFGetTypeID(p) == AXUIElementGetTypeID() else { break }
+            node = (p as! AXUIElement)
+        }
+        return nil
+    }
+
+    private static func markerSelection(_ el: AXUIElement) -> String? {
+        var range: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, "AXSelectedTextMarkerRange" as CFString, &range) == .success,
+              let r = range else { return nil }
+        var str: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(el, "AXStringForTextMarkerRange" as CFString, r, &str) == .success,
+              let s = str as? String, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return s
     }
 
     /// Press ⌘C on the user's behalf, read the text, then put their clipboard back exactly as it was.
@@ -1256,7 +1287,8 @@ final class Bubble: NSObject {
     var onLevel: (() -> Void)?
     var onMic: (() -> Void)?
     var anchor: () -> NSPoint = { .zero }   // cat head centre, screen coords
-    let width: CGFloat = 340
+    /// Roomier in chat (header buttons + input row), a little narrower for one-off hints.
+    var width: CGFloat { chatMode ? 420 : 360 }
 
     var isShown: Bool { panel.isVisible && panel.alphaValue > 0.01 }
     var hasDraft: Bool { !input.stringValue.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -1506,7 +1538,8 @@ final class Bubble: NSObject {
         for (i, item) in list.enumerated() {
             let b = OCButton(title: item.0, target: self, action: #selector(doAction(_:)))
             b.bezelStyle = .rounded
-            if list.count > 3 { b.controlSize = .small; b.font = .systemFont(ofSize: 11) }
+            b.font = .systemFont(ofSize: list.count > 3 ? 12 : 13, weight: .medium)
+            b.lineBreakMode = .byTruncatingTail
             if i == 0 { b.style = .primary }
             b.tag = i
             card.addSubview(b)
@@ -1520,7 +1553,7 @@ final class Bubble: NSObject {
         tag = nil
         setChoices([])
         setActions(list)
-        textView.textStorage?.setAttributedString(bubbleAttributed(text))
+        textView.textStorage?.setAttributedString(bubbleAttributed(L10n.t(text)))   // UI hints follow the app language
         if isShown {
             // Already on screen: swap content instantly, no fade.
             panel.animator().alphaValue = 1
@@ -1530,6 +1563,26 @@ final class Bubble: NSObject {
             present(makeKey: false)
         }
         scheduleHide(after: hold ?? min(15, 4 + Double(text.count) * 0.08 + (list.isEmpty ? 0 : 4)))
+    }
+
+    /// Inside an open chat: show a short hint with buttons, keeping the chat box and its input.
+    func offerInChat(_ text: String, actions list: [(String, () -> Void)]) {
+        setChoices([])
+        setActions(list)
+        textView.textStorage?.setAttributedString(bubbleAttributed(L10n.t(text)))
+        layout()
+        panel.orderFrontRegardless()
+    }
+
+    /// Put text in the chat input and focus it (the user finishes the question).
+    func prefill(_ text: String) {
+        if !chatMode { openChat(greeting: nil) }
+        setActions([])
+        input.stringValue = text
+        panel.makeKey()
+        panel.makeFirstResponder(input)
+        input.currentEditor()?.selectedRange = NSRange(location: (text as NSString).length, length: 0)
+        layout()
     }
 
     /// Open the quick-chat box.
@@ -1609,7 +1662,13 @@ final class Bubble: NSObject {
             used = lm.usedRect(for: tc).height
         }
         let textH = min(max(used, 18), 300)
-        let actionH: CGFloat = actionButtons.isEmpty ? 0 : 36
+        // Action buttons: equal widths filling the row (up to 4 per row; 2 per row when a title is long).
+        let actGap: CGFloat = 6
+        let longest = actionButtons.map { ceil($0.intrinsicContentSize.width) }.max() ?? 0
+        var perRow = min(4, max(1, actionButtons.count))
+        while perRow > 1 && (inner - actGap * CGFloat(perRow - 1)) / CGFloat(perRow) < longest { perRow -= 1 }
+        let actRows = actionButtons.isEmpty ? 0 : (actionButtons.count + perRow - 1) / perRow
+        let actionH: CGFloat = actRows == 0 ? 0 : CGFloat(actRows) * 30 + CGFloat(actRows - 1) * actGap + 10
         let choiceW = inner
         var choiceHs: [CGFloat] = []
         for b in choiceButtons {
@@ -1618,17 +1677,17 @@ final class Bubble: NSObject {
             choiceHs.append(ceil(r.height) + 14)
         }
         let choicesH: CGFloat = choiceHs.reduce(0) { $0 + $1 + 6 } + (choiceHs.isEmpty ? 0 : 4)
-        let chatH: CGFloat = chatMode ? 40 : 0
+        let chatH: CGFloat = chatMode ? 44 : 0
         let showChip = chatMode && shareTitle != nil
-        let chipH: CGFloat = showChip ? 30 : 0
-        let h = pad + 18 + 6 + textH + choicesH + actionH + chipH + chatH + pad
+        let chipH: CGFloat = showChip ? 32 : 0
+        let h = pad + 18 + 10 + textH + choicesH + actionH + chipH + chatH + pad
 
         var y = h - pad - 16
         title.frame = NSRect(x: pad, y: y, width: 120, height: 16)
         // Header buttons hug their text (right to left) so 📶 and the level icons fit next to them.
         // Amber chips (OCButton.chip) with a small gap between them.
         let fitW: (NSButton, CGFloat) -> CGFloat = { b, maxW in min(maxW, ceil(b.intrinsicContentSize.width)) }
-        let gap: CGFloat = 4
+        let gap: CGFloat = 6
         let ew = fitW(expandButton, 110), tw = fitW(topicsButton, 120), qw = fitW(squareButton, 90), sw = fitW(signalButton, 30)
         expandButton.frame = NSRect(x: width - pad - ew, y: y - 2, width: ew, height: 20)
         expandButton.isHidden = !chatMode
@@ -1647,7 +1706,7 @@ final class Bubble: NSObject {
             speakPause.frame = NSRect(x: pad + 58, y: y - 2, width: 22, height: 20)
             speakStop.frame = NSRect(x: pad + 82, y: y - 2, width: 22, height: 20)
         }
-        y -= 6 + textH
+        y -= 10 + textH
         scroll.frame = NSRect(x: pad, y: y, width: inner, height: textH)
         textView.frame = NSRect(x: 0, y: 0, width: inner, height: max(used, textH))
         if !choiceButtons.isEmpty {
@@ -1659,12 +1718,11 @@ final class Bubble: NSObject {
         }
         if !actionButtons.isEmpty {
             y -= actionH
-            var x = pad - 4
-            for b in actionButtons {
-                b.sizeToFit()
-                let w = actionButtons.count > 3 ? max(56, b.frame.width + 8) : max(84, b.frame.width + 16)
-                b.frame = NSRect(x: x, y: y + 3, width: w, height: 30)
-                x += w + (actionButtons.count > 3 ? 3 : 6)
+            let bw = floor((inner - actGap * CGFloat(perRow - 1)) / CGFloat(perRow))
+            for (i, b) in actionButtons.enumerated() {
+                let row = i / perRow, col = i % perRow
+                let by = y + actionH - 4 - CGFloat(row + 1) * 30 - CGFloat(row) * actGap
+                b.frame = NSRect(x: pad + CGFloat(col) * (bw + actGap), y: by, width: bw, height: 30)
             }
         }
         shareChip.isHidden = !showChip
@@ -1672,9 +1730,9 @@ final class Bubble: NSObject {
         if showChip {
             y -= chipH
             shareChip.sizeToFit()
-            let cw = min(inner - 26, shareChip.frame.width + 14)
-            shareChip.frame = NSRect(x: pad, y: y + 4, width: cw, height: 22)
-            shareClose.frame = NSRect(x: pad + cw + 2, y: y + 4, width: 22, height: 22)
+            let cw = min(inner - 28, shareChip.frame.width + 14)
+            shareChip.frame = NSRect(x: pad, y: y + 6, width: cw, height: 22)
+            shareClose.frame = NSRect(x: pad + cw + 4, y: y + 6, width: 22, height: 22)
         }
         input.isHidden = !chatMode
         sendButton.isHidden = !chatMode
@@ -1682,9 +1740,10 @@ final class Bubble: NSObject {
         if micButton.image != nil && micButton.contentTintColor == nil { micButton.toolTip = voiceTip() }
         if chatMode {
             y -= chatH
-            input.frame = NSRect(x: pad, y: y + 6, width: inner - 104, height: 26)
-            micButton.frame = NSRect(x: pad + inner - 100, y: y + 4, width: 40, height: 30)
-            sendButton.frame = NSRect(x: pad + inner - 58, y: y + 4, width: 60, height: 30)
+            // Input, voice and send share one 30pt row with even 6pt gaps.
+            input.frame = NSRect(x: pad, y: y + 8, width: inner - 6 - 40 - 6 - 64, height: 30)
+            micButton.frame = NSRect(x: pad + inner - 64 - 6 - 40, y: y + 8, width: 40, height: 30)
+            sendButton.frame = NSRect(x: pad + inner - 64, y: y + 8, width: 64, height: 30)
         }
 
         let head = anchor()
@@ -2598,6 +2657,11 @@ final class SettingsController: NSObject, NSWindowDelegate {
         p.add(SK.buttons([SK.button("检查更新", self, #selector(checkUpdate)), updateButton,
                           SK.button("发布页", self, #selector(openReleases))]))
 
+        p.header("客服与反馈")
+        p.hint("有问题或建议，直接在 app 里找客服聊，或者发邮件到 hello@ordcat.de。")
+        p.add(SK.buttons([SK.button("💬 在线客服", self, #selector(supportChat)),
+                          SK.button("✉️ 发邮件", self, #selector(supportMail))]))
+
         p.header("签名与授权")
         signLabel.font = .systemFont(ofSize: 12)
         signLabel.textColor = .labelColor
@@ -2728,6 +2792,10 @@ final class SettingsController: NSObject, NSWindowDelegate {
         if let first = p.voices.first { ttsVoiceBox.stringValue = first.id }
     }
     @objc private func saveVoice() {
+        guard OCConfirm.ask("保存声音设置？", "朗读引擎、声音和云端声音的地址、模型、Key 会换成现在填的内容。", ok: "保存") else { return }
+        storeVoice()
+    }
+    private func storeVoice() {
         voiceChanged()
         Prefs.ttsBase = ttsBase.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         Prefs.ttsModel = ttsModel.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2736,7 +2804,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         ttsStatus.stringValue = "✅ 已保存"
     }
     @objc private func testVoice() {
-        saveVoice()
+        storeVoice()
         ttsStatus.stringValue = Prefs.ttsEngine == 1 ? "正在请求云端声音…" : "▶︎ 系统声音试听中"
         voice?.onStatus = { [weak self] m in self?.ttsStatus.stringValue = m }
         voice?.speak("喵～我是 OrdCat。今天辛苦啦，要不要先喝口水，休息一下眼睛？我一直在这儿陪着你。")
@@ -2775,11 +2843,15 @@ final class SettingsController: NSObject, NSWindowDelegate {
             if let e = err { self?.updateStatus.stringValue = "⚠️ 检查失败：\(e)" } else { self?.refreshUpdate() }
         }
     }
+    @objc private func supportChat() { Social.openSupport() }
+    @objc private func supportMail() { Social.mailSupport() }
     @objc private func installUpdate() {
+        guard OCConfirm.ask("现在安装更新？", "下载完成后 OrdCat 会自动重启，聊天记录和设置都会保留。", ok: "安装并重启") else { return }
         updateButton.isEnabled = false
         Updater.shared.install { [weak self] msg in self?.updateStatus.stringValue = msg }
     }
     @objc private func repairSigning() {
+        guard OCConfirm.ask("修复授权？", "会用这台 Mac 的签名重新签 OrdCat，完成后自动退出，需要你再打开一次。", ok: "修复") else { return }
         signLabel.stringValue = "正在用这台 Mac 的签名重新签…"
         DispatchQueue.global(qos: .userInitiated).async {
             let r = Updater.shared.repairSigning()
@@ -2915,6 +2987,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     }
 
     @objc private func saveIt() {
+        guard OCConfirm.ask("保存模型设置？", "对话、看图和听写模型的地址、模型名和 Key 会换成现在填的内容。", ok: "保存") else { return }
         store()
         status.stringValue = "✅ 已保存"
     }
@@ -3133,6 +3206,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SignalStation.shared.start()
         bubble.onLevel = { [weak self] in self?.settings.show(page: .user) }
         catView.setMember(CatLevel.isMember)
+        CatLevel.shared.startClock()
+        Social.onUnread = { [weak self] n in
+            guard let self = self, !self.bubble.chatMode else { return }
+            self.bubble.notify(L10n.english ? "💬 You have \(n) new private message\(n > 1 ? "s" : "")" : "💬 你有 \(n) 条新私信",
+                               actions: [(L10n.t("打开私信"), { DMWindow.shared.show() })], hold: 8)
+        }
+        Social.startUnreadWatch()
         CatLevel.shared.refresh()
         Account.shared.observe { [weak self] in
             guard let self = self else { return }
@@ -3244,6 +3324,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(withTitle: "查看当前上下文", action: #selector(previewContextMenu), keyEquivalent: "").target = self
         m.addItem(withTitle: "🐟 猫帮圈", action: #selector(menuSquare), keyEquivalent: "").target = self
         m.addItem(withTitle: "📶 信号站", action: #selector(menuSignal), keyEquivalent: "").target = self
+        m.addItem(withTitle: "💬 私信", action: #selector(menuDM), keyEquivalent: "").target = self
+        m.addItem(withTitle: "🎁 邀请好友", action: #selector(menuInvite), keyEquivalent: "").target = self
+        m.addItem(withTitle: "🛟 联系客服", action: #selector(menuSupport), keyEquivalent: "").target = self
         m.addItem(.separator())
         m.addItem(withTitle: "设置…", action: #selector(openSettings), keyEquivalent: ",").target = self
         m.addItem(.separator())
@@ -3261,6 +3344,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openSettings() { settings.show() }
     @objc private func menuSquare() { TaskSquare.shared.showWindow() }
     @objc private func menuSignal() { SignalStation.shared.showWindow() }
+    @objc private func menuDM() { DMWindow.shared.show() }
+    @objc private func menuInvite() { InviteWindow.shared.show() }
+    @objc private func menuSupport() { Social.openSupport() }
     @objc private func previewContextMenu() { previewContext() }
 
     // MARK: perception
@@ -4176,8 +4262,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let note = "[这个对话属于用户的项目「\(p.name)」，项目说明如下，回答时请参考]\n" + p.note
                 context = context.map { note + "\n\n" + $0 } ?? note
             }
+            var liveRinged = 0
+            let ringLive = (usePerception || sharePage) && Prefs.highlight
+            if ringLive { self.highlighter.clear() }
             self.llm.stream(history, context: context, onDelta: { [weak self] t in
                 guard let self = self else { return }
+                // Ring each place the moment the answer points at it (positions from the capture just taken);
+                // the final pass after the answer re-checks them and narrows to the exact line.
+                if ringLive {
+                    let live = self.hub.taggedTargets(in: t)
+                    if live.count > liveRinged {
+                        for g in live[liveRinged...] { self.highlighter.add(g.el.rect, number: g.n, seconds: 12) }
+                        liveRinged = live.count
+                    }
+                }
                 let shown = ContextHub.stripTags(t)
                 self.store.updateLast(shown)
                 if inBubble && self.bubble.isShown && gen == self.bubbleGen { self.bubble.setText(shown) }
@@ -4196,13 +4294,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if (usePerception || sharePage) && Prefs.highlight {
                     // Rings go exactly on the lines the answer talks about: tagged lines first, otherwise the
                     // on-screen line each point matches. Positions are re-read right before drawing.
-                    var targets = self.hub.taggedElements(in: raw)
+                    var targets = self.hub.taggedTargets(in: raw)
                     let pointish = ["重点", "关键", "在哪", "哪里", "哪儿", "标", "圈", "指", "找"].contains { text.contains($0) }
-                    if targets.isEmpty && (sharePage || pointish) { targets = self.hub.fallbackTargets(for: final) }
-                    let extraRects = self.hub.resolveTargets(in: raw.replacingOccurrences(of: "\\[\\[el:[^\\]]*\\]\\]", with: "", options: .regularExpression))
+                    if targets.isEmpty && pointish { targets = self.hub.fallbackTargets(for: final) }
+                    let points = self.hub.pointTargets(in: raw)
                     Task { @MainActor in
-                        let rects = await self.hub.relocate(targets) + extraRects
-                        if !rects.isEmpty { self.highlighter.show(rects, label: "在这里", seconds: 10, limit: 6) }
+                        let marks = await self.hub.relocate(targets) + points
+                        if !marks.isEmpty { self.highlighter.show(marks: marks.sorted { $0.1 < $1.1 }, seconds: 12) }
+                        else if liveRinged > 0 { self.highlighter.clear() }   // everything scrolled away
                     }
                 }
                 var said = final
@@ -4305,17 +4404,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Clicking into a post can look like a selection: never let it replace the fresh post card.
         if Date().timeIntervalSince(xCardAt) < 4 && bubble.isShown { return }
         lastPrompted = s
-        bubbleGen += 1   // older streaming answers stop writing into the bubble
         catView.perk(true)
         let preview = s.count > 36 ? String(s.prefix(36)) + "…" : s
-        bubble.notify("你\(verb)了「\(preview)」～要我帮忙吗？", actions: [
+        let acts: [(String, () -> Void)] = [
             ("帮我看看 🐾", { [weak self] in
                 self?.ask("请帮我看看下面这段内容：如果是报错或代码，告诉我问题和改法；如果是普通文字，用一两句话解释或接个话。\n\n\(s)")
             }),
-            ("翻译", { [weak self] in
+            (L10n.english ? "Translate" : "翻译", { [weak self] in
                 self?.ask("把下面的内容翻译成中文（如果原文已经是中文，就翻译成英文），只给译文：\n\n\(s)")
-            })
-        ])
+            }),
+            ("问这段", { [weak self] in self?.bubble.prefill("关于「\(preview)」：") })
+        ]
+        // Chat box already open: offer the help inside it instead of closing the chat.
+        if bubble.chatMode && bubble.isShown {
+            bubble.offerInChat("✂️ 你\(verb)了「\(preview)」～要我帮忙吗？", actions: acts)
+            return
+        }
+        bubbleGen += 1   // older streaming answers stop writing into the bubble
+        bubble.notify("你\(verb)了「\(preview)」～要我帮忙吗？", actions: acts)
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
             guard let self = self, !self.bubble.chatMode else { return }
             self.catView.perk(false)

@@ -1,3 +1,31 @@
+# OrdCat v0.2.45
+
+- 屏幕重点圈重新做了：不会再圈到浏览器的书签栏、标签页和工具栏；长段落会精确圈到说的那一行；小猫回答到哪一点就马上圈出哪里，每个圈带编号 ①②③，和回答里的编号一一对应。
+- 选中文字提醒：在 Chrome、Safari 等浏览器网页里选中文字也能弹出提醒；聊天气泡开着时，提醒直接出现在气泡里，不会关掉对话。多了「问这段」按钮。
+- 聊天气泡加宽，顶部按钮间距更舒服，按钮自动排成整齐的一行或两行，输入框、语音、发送对齐。
+- 所有保存和账号操作都会先弹窗确认，并列出改了什么：保存资料、换头像、发验证码、登录、退出、导出、保存模型和声音设置、安装更新、修复授权。
+- 输入用户名时下方实时提示「可以使用 / 已被占用 / 格式不对」。
+- 小猫等级改成按在线时长：OrdCat 运行满 24 小时算陪伴 1 天，可以分多次累计，Mac 睡眠时不算。以前攒的天数都保留。
+- 喵友：点「喵友」「关注」打开关注我的和我关注的列表，可以关注、取消关注、发私信。
+- 新增私信、好友邀请（双方各得 50 小鱼干并互加喵友）、密码登录 / 设置密码 / 修改密码 / 忘记密码。
+- 新增客服：设置 → 关于 → 客服与反馈，可以在 app 里找客服聊天或发邮件；右键菜单也有「联系客服」。
+- 英文版补上了大部分漏翻的中文。
+- 需要管理员在 Supabase 运行 supabase/account2.sql 后，用户名检查、喵友列表、在线时长等级、邀请、私信和客服才会生效。
+
+**English**
+
+- Highlight rings rebuilt: they never land on the browser's bookmarks bar, tabs or toolbar; long paragraphs are narrowed to the exact line; each place is ringed the moment the cat mentions it, with numbers ①②③ that match the answer.
+- Selection hints now work for text selected on web pages in Chrome, Safari and other browsers, and show inside the chat bubble when it's open instead of closing the chat. New "Ask about it" button.
+- Wider chat bubble with roomier header buttons, a tidy one- or two-row button grid, and an aligned input row.
+- Every save and account action now asks first and lists what changes: profile, avatar, sending a code, sign in, sign out, export, model and voice settings, installing updates, repairing permissions.
+- Live username hint while you type: available / taken / invalid.
+- Cat level now follows online time: every 24 hours OrdCat runs counts as one day together, added up across sessions; sleep doesn't count. Days you already earned are kept.
+- Cat Pals: tap Cat Pals or Following to see both lists, follow, unfollow or send a message.
+- New: private messages, friend invites (50 Dried Fish each and you become Cat Pals), password sign-in, set, change and forgot password.
+- New support: Settings → About → Support & feedback lets you chat with support in the app or email us; it's also in the right-click menu.
+- Most leftover Chinese in the English interface is now translated.
+- Username checks, Cat Pals lists, online-time levels, invites, messages and support start working once the admin runs supabase/account2.sql in Supabase.
+
 # OrdCat v0.2.44
 
 - 聊天气泡顶部的「完整对话」「之前的话题」「猫帮圈」「📶」换成了琥珀色小按钮，和整个 app 的按钮风格统一。鼠标移上去会变亮，按下去有回弹动效。

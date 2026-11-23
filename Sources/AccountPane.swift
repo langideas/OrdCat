@@ -3,7 +3,7 @@
 import Cocoa
 import UniformTypeIdentifiers
 
-final class AccountPane: NSObject {
+final class AccountPane: NSObject, NSTextFieldDelegate {
     private let acc = Account.shared
     private let avatar = NSImageView()
     private let headerName = SK.WrapLabel("", size: 15, secondary: false, weight: .bold)
@@ -13,10 +13,20 @@ final class AccountPane: NSObject {
     private let nameField = NSTextField()
     private let userField = NSTextField()
     private let profileStatus = SK.WrapLabel()
+    private let userHint = SK.WrapLabel()
+    private enum UserState { case none, checking, ok, taken, bad, unknown }
+    private var userState: UserState = .none
+    private var userCheck: DispatchWorkItem?
     private let loginLine = NSTextField(labelWithString: "")
     private let method = NSSegmentedControl(labels: ["邮箱", "手机号"], trackingMode: .selectOne, target: nil, action: nil)
     private let idField = NSTextField()
     private let codeField = NSTextField()
+    private let passField = NSSecureTextField()
+    private let loginMode = NSSegmentedControl(labels: ["验证码", "密码"], trackingMode: .selectOne, target: nil, action: nil)
+    private let forgotBtn = OCButton(title: "忘记密码？", target: nil, action: nil)
+    private let passwordBtn = OCButton(title: "设置密码", target: nil, action: nil)
+    private let palsBtn = OCButton(title: "喵友 0", target: nil, action: nil)
+    private let followingBtn = OCButton(title: "关注 0", target: nil, action: nil)
     private let sendBtn = OCButton(title: "发送验证码", target: nil, action: nil)
     private let loginBtn = OCButton(title: "登录 / 注册", target: nil, action: nil)
     private let logoutBtn = OCButton(title: "退出登录", target: nil, action: nil)
@@ -56,6 +66,10 @@ final class AccountPane: NSObject {
         g1.add(SK.row("名称", input(nameField, "小猫怎么称呼你")))
         g1.add(SK.row("用户名", input(userField, "字母、数字或下划线")))
         p.add(g1)
+        userHint.font = .systemFont(ofSize: 11.5)
+        userHint.stringValue = ""
+        p.add(userHint)
+        userField.delegate = self
         p.add(SK.buttons([button("保存", #selector(saveProfile))], trailing: true))
         p.add(profileStatus)
 
@@ -70,19 +84,45 @@ final class AccountPane: NSObject {
         g2.add(SK.info(loginLine, logoutBtn))
         p.add(g2)
         method.target = self; method.action = #selector(methodChanged)
-        method.selectedSegment = 0
         sendBtn.target = self; sendBtn.action = #selector(sendCode)
         sendBtn.bezelStyle = .rounded
         loginBtn.target = self; loginBtn.action = #selector(verify)
         loginBtn.bezelStyle = .rounded
         loginBtn.keyEquivalent = "\r"
+        loginMode.target = self; loginMode.action = #selector(loginModeChanged)
+        loginMode.selectedSegment = 0
+        ocStyleTabs(loginMode)
+        method.selectedSegment = 0
+        let modes = NSStackView(views: [method, loginMode])
+        modes.spacing = 10
+        // Code and password share one row; only one shows at a time.
+        let cred = NSView()
+        cred.translatesAutoresizingMaskIntoConstraints = false
+        for f in [input(codeField, "6 位验证码"), passField] as [NSTextField] {
+            f.translatesAutoresizingMaskIntoConstraints = false
+            cred.addSubview(f)
+            NSLayoutConstraint.activate([f.leadingAnchor.constraint(equalTo: cred.leadingAnchor),
+                                         f.trailingAnchor.constraint(equalTo: cred.trailingAnchor),
+                                         f.centerYAnchor.constraint(equalTo: cred.centerYAnchor)])
+        }
+        cred.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        passField.placeholderString = "密码（至少 8 位）"
+        passField.font = .systemFont(ofSize: 13)
+        passField.isHidden = true
+        forgotBtn.target = self; forgotBtn.action = #selector(forgot)
+        forgotBtn.chip = true
+        forgotBtn.style = .neutral
+        forgotBtn.isHidden = true
         let lg = SK.Group()
-        lg.add(SK.row("方式", method, fill: false))
+        lg.add(SK.row("方式", modes, fill: false))
         lg.add(SK.info(input(idField, ""), sendBtn))
-        lg.add(SK.info(input(codeField, "6 位验证码"), loginBtn))
+        lg.add(SK.info(cred, loginBtn))
         let fold = SK.Fold(lg)
         loginFold = fold
         p.add(fold)
+        p.add(SK.buttons([forgotBtn]))
+        passwordBtn.target = self; passwordBtn.action = #selector(changePassword)
+        p.add(SK.buttons([passwordBtn]))
         p.add(loginStatus)
 
         // 订阅与付款
@@ -133,7 +173,15 @@ final class AccountPane: NSObject {
         levelRow.spacing = 6
         levelRow.alignment = .centerY
         levelRow.translatesAutoresizingMaskIntoConstraints = false
-        let right = NSStackView(views: [headerName, levelRow, headerStats])
+        palsBtn.target = self; palsBtn.action = #selector(showPals)
+        followingBtn.target = self; followingBtn.action = #selector(showFollowing)
+        let invite = OCButton(title: "🎁 邀请好友", target: self, action: #selector(showInvite))
+        let dm = OCButton(title: "💬 私信", target: self, action: #selector(showDM))
+        for b in [palsBtn, followingBtn, invite, dm] { b.chip = true; b.style = .secondary }
+        palsBtn.toolTip = L10n.t("看看谁关注了你")
+        let socialRow = NSStackView(views: [palsBtn, followingBtn, invite, dm])
+        socialRow.spacing = 6
+        let right = NSStackView(views: [headerName, levelRow, headerStats, socialRow])
         right.orientation = .vertical
         right.alignment = .leading
         right.spacing = 5
@@ -166,17 +214,25 @@ final class AccountPane: NSObject {
         levelIcons.image = RankIcon.strip(level: lv, height: 16)
         levelIcons.toolTip = CatLevel.partsText(level: lv)
         let fans = lc.followers
+        let following = lc.mine?.following ?? 0
         headerStats.stringValue = L10n.english
-            ? "\(lc.days) days together · \(lc.daysToNext) days to next level · \(fans) followers"
-            : "已陪伴 \(lc.days) 天 · 距下一级还差 \(lc.daysToNext) 天 · 喵友 \(fans)"
+            ? "\(lc.days) days together · \(lc.hoursToNextDay)h online to the next day · \(lc.daysToNext) days to next level"
+            : "已陪伴 \(lc.days) 天 · 再在线 \(lc.hoursToNextDay) 小时满一天 · 距下一级还差 \(lc.daysToNext) 天"
+        headerStats.toolTip = L10n.t("OrdCat 运行满 24 小时算陪伴 1 天，可以分多次累计；Mac 睡眠时不算。")
+        palsBtn.title = L10n.english ? "Cat Pals \(fans)" : "喵友 \(fans)"
+        followingBtn.title = L10n.english ? "Following \(following)" : "关注 \(following)"
     }
 
     func refresh() {
         refreshHeader()
         nameField.stringValue = acc.profile.displayName
         userField.stringValue = acc.profile.username
+        userState = .none; userHint.stringValue = ""
         loginLine.stringValue = acc.accountLine
         logoutBtn.isHidden = !acc.signedIn
+        passwordBtn.isHidden = !acc.signedIn
+        passwordBtn.title = acc.hasPassword ? "修改密码" : "设置密码"
+        forgotBtn.isHidden = acc.signedIn || loginMode.selectedSegment != 1
         loginFold?.folded = acc.signedIn || !acc.configured
         if !acc.configured {
             loginStatus.stringValue = "邮箱 / 手机号注册即将开放。现在名称和头像先保存在本机，开通后登录会自动同步。"
@@ -200,11 +256,21 @@ final class AccountPane: NSObject {
         p.allowedContentTypes = [.image]
         p.message = "选一张图片做头像"
         guard p.runModal() == .OK, let u = p.url else { return }
+        guard OCConfirm.ask("用这张图片做头像？", "头像会显示在聊天窗口、猫帮圈和信号站里\(acc.signedIn ? "，并同步到你的账号" : "")。",
+                            ok: "换上", icon: NSImage(contentsOf: u)) else { return }
         profileStatus.stringValue = "正在保存…"
         acc.setAvatar(from: u) { [weak self] err in self?.profileStatus.stringValue = err ?? "✅ 头像已更新" }
     }
 
     @objc private func saveProfile() {
+        let n = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let u = userField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "@", with: "")
+        if userState == .taken { profileStatus.stringValue = "⚠️ 这个用户名已经有人用了，换一个吧"; return }
+        if userState == .bad { profileStatus.stringValue = "⚠️ 用户名只能用 3–20 个字母、数字或下划线"; return }
+        let changes = OCConfirm.diff([("名称", acc.profile.displayName, n),
+                                      ("用户名", acc.profile.username.isEmpty ? "" : "@" + acc.profile.username, u.isEmpty ? "" : "@" + u)])
+        guard !changes.isEmpty else { profileStatus.stringValue = "没有改动"; return }
+        guard OCConfirm.ask("保存个人资料？", changes, ok: "保存") else { return }
         profileStatus.stringValue = "正在保存…"
         acc.update(displayName: nameField.stringValue, username: userField.stringValue) { [weak self] err in
             self?.profileStatus.stringValue = err ?? "✅ 已保存"
@@ -218,6 +284,8 @@ final class AccountPane: NSObject {
         let v = idValue
         if isEmail && !(v.contains("@") && v.contains(".")) { loginStatus.stringValue = "邮箱格式不对"; return }
         if !isEmail && v.filter({ $0.isNumber }).count < 8 { loginStatus.stringValue = "手机号不对"; return }
+        guard OCConfirm.ask("把验证码发到 \(v)？", isEmail ? "去邮箱查收 6 位验证码，填进来就能登录；没有账号会自动注册。" : "短信会收到 6 位验证码，填进来就能登录；没有账号会自动注册。",
+                            ok: "发送") else { return }
         sendBtn.isEnabled = false
         loginStatus.stringValue = "正在发送…"
         acc.sendCode(email: isEmail ? v : nil, phone: isEmail ? nil : v) { [weak self] err in
@@ -227,9 +295,75 @@ final class AccountPane: NSObject {
         }
     }
 
+    @objc private func loginModeChanged() {
+        let pw = loginMode.selectedSegment == 1
+        passField.isHidden = !pw
+        codeField.isHidden = pw
+        sendBtn.isHidden = pw
+        forgotBtn.isHidden = !pw || acc.signedIn
+        loginStatus.stringValue = pw ? L10n.t("设置过密码的账号可以直接用密码登录。") : ""
+    }
+
+    @objc private func forgot() {
+        loginMode.selectedSegment = 0
+        loginModeChanged()
+        loginStatus.stringValue = L10n.t("忘记密码：先用验证码登录，登录后点「修改密码」设一个新的。")
+    }
+
+    @objc private func changePassword() {
+        let change = acc.hasPassword
+        let cur = NSSecureTextField(), new1 = NSSecureTextField(), new2 = NSSecureTextField()
+        cur.placeholderString = L10n.t("当前密码")
+        new1.placeholderString = L10n.t("新密码（至少 8 位）")
+        new2.placeholderString = L10n.t("再输一次新密码")
+        let fields: [NSTextField] = change ? [cur, new1, new2] : [new1, new2]
+        let box = NSStackView(views: fields)
+        box.orientation = .vertical
+        box.spacing = 8
+        box.frame = NSRect(x: 0, y: 0, width: 260, height: CGFloat(fields.count) * 30)
+        for f in fields { f.translatesAutoresizingMaskIntoConstraints = false; f.widthAnchor.constraint(equalToConstant: 260).isActive = true }
+        let a = NSAlert()
+        a.messageText = change ? "修改密码" : "设置密码"
+        a.informativeText = change ? "忘了当前密码？退出后用验证码登录，再来这里设新密码（不用填当前密码）。"
+                                   : "设好后可以用邮箱 / 手机号 + 密码登录，验证码登录也照样能用。"
+        a.accessoryView = box
+        a.addButton(withTitle: "保存")
+        a.addButton(withTitle: "取消").keyEquivalent = "\u{1b}"
+        a.window.initialFirstResponder = fields.first
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        guard new1.stringValue.count >= 8 else { loginStatus.stringValue = "⚠️ " + L10n.t("密码至少 8 位"); return }
+        guard new1.stringValue == new2.stringValue else { loginStatus.stringValue = "⚠️ " + L10n.t("两次输入的新密码不一样"); return }
+        loginStatus.stringValue = L10n.t("正在保存…")
+        // Fresh code login (forgot flow) may change without the old password; otherwise check it.
+        let current = change && !cur.stringValue.isEmpty ? cur.stringValue : nil
+        acc.setPassword(new1.stringValue, current: current) { [weak self] err in
+            self?.loginStatus.stringValue = err.map { "⚠️ " + $0 } ?? L10n.t("✅ 密码已保存")
+            self?.refresh()
+        }
+    }
+
+    @objc private func showPals() { FollowListWindow.shared.show(kind: 0) }
+    @objc private func showFollowing() { FollowListWindow.shared.show(kind: 1) }
+    @objc private func showInvite() { InviteWindow.shared.show() }
+    @objc private func showDM() { DMWindow.shared.show() }
+
     @objc private func verify() {
+        if loginMode.selectedSegment == 1 {
+            let pw = passField.stringValue
+            guard pw.count >= 6 else { loginStatus.stringValue = L10n.t("先填密码"); return }
+            guard OCConfirm.ask(L10n.english ? "Sign in as \(idValue)?" : "用 \(idValue) 登录？", "登录后名称、头像和订阅会同步到这个账号。", ok: "登录") else { return }
+            loginStatus.stringValue = "正在登录…"
+            acc.signIn(email: isEmail ? idValue : nil, phone: isEmail ? nil : idValue, password: pw) { [weak self] err in
+                guard let self = self else { return }
+                self.loginStatus.stringValue = err.map { "⚠️ " + $0 } ?? "✅ 登录成功"
+                if err == nil { self.passField.stringValue = ""; Prefs.d.set(true, forKey: "account.hasPassword") }
+                self.refresh()
+            }
+            return
+        }
         let code = codeField.stringValue.trimmingCharacters(in: .whitespaces)
         guard code.count >= 4 else { loginStatus.stringValue = "先填验证码"; return }
+        guard OCConfirm.ask("用 \(idValue) 登录？", "登录后名称、头像和订阅会同步到这个账号。", ok: "登录") else { return }
         loginStatus.stringValue = "正在登录…"
         acc.verify(email: isEmail ? idValue : nil, phone: isEmail ? nil : idValue, code: code) { [weak self] err in
             guard let self = self else { return }
@@ -240,6 +374,7 @@ final class AccountPane: NSObject {
     }
 
     @objc private func logout() {
+        guard OCConfirm.ask("退出登录？", "本机的聊天记录和设置会保留；订阅和信号站要重新登录才能用。", ok: "退出登录", danger: true) else { return }
         acc.signOut()
         loginStatus.stringValue = "已退出登录"
         refresh()
@@ -263,6 +398,7 @@ final class AccountPane: NSObject {
     }
 
     @objc private func exportData() {
+        guard OCConfirm.ask("导出我的数据？", "聊天记录、记忆和设置会打包成一个文件，放到「下载」文件夹（不含模型 Key）。", ok: "导出") else { return }
         dataStatus.stringValue = "正在打包…"
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let out = self?.acc.exportData()
@@ -271,6 +407,42 @@ final class AccountPane: NSObject {
                 self?.dataStatus.stringValue = "✅ 已导出到：\(out.lastPathComponent)"
                 NSWorkspace.shared.activateFileViewerSelecting([out])
             }
+        }
+    }
+
+    // MARK: 用户名 live check (format right away, availability after a short pause)
+
+    func controlTextDidChange(_ n: Notification) {
+        guard (n.object as? NSTextField) === userField else { return }
+        userCheck?.cancel()
+        let u = userField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "@", with: "")
+        if u.isEmpty || u == acc.profile.username { setUser(.none, ""); return }
+        guard Account.validUsername(u) else {
+            setUser(.bad, u.count < 3 ? "✗ 至少 3 个字符" : (u.count > 20 ? "✗ 最多 20 个字符" : "✗ 只能用字母、数字或下划线"))
+            return
+        }
+        setUser(.checking, "正在检查…")
+        let w = DispatchWorkItem { [weak self] in
+            self?.acc.usernameAvailable(u) { ok, err in
+                guard let self = self, self.userField.stringValue.replacingOccurrences(of: "@", with: "").trimmingCharacters(in: .whitespaces) == u else { return }
+                switch ok {
+                case true?: self.setUser(.ok, "✓ @\(u) 可以使用")
+                case false?: self.setUser(.taken, "✗ @\(u) 已经被占用了")
+                case nil: self.setUser(.unknown, err ?? "格式没问题；联网后会再确认是否被占用")
+                }
+            }
+        }
+        userCheck = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: w)
+    }
+
+    private func setUser(_ s: UserState, _ text: String) {
+        userState = s
+        userHint.stringValue = text
+        switch s {
+        case .ok: userHint.textColor = .systemGreen
+        case .taken, .bad: userHint.textColor = .systemRed
+        default: userHint.textColor = .secondaryLabelColor
         }
     }
 

@@ -96,20 +96,14 @@ $$;
 
 -- Called by the app on a day the user interacted with the cat. Counts at most one day per user per (UTC) day.
 -- p_local_days: days the app counted on this Mac before; used only the first time, capped at 30.
+-- cat_touch: since account2.sql days come from online time (cat_heartbeat); this only reports.
 create or replace function public.cat_touch(p_local_days int default 0) returns json
 language plpgsql security definer set search_path = public as $$
-declare uid uuid := auth.uid(); n int; d int;
+declare uid uuid := auth.uid(); d int;
 begin
   if uid is null then raise exception '还没登录'; end if;
-  insert into cat_levels (user_id, days, last_day)
-  values (uid, greatest(1, least(coalesce(p_local_days, 0), 30)), current_date)
-  on conflict (user_id) do nothing;
-  get diagnostics n = row_count;
-  if n = 0 then
-    update cat_levels set days = days + 1, last_day = current_date, updated_at = now()
-    where user_id = uid and (last_day is null or last_day < current_date);
-  end if;
   select days into d from cat_levels where user_id = uid;
+  d := coalesce(d, 0);
   return json_build_object('days', d, 'level', ord_level(d));
 end $$;
 

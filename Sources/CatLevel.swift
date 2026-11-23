@@ -1,8 +1,8 @@
 // OrdCat — 小猫等级（像 QQ 等级，按活跃天数点亮，没有上限）+ 订阅会员徽章。
 //
-// 活跃天 = 这一天 App 在运行、而且你至少和小猫互动过一次（点小猫、发消息、语音）。
-// 本机记在 UserDefaults；登录后每天最多同步一次到云端（supabase/signal.sql → cat_touch），
-// 登录时显示云端的天数（信号站按云端等级判断能不能看）。
+// 陪伴天数 = 在线时长累计（Lang 2026-11-23）：OrdCat 运行满 24 小时算 1 天（可以分多次累计）。
+// 本机每分钟记一次；登录后每 5 分钟发一次心跳到云端（supabase/account2.sql → cat_heartbeat），
+// 服务器只按两次心跳之间的真实时间累计（每次最多 10 分钟），防止作弊。登录时显示云端的天数。
 //
 // 升到 Lv N 需要 N*N + 4*N 天（Lv1 = 5 天）。图标：星芒 = 1 级，猫瞳 = 4，猫眼 = 16，猫冠 = 64。
 // 例：Lv89 = 1 猫冠 + 1 猫眼 + 2 猫瞳 + 1 星芒。图标照 brand/rank/rank-*.svg 用代码画（64×64，琥珀色 #FFB547，柔光）。
@@ -17,6 +17,11 @@ extension Prefs {
     static var catCloudDays: Int? { get { d.object(forKey: "catCloudDays") as? Int } set { d.set(newValue, forKey: "catCloudDays") } }
     static var catCloudUser: String { get { d.string(forKey: "catCloudUser") ?? "" } set { d.set(newValue, forKey: "catCloudUser") } }
     static var catCloudSynced: String { get { d.string(forKey: "catCloudSynced") ?? "" } set { d.set(newValue, forKey: "catCloudSynced") } }
+    /// Seconds OrdCat has been running on this Mac (all sessions added up). -1 = not started yet.
+    static var catOnlineSeconds: Int { get { d.object(forKey: "catOnlineSeconds") as? Int ?? -1 } set { d.set(newValue, forKey: "catOnlineSeconds") } }
+    /// Online seconds not yet sent to the server.
+    static var catPendingSeconds: Int { get { d.integer(forKey: "catPendingSeconds") } set { d.set(newValue, forKey: "catPendingSeconds") } }
+    static var catCloudSeconds: Int? { get { d.object(forKey: "catCloudSeconds") as? Int } set { d.set(newValue, forKey: "catCloudSeconds") } }
 }
 
 /// Level, 喵友 and membership of one user, as the server sees them.
@@ -93,47 +98,84 @@ final class CatLevel {
 
     // MARK: my days
 
-    var localDays: Int { Prefs.catActiveCount }
-    /// What the app shows as my active days: the cloud count when signed in (that is what 信号站 checks), else this Mac's.
+    /// Days on this Mac: every full 24 hours OrdCat has been running.
+    var localDays: Int { max(0, Prefs.catOnlineSeconds) / 86400 }
+    /// What the app shows: the cloud count when signed in (that is what 信号站 checks), else this Mac's.
     var days: Int {
         if acct.signedIn, let uid = acct.profile.userID, Prefs.catCloudUser == uid, let c = Prefs.catCloudDays { return c }
         return localDays
+    }
+    /// Online seconds behind `days` (cloud when signed in).
+    var onlineSeconds: Int {
+        if acct.signedIn, let uid = acct.profile.userID, Prefs.catCloudUser == uid, let c = Prefs.catCloudSeconds { return c }
+        return max(0, Prefs.catOnlineSeconds)
     }
     var level: Int { CatLevel.level(days: days) }
     var followers: Int { mine?.followers ?? 0 }
 
     /// Days still needed for the next level.
     var daysToNext: Int { max(0, CatLevel.daysFor(level: level + 1) - days) }
+    /// Hours still needed to finish the current day.
+    var hoursToNextDay: Int { Int(ceil(Double(86400 - onlineSeconds % 86400) / 3600)) }
 
     /// Any active subscription (account-bound or license key) → 订阅会员.
     static var isMember: Bool { ["x", "agent"].contains { Billing.isSubscribed($0) } }
 
-    /// The user interacted with the cat: count today once, and tell the server (at most once a day).
-    func touch() {
-        let t = CatLevel.today
-        if Prefs.catLastActive != t {
-            Prefs.catLastActive = t
-            Prefs.catActiveCount += 1
-            NotificationCenter.default.post(name: CatLevel.changed, object: nil)
+    // MARK: online clock
+
+    private var clock: Timer?
+    private var lastTick = Date()
+    private var beating = false
+
+    /// Start counting online time (once, at launch). Days from the old "active day" rule are kept.
+    func startClock() {
+        guard clock == nil else { return }
+        if Prefs.catOnlineSeconds < 0 { Prefs.catOnlineSeconds = Prefs.catActiveCount * 86400 }
+        lastTick = Date()
+        let t = Timer(timeInterval: 60, repeats: true) { [weak self] _ in self?.tick() }
+        t.tolerance = 10
+        RunLoop.main.add(t, forMode: .common)
+        clock = t
+        // Sleep / wake: never count the time the Mac was asleep.
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.lastTick = Date()
         }
-        syncTouch()
+        beat()
     }
 
-    private func syncTouch() {
-        guard acct.configured, acct.signedIn, let uid = acct.profile.userID, !touching else { return }
-        let key = uid + "|" + CatLevel.today
-        guard Prefs.catCloudSynced != key else { return }
-        touching = true
-        acct.request("POST", "/rest/v1/rpc/cat_touch", json: ["p_local_days": localDays]) { [weak self] obj, err in
+    private func tick() {
+        let now = Date()
+        let add = Int(min(max(now.timeIntervalSince(lastTick), 0), 90))   // a long gap = sleep, not online
+        lastTick = now
+        guard add > 0 else { return }
+        let before = localDays
+        Prefs.catOnlineSeconds = max(0, Prefs.catOnlineSeconds) + add
+        Prefs.catPendingSeconds += add
+        if localDays != before { NotificationCenter.default.post(name: CatLevel.changed, object: nil) }
+        if Prefs.catPendingSeconds >= 300 { beat() }
+    }
+
+    /// Send the online time to the server (cat_heartbeat). Falls back quietly when the server isn't updated yet.
+    private func beat() {
+        guard acct.configured, acct.signedIn, let uid = acct.profile.userID, !beating else { return }
+        beating = true
+        let pending = min(Prefs.catPendingSeconds, 600)
+        acct.request("POST", "/rest/v1/rpc/cat_heartbeat",
+                     json: ["p_seconds": pending, "p_local_seconds": max(0, Prefs.catOnlineSeconds)]) { [weak self] obj, err in
             guard let self = self else { return }
-            self.touching = false
+            self.beating = false
             guard err == nil, let o = obj as? [String: Any] else { return }
-            Prefs.catCloudSynced = key
+            Prefs.catPendingSeconds = max(0, Prefs.catPendingSeconds - pending)
+            let before = self.days
             Prefs.catCloudUser = uid
             Prefs.catCloudDays = CatStats.int(o["days"])
-            self.refresh()
+            Prefs.catCloudSeconds = CatStats.int(o["online_seconds"])
+            if self.days != before { self.refresh() }
         }
     }
+
+    /// Kept for callers from the old rule: interacting no longer adds days, it only makes sure the clock runs.
+    func touch() { startClock() }
 
     /// Load my level / 喵友 / membership from the server (on launch and after sign-in).
     func refresh(_ done: (() -> Void)? = nil) {
@@ -142,8 +184,7 @@ final class CatLevel {
             NotificationCenter.default.post(name: CatLevel.changed, object: nil)
             done?(); return
         }
-        // Signed in today and already interacted today → make sure today counts in the cloud too.
-        if Prefs.catLastActive == CatLevel.today { syncTouch() }
+        beat()
         stats(of: nil) { [weak self] s, _ in
             if let s = s {
                 self?.mine = s

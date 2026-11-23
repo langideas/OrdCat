@@ -295,6 +295,13 @@ struct AssembledContext {
     let tokens: Int
 }
 
+/// One place on screen the answer points at.
+struct GroundTarget {
+    let el: ScreenElement
+    let hint: String
+    let n: Int
+}
+
 final class ContextHub {
     let reader = ScreenReader()
     let memory: MemoryStore
@@ -542,7 +549,7 @@ final class ContextHub {
             var s = "## 当前屏幕\n应用：\(card.app)\n窗口：\(card.windowTitle)\n窗口区域：(\(Int(wr.minX)),\(Int(wr.minY)),\(Int(wr.width)),\(Int(wr.height)))\n读取方式：\(card.source)\n可见元素（#编号 [类型] 内容 @x,y,宽,高）：\n"
             let screenBudget = budget * 55 / 100
             var used = estimateTokens(s)
-            for e in card.elements {
+            for e in card.elements where !e.chrome {
                 let t = e.text.count > 240 ? String(e.text.prefix(240)) + "…" : e.text
                 let line = "#\(elements.count + 1) [\(e.role)] \(t.replacingOccurrences(of: "\n", with: " ")) @\(Int(e.rect.minX)),\(Int(e.rect.minY)),\(Int(e.rect.width)),\(Int(e.rect.height))\n"
                 let cost = estimateTokens(line)
@@ -629,7 +636,7 @@ final class ContextHub {
         }
         var seen = Set<String>()
         var vis: [ScreenElement] = [], rest: [ScreenElement] = []
-        for e in c.elements {
+        for e in c.elements where !e.chrome {   // toolbars / tabs / bookmarks are never numbered (never ringed)
             let t = e.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard t.count >= 2, seen.insert(t).inserted else { continue }
             if visible(e) { vis.append(e) } else { rest.append(e) }
@@ -664,40 +671,71 @@ final class ContextHub {
     }
 
     /// When the model gave no tags: match each point of the answer to the on-screen line it talks about.
-    func fallbackTargets(for reply: String, limit: Int = 4) -> [ScreenElement] {
-        let parts = reply.components(separatedBy: CharacterSet(charactersIn: "\n。；;"))
-            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " •-*·0123456789.、：:")) }
+    /// Strict on purpose: a wrong ring is worse than no ring. Short labels (buttons, bookmarks) never match on a
+    /// couple of shared letters, and lines visible on screen win ties.
+    func fallbackTargets(for reply: String, limit: Int = 4) -> [GroundTarget] {
+        let parts = reply.components(separatedBy: CharacterSet(charactersIn: "\n。；;！？!?"))
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " •-*·0123456789.、：:①②③④⑤⑥⑦⑧⑨👉")) }
             .filter { $0.count >= 6 }
-        var picked: [ScreenElement] = []
+        var picked: [GroundTarget] = []
         for p in parts {
             var best: (Double, ScreenElement)?
-            for e in groundingElements where e.text.count >= 4 && !picked.contains(where: { $0.rect == e.rect }) {
-                let sc = ContextHub.similarity(p, e.text)
-                if sc > (best?.0 ?? 0.34) { best = (sc, e) }
+            for e in groundingElements where !e.chrome && e.text.count >= 6 && !picked.contains(where: { $0.el.rect == e.rect }) {
+                let (sc, shared) = ContextHub.overlap(p, e.text)
+                guard shared >= 4 else { continue }
+                if sc > (best?.0 ?? 0.5) { best = (sc, e) }
             }
-            if let b = best { picked.append(b.1) }
+            if let b = best { picked.append(GroundTarget(el: b.1, hint: p, n: picked.count + 1)) }
             if picked.count >= limit { break }
         }
         return picked
     }
 
-    /// Elements named by [[el:N]] tags.
-    func taggedElements(in reply: String) -> [ScreenElement] {
+    /// Bigram overlap score (0…1, relative to the shorter text) and the number of shared bigrams.
+    static func overlap(_ a: String, _ b: String) -> (Double, Int) {
+        func grams(_ s: String) -> Set<String> {
+            let c = Array(s.lowercased().filter { !$0.isWhitespace && !$0.isPunctuation && !$0.isSymbol })
+            guard c.count >= 2 else { return Set(c.map { String($0) }) }
+            return Set((0..<(c.count - 1)).map { String(c[$0]) + String(c[$0 + 1]) })
+        }
+        let ga = grams(a), gb = grams(b)
+        guard !ga.isEmpty, !gb.isEmpty else { return (0, 0) }
+        let n = ga.intersection(gb).count
+        return (Double(n) / Double(min(ga.count, gb.count)), n)
+    }
+
+    /// Elements named by [[el:N]] tags, in the order the answer mentions them. Each carries the sentence that
+    /// pointed at it (to find the exact line inside a long block) and its ring number (① ② …, same as the text).
+    func taggedTargets(in reply: String) -> [GroundTarget] {
         guard let re = try? NSRegularExpression(pattern: "\\[\\[el:\\s*([0-9]+)\\s*\\]\\]") else { return [] }
         let ns = reply as NSString
-        var out: [ScreenElement] = []
+        var out: [GroundTarget] = []
+        var seen: [Int] = []
+        var prevEnd = 0
         for m in re.matches(in: reply, range: NSRange(location: 0, length: ns.length)) {
             let i = (Int(ns.substring(with: m.range(at: 1))) ?? 0) - 1
-            if i >= 0 && i < groundingElements.count, !out.contains(where: { $0.rect == groundingElements[i].rect }) {
-                out.append(groundingElements[i])
-            }
+            // The sentence right before the tag.
+            var hint = ns.substring(with: NSRange(location: prevEnd, length: max(0, m.range.location - prevEnd)))
+            prevEnd = m.range.location + m.range.length
+            if let cut = hint.rangeOfCharacter(from: CharacterSet(charactersIn: "\n。！？!?"), options: .backwards),
+               hint.distance(from: cut.upperBound, to: hint.endIndex) >= 4 { hint = String(hint[cut.upperBound...]) }
+            hint = hint.replacingOccurrences(of: "\\[\\[[^\\]]*\\]\\]", with: "", options: .regularExpression)
+                .trimmingCharacters(in: CharacterSet(charactersIn: " •-*·、：:，,"))
+            guard !seen.contains(i) else { continue }
+            seen.append(i)
+            guard i >= 0 && i < groundingElements.count, !groundingElements[i].chrome else { continue }
+            out.append(GroundTarget(el: groundingElements[i], hint: hint, n: seen.count))
         }
         return out
     }
 
+    /// Kept for older callers.
+    func taggedElements(in reply: String) -> [ScreenElement] { taggedTargets(in: reply).map { $0.el } }
+
     /// Re-read the page right before drawing, so rings land where the text is now (the user may have scrolled
-    /// while the answer was streaming). Elements that are no longer on screen are left out.
-    func relocate(_ targets: [ScreenElement]) async -> [CGRect] {
+    /// while the answer was streaming), then narrow each ring from a whole block to the exact line(s) the
+    /// answer is about (on-device OCR of the window, nothing leaves the Mac). Off-screen targets are left out.
+    func relocate(_ targets: [GroundTarget]) async -> [(CGRect, Int)] {
         guard !targets.isEmpty else { return [] }
         let screens = NSScreen.screens.map { r -> CGRect in
             let h = NSScreen.screens.first?.frame.height ?? 0
@@ -708,19 +746,83 @@ final class ContextHub {
         }
         guard let app = groundingApp ?? lastExternalApp, !app.isTerminated,
               let c = await reader.capture(app: app, deep: true, wantScreenshot: false, maxNodes: 4000, axBudget: 0.6) else {
-            return targets.map { $0.rect }
+            return targets.map { ($0.el.rect, $0.n) }
         }
-        var out: [CGRect] = []
+        var found: [(CGRect, GroundTarget)] = []
         for t in targets {
-            let same = c.elements.filter { $0.text == t.text && onScreen($0.rect, c.windowRect) }
-            if let near = same.min(by: { hypot($0.rect.midY - t.rect.midY, $0.rect.midX - t.rect.midX) < hypot($1.rect.midY - t.rect.midY, $1.rect.midX - t.rect.midX) }) {
-                out.append(near.rect.intersection(c.windowRect == .zero ? near.rect : c.windowRect))
+            let same = c.elements.filter { $0.text == t.el.text && !$0.chrome && onScreen($0.rect, c.windowRect) }
+            if let near = same.min(by: { hypot($0.rect.midY - t.el.rect.midY, $0.rect.midX - t.el.rect.midX) < hypot($1.rect.midY - t.el.rect.midY, $1.rect.midX - t.el.rect.midX) }) {
+                let r = near.rect.intersection(c.windowRect == .zero ? near.rect : c.windowRect)
+                if !r.isNull && r.height > 2 { found.append((r, t)) }
             }
         }
-        return out.filter { !$0.isNull && $0.height > 2 }
+        // Narrow tall blocks (a whole post, a paragraph) to the line the point quotes.
+        var lines: [ScreenElement]?
+        var out: [(CGRect, Int)] = []
+        for (r, t) in found {
+            var rect = r
+            if r.height > 44 && t.hint.count >= 4 {
+                if lines == nil {
+                    lines = []
+                    if let (img, frame) = await reader.captureWindowImage(pid: app.processIdentifier, maxWidth: 2400) {
+                        lines = reader.ocr(img, frame: frame, accurate: true)
+                    }
+                }
+                if let l = lines, let narrow = ContextHub.bestLines(in: r, hint: t.hint, lines: l) { rect = narrow }
+            }
+            out.append((rect, t.n))
+        }
+        return out
+    }
+
+    /// Older callers: plain rects.
+    func relocate(_ targets: [ScreenElement]) async -> [CGRect] {
+        await relocate(targets.enumerated().map { GroundTarget(el: $0.element, hint: "", n: $0.offset + 1) }).map { $0.0 }
+    }
+
+    /// The OCR line(s) inside `block` that best match `hint`: the best line, plus the next line when the point
+    /// runs onto it. Nil when nothing matches well enough (then the whole block is ringed).
+    static func bestLines(in block: CGRect, hint: String, lines: [ScreenElement]) -> CGRect? {
+        let inside = lines.filter { l in
+            let i = l.rect.intersection(block.insetBy(dx: -4, dy: -4))
+            return !i.isNull && i.width * i.height >= 0.6 * l.rect.width * l.rect.height
+        }.sorted { abs($0.rect.minY - $1.rect.minY) > 4 ? $0.rect.minY < $1.rect.minY : $0.rect.minX < $1.rect.minX }
+        guard !inside.isEmpty else { return nil }
+        var best: (Double, Int)?
+        for (k, l) in inside.enumerated() {
+            let (sc, n) = overlap(hint, l.text)
+            guard n >= 2 else { continue }
+            if sc > (best?.0 ?? 0.3) { best = (sc, k) }
+        }
+        guard let (_, k) = best else { return nil }
+        var r = inside[k].rect
+        // Same visual row (wrapped spans) and the following row if it continues the quoted point.
+        for l in inside where l.rect != inside[k].rect && abs(l.rect.midY - r.midY) < r.height * 0.5 { r = r.union(l.rect) }
+        if k + 1 < inside.count {
+            let nx = inside[k + 1]
+            let (sc, n) = overlap(hint, nx.text)
+            if nx.rect.minY > r.midY && nx.rect.minY - r.maxY < r.height && n >= 2 && sc >= 0.3 { r = r.union(nx.rect) }
+        }
+        return r.insetBy(dx: -2, dy: -1)
     }
 
     /// Resolve [[el:N]] / [[pt:x,y]] / [[img:x,y]] tags into global top-left rects.
+    /// [[pt:…]] / [[img:…]] tags with their ring numbers (counted over every tag, the same way stripTags numbers them).
+    func pointTargets(in reply: String) -> [(CGRect, Int)] {
+        guard let re = try? NSRegularExpression(pattern: "\\[\\[((?:el|pt|img):[^\\]]*)\\]\\]") else { return [] }
+        let ns = reply as NSString
+        var order: [String] = []
+        var out: [(CGRect, Int)] = []
+        for m in re.matches(in: reply, range: NSRange(location: 0, length: ns.length)) {
+            let key = ns.substring(with: m.range(at: 1)).replacingOccurrences(of: " ", with: "")
+            if order.contains(key) { continue }
+            order.append(key)
+            if key.hasPrefix("el:") { continue }
+            if let r = resolveTargets(in: "[[" + key + "]]").first { out.append((r, order.count)) }
+        }
+        return out
+    }
+
     func resolveTargets(in reply: String) -> [CGRect] {
         guard let re = try? NSRegularExpression(pattern: "\\[\\[(el|pt|img):\\s*([0-9.]+)\\s*(?:,\\s*([0-9.]+))?\\s*\\]\\]") else { return [] }
         let ns = reply as NSString
@@ -747,7 +849,25 @@ final class ContextHub {
         return out
     }
 
+    /// Tags become ring numbers ① ② … in the order the answer first mentions each place, so the text and the
+    /// rings on screen match. Unfinished tags at the end of a streaming chunk are hidden.
     static func stripTags(_ s: String) -> String {
-        s.replacingOccurrences(of: "\\[\\[(?:el|pt|img):[^\\]]*\\]\\]", with: "👉", options: .regularExpression)
+        let marks = ["①","②","③","④","⑤","⑥","⑦","⑧","⑨","⑩"]
+        guard let re = try? NSRegularExpression(pattern: "\\[\\[((?:el|pt|img):[^\\]]*)\\]\\]") else { return s }
+        let ns = s as NSString
+        var order: [String] = []
+        var out = ""
+        var last = 0
+        for m in re.matches(in: s, range: NSRange(location: 0, length: ns.length)) {
+            out += ns.substring(with: NSRange(location: last, length: m.range.location - last))
+            let key = ns.substring(with: m.range(at: 1)).replacingOccurrences(of: " ", with: "")
+            if !order.contains(key) { order.append(key) }
+            let i = order.firstIndex(of: key)!
+            out += i < marks.count ? marks[i] : "👉"
+            last = m.range.location + m.range.length
+        }
+        out += ns.substring(from: last)
+        if let r = out.range(of: "\\[\\[[^\\]]*$", options: .regularExpression) { out.removeSubrange(r) }
+        return out
     }
 }

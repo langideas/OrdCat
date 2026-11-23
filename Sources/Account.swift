@@ -104,6 +104,22 @@ final class Account {
         if signedIn { pushProfile(done: done) } else { done(nil) }
     }
 
+    /// Is this 用户名 free? true / false, or nil with a reason when the server can't say (offline, not set up).
+    /// Uses the username_available RPC (supabase/account2.sql), which works signed in or not.
+    func usernameAvailable(_ u: String, done: @escaping (Bool?, String?) -> Void) {
+        guard configured else { done(nil, "格式没问题（账号服务开通后会检查是否被占用）"); return }
+        request("POST", "/rest/v1/rpc/username_available", json: ["p_name": u], auth: signedIn) { obj, err in
+            if let e = err {
+                done(nil, e.contains("username_available") || e.contains("404") || e.contains("PGRST")
+                     ? "格式没问题（服务器还没开通用户名检查）" : "格式没问题，暂时连不上服务器确认是否被占用")
+                return
+            }
+            if let b = obj as? Bool { done(b, nil); return }
+            if let o = obj as? [String: Any], let b = o["available"] as? Bool { done(b, nil); return }
+            done(nil, nil)
+        }
+    }
+
     func setAvatar(from url: URL, done: @escaping (String?) -> Void) {
         guard let src = NSImage(contentsOf: url) else { done("这张图片打不开"); return }
         let side: CGFloat = 256
@@ -150,6 +166,50 @@ final class Account {
             self.pull { done(nil) }
         }
     }
+
+    // MARK: password (Supabase Auth). 忘记密码 = sign in with a one-time code, then set a new password.
+
+    /// Sign in with email / phone + password.
+    func signIn(email: String?, phone: String?, password: String, done: @escaping (String?) -> Void) {
+        guard configured else { done("账号服务还在开通中"); return }
+        var body: [String: Any] = ["password": password]
+        if let e = email { body["email"] = e.trimmingCharacters(in: .whitespaces) }
+        if let p = phone { body["phone"] = Account.normalizePhone(p) }
+        request("POST", "/auth/v1/token?grant_type=password", json: body, auth: false) { [weak self] obj, err in
+            guard let self = self else { return }
+            guard err == nil, let o = obj as? [String: Any], self.takeSession(o) else {
+                let e = (err ?? "").lowercased()
+                done(e.contains("invalid") ? "账号或密码不对（没设过密码就用验证码登录）" : (err ?? "登录失败"))
+                return
+            }
+            self.pull { done(nil) }
+        }
+    }
+
+    /// Set or change the password of the signed-in account. Changing asks for the current one first.
+    func setPassword(_ new: String, current: String?, done: @escaping (String?) -> Void) {
+        guard signedIn else { done("还没登录"); return }
+        guard new.count >= 8 else { done("密码至少 8 位"); return }
+        let apply: () -> Void = { [weak self] in
+            self?.request("PUT", "/auth/v1/user", json: ["password": new]) { _, err in
+                if let e = err, e.lowercased().contains("same") { done("新密码不能和旧密码一样"); return }
+                if err == nil { Prefs.d.set(true, forKey: "account.hasPassword") }
+                done(err)
+            }
+        }
+        guard let cur = current, !cur.isEmpty else { apply(); return }
+        // Check the current password by signing in with it again (same account).
+        var body: [String: Any] = ["password": cur]
+        if let e = profile.email, !e.isEmpty { body["email"] = e } else if let p = profile.phone, !p.isEmpty { body["phone"] = p }
+        request("POST", "/auth/v1/token?grant_type=password", json: body, auth: false) { [weak self] obj, err in
+            guard let self = self else { return }
+            guard err == nil, let o = obj as? [String: Any], self.takeSession(o) else { done("当前密码不对"); return }
+            apply()
+        }
+    }
+
+    /// Whether this Mac has set a password for the account (Supabase doesn't tell clients).
+    var hasPassword: Bool { Prefs.d.bool(forKey: "account.hasPassword") }
 
     static func normalizePhone(_ p: String) -> String {
         var s = p.filter { $0.isNumber || $0 == "+" }

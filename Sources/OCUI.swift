@@ -230,3 +230,30 @@ func ocRelativeTime(_ d: Date) -> String {
     let f = DateFormatter(); f.dateFormat = L10n.english ? "MMM d" : "M月d日"
     return f.string(from: d)
 }
+
+
+/// One confirm popup for every save and account action (Lang 2026-11-23: 所有保存都要弹窗确认).
+enum OCConfirm {
+    /// Returns true when the user presses the first button. `info` should say what will change.
+    @discardableResult
+    static func ask(_ title: String, _ info: String = "", ok: String = "确认", danger: Bool = false, icon: NSImage? = nil) -> Bool {
+        let a = NSAlert()
+        a.alertStyle = danger ? .critical : .informational
+        a.messageText = title
+        a.informativeText = info
+        if let i = icon { a.icon = i }
+        a.addButton(withTitle: ok)
+        let cancel = a.addButton(withTitle: "取消")
+        cancel.keyEquivalent = "\u{1b}"
+        NSApp.activate(ignoringOtherApps: true)
+        return a.runModal() == .alertFirstButtonReturn
+    }
+
+    /// "旧 → 新" lines for the fields that actually changed; empty when nothing changed.
+    static func diff(_ rows: [(String, String, String)]) -> String {
+        rows.filter { $0.1 != $0.2 }.map { r in
+            let a = r.1.isEmpty ? "（空）" : r.1, b = r.2.isEmpty ? "（空）" : r.2
+            return "\(r.0)：\(a) → \(b)"
+        }.joined(separator: "\n")
+    }
+}

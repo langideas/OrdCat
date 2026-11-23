@@ -14,6 +14,8 @@ struct ScreenElement {
     let role: String      // 按钮 / 文本 / 输入框 / 链接 / 标题 / 文字(OCR)…
     let text: String
     let rect: CGRect      // global, top-left origin
+    /// Browser / app chrome (toolbars, tab strip, bookmarks bar) outside the page content. Never a highlight target.
+    var chrome: Bool = false
 }
 
 struct ContextCard {
@@ -296,16 +298,25 @@ final class ScreenReader {
         let win = wv as! AXUIElement
         let title = str(win, kAXTitleAttribute as String) ?? ""
         let frame = rect(win) ?? .zero
+        let bidNow = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""
+        let browser = ScreenReader.chromiumBrowsers.contains(bidNow) || ["com.apple.Safari", "org.mozilla.firefox",
+            "com.apple.SafariTechnologyPreview"].contains(bidNow)
         var out: [ScreenElement] = []
-        var stack: [(AXUIElement, Int)] = [(root ?? win, 0)]
+        // Each node carries whether it sits inside page content (AXWebArea) and whether it sits in window chrome
+        // (toolbar, tab strip, bookmarks bar) — chrome is kept as context but never ringed.
+        var stack: [(AXUIElement, Int, Bool, Bool)] = [(root ?? win, 0, false, false)]
         var visited = 0
+        var sawWeb = false
         let deadline = Date().addingTimeInterval(budget)
-        while let (el, depth) = stack.popLast() {
+        while let (el, depth, inWeb0, chrome0) = stack.popLast() {
             visited += 1
             if visited > maxNodes || Date() > deadline { break }
             let role = str(el, kAXRoleAttribute as String) ?? ""
             if role == "AXSecureTextField" { continue }                // never read password fields
             if role == "AXMenuBar" || role == "AXMenuBarItem" { continue } // noise
+            let inWeb = inWeb0 || role == "AXWebArea"
+            if role == "AXWebArea" { sawWeb = true }
+            let chrome = chrome0 || (!inWeb && ["AXToolbar", "AXTabGroup", "AXMenuButton", "AXPopUpButton", "AXRadioGroup"].contains(role))
             if let name = roleName(role) {
                 var text = ""
                 for a in [kAXValueAttribute as String, kAXTitleAttribute as String, kAXDescriptionAttribute as String] {
@@ -313,13 +324,16 @@ final class ScreenReader {
                 }
                 if !text.isEmpty, let r = rect(el), r.width > 1, r.height > 1, frame == .zero || frame.insetBy(dx: -4, dy: -4).intersects(r) {
                     let clipped = text.count > 1200 ? String(text.prefix(1200)) + "…" : text
-                    out.append(ScreenElement(role: name, text: Redactor.clean(clipped), rect: r))
+                    // Outside the web page in a browser counts as chrome too (address bar, bookmarks, tabs).
+                    out.append(ScreenElement(role: name, text: Redactor.clean(clipped), rect: r,
+                                             chrome: chrome || (!inWeb && browser)))
                 }
             }
             if depth < 30 {
-                for c in children(el).reversed() { stack.append((c, depth + 1)) }
+                for c in children(el).reversed() { stack.append((c, depth + 1, inWeb, chrome)) }
             }
         }
+        if browser && !sawWeb { for i in out.indices { out[i].chrome = false } }   // tree had no web area: don't drop everything
         // Reading order: top-to-bottom, left-to-right.
         out.sort { a, b in abs(a.rect.minY - b.rect.minY) > 6 ? a.rect.minY < b.rect.minY : a.rect.minX < b.rect.minX }
         return (Redactor.clean(title), frame, out)
@@ -382,7 +396,10 @@ final class ScreenReader {
         if needOCR || (deep && wantScreenshot) {
             if let (img, frame) = await captureWindowImage(pid: pid, maxWidth: deep ? 1800 : 1280) {
                 if needOCR {
-                    let o = ocr(img, frame: frame, accurate: deep)
+                    var o = ocr(img, frame: frame, accurate: deep)
+                    // OCR text above the bottom of the window chrome (tabs, address bar, bookmarks) is chrome too.
+                    let chromeBottom = ax.elements.filter { $0.chrome && $0.rect.minY < frame.minY + 200 }.map { $0.rect.maxY }.max()
+                    if let cb = chromeBottom { for i in o.indices where o[i].rect.midY < cb + 2 { o[i].chrome = true } }
                     if !o.isEmpty { elements += o; source = axChars > 0 ? "AX+OCR" : "OCR" }
                 }
                 if deep && wantScreenshot { shot = img }
@@ -408,54 +425,101 @@ final class Highlighter {
     func clear() {
         for p in panels { p.orderOut(nil) }
         panels.removeAll()
+        shown.removeAll()
     }
 
     func show(_ rects: [CGRect], label: String? = nil, seconds: Double = 7, limit: Int = 4) {
+        show(marks: rects.prefix(limit).map { ($0, 0) }, label: label, seconds: seconds)
+    }
+
+    private var hideWork: DispatchWorkItem?
+    private var shown: [CGRect] = []
+
+    /// Rings with their numbers (① ② … matching the answer; 0 = no number). Replaces what is on screen.
+    func show(marks: [(CGRect, Int)], label: String? = nil, seconds: Double = 10) {
         clear()
-        for (i, r0) in rects.prefix(limit).enumerated() {
-            var r = Highlighter.cocoaRect(r0).insetBy(dx: -8, dy: -8)
-            if r.width < 36 { r = r.insetBy(dx: -(36 - r.width) / 2, dy: 0) }
-            if r.height < 36 { r = r.insetBy(dx: 0, dy: -(36 - r.height) / 2) }
-            let p = NSPanel(contentRect: r, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-            p.isOpaque = false
-            p.backgroundColor = .clear
-            p.level = .statusBar
-            p.ignoresMouseEvents = true
-            p.hasShadow = false
-            p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-            let v = NSView(frame: NSRect(origin: .zero, size: r.size))
-            v.wantsLayer = true
-            let ring = CAShapeLayer()
-            ring.frame = v.bounds
-            ring.path = CGPath(roundedRect: v.bounds.insetBy(dx: 3, dy: 3), cornerWidth: 10, cornerHeight: 10, transform: nil)
-            ring.fillColor = kAmber.withAlphaComponent(0.12).cgColor
-            ring.strokeColor = kAmber.cgColor
-            ring.lineWidth = 3
-            ring.shadowColor = kAmber.cgColor
-            ring.shadowOpacity = 0.8
-            ring.shadowRadius = 8
-            ring.shadowOffset = .zero
-            v.layer?.addSublayer(ring)
+        shown = []
+        for (i, m) in marks.prefix(8).enumerated() { add(m.0, number: m.1, label: i == 0 ? label : nil, seconds: seconds) }
+    }
+
+    /// Ring one more place right away (while the answer is still being written), keeping the others.
+    func add(_ r0: CGRect, number: Int, label: String? = nil, seconds: Double = 10) {
+        guard panels.count < 8, !shown.contains(where: { $0.intersects(r0) && abs($0.midY - r0.midY) < 4 }) else { return }
+        shown.append(r0)
+        var r = Highlighter.cocoaRect(r0).insetBy(dx: -6, dy: -5)
+        if r.width < 30 { r = r.insetBy(dx: -(30 - r.width) / 2, dy: 0) }
+        if r.height < 24 { r = r.insetBy(dx: 0, dy: -(24 - r.height) / 2) }
+        // Room for the number badge on the top-left corner.
+        let badge: CGFloat = number > 0 ? 22 : 0
+        let outer = NSRect(x: r.minX - badge / 2, y: r.minY, width: r.width + badge / 2, height: r.height + badge / 2)
+        let p = NSPanel(contentRect: outer, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.level = .statusBar
+        p.ignoresMouseEvents = true
+        p.hasShadow = false
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        let v = NSView(frame: NSRect(origin: .zero, size: outer.size))
+        v.wantsLayer = true
+        v.layer?.masksToBounds = false
+        let box = NSRect(x: badge / 2, y: 0, width: r.width, height: r.height)
+        let ring = CAShapeLayer()
+        ring.frame = v.bounds
+        ring.path = CGPath(roundedRect: box.insetBy(dx: 2, dy: 2), cornerWidth: 7, cornerHeight: 7, transform: nil)
+        ring.fillColor = kAmber.withAlphaComponent(0.10).cgColor
+        ring.strokeColor = kAmber.cgColor
+        ring.lineWidth = 2.5
+        ring.shadowColor = kAmber.cgColor
+        ring.shadowOpacity = 0.8
+        ring.shadowRadius = 6
+        ring.shadowOffset = .zero
+        v.layer?.addSublayer(ring)
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            // Draw in once (the cat "circles" it), then breathe softly.
+            let draw = CABasicAnimation(keyPath: "strokeEnd")
+            draw.fromValue = 0; draw.toValue = 1; draw.duration = 0.35
+            draw.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            ring.add(draw, forKey: "draw")
             let pulse = CABasicAnimation(keyPath: "opacity")
-            pulse.fromValue = 1; pulse.toValue = 0.35
-            pulse.duration = 0.6; pulse.autoreverses = true; pulse.repeatCount = .infinity
+            pulse.fromValue = 1; pulse.toValue = 0.5
+            pulse.beginTime = CACurrentMediaTime() + 0.35
+            pulse.duration = 0.8; pulse.autoreverses = true; pulse.repeatCount = .infinity
             ring.add(pulse, forKey: "pulse")
-            if i == 0, let label = label, !label.isEmpty {
-                let t = CATextLayer()
-                t.string = " 🐾 " + label + " "
-                t.fontSize = 12
-                t.foregroundColor = NSColor.black.cgColor
-                t.backgroundColor = kAmber.cgColor
-                t.cornerRadius = 6
-                t.contentsScale = 2
-                t.frame = CGRect(x: 4, y: v.bounds.height - 4, width: min(260, CGFloat(label.count) * 13 + 40), height: 18)
-                v.layer?.masksToBounds = false
-                v.layer?.addSublayer(t)
-            }
-            p.contentView = v
-            p.orderFrontRegardless()
-            panels.append(p)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in self?.clear() }
+        if number > 0 {
+            let marks = ["①","②","③","④","⑤","⑥","⑦","⑧","⑨","⑩"]
+            let c = CATextLayer()
+            c.string = number <= marks.count ? String(number) : "•"
+            c.font = NSFont.systemFont(ofSize: 12, weight: .bold)
+            c.fontSize = 12
+            c.alignmentMode = .center
+            c.foregroundColor = NSColor(srgbRed: 0.12, green: 0.13, blue: 0.13, alpha: 1).cgColor
+            c.backgroundColor = kAmber.cgColor
+            c.cornerRadius = 10
+            c.contentsScale = 2
+            c.frame = CGRect(x: 0, y: outer.height - 20, width: 20, height: 20)
+            // Vertically centre the digit.
+            let t = CATextLayer(); _ = t
+            c.bounds = CGRect(x: 0, y: -2, width: 20, height: 20)
+            v.layer?.addSublayer(c)
+        }
+        if let label = label, !label.isEmpty {
+            let t = CATextLayer()
+            t.string = " 🐾 " + label + " "
+            t.fontSize = 12
+            t.foregroundColor = NSColor.black.cgColor
+            t.backgroundColor = kAmber.cgColor
+            t.cornerRadius = 6
+            t.contentsScale = 2
+            t.frame = CGRect(x: badge + 2, y: outer.height - 2, width: min(260, CGFloat(label.count) * 13 + 40), height: 18)
+            v.layer?.addSublayer(t)
+        }
+        p.contentView = v
+        p.orderFrontRegardless()
+        panels.append(p)
+        hideWork?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.clear() }
+        hideWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: w)
     }
 }
