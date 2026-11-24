@@ -1376,6 +1376,13 @@ final class Bubble: NSObject {
     private(set) var listenActive = false
     var onListenMenu: ((NSView) -> Void)?
     var onListenClose: (() -> Void)?
+    // 🔊 正在听: an app on this Mac is making sound. Text set by the app delegate; nil hides it.
+    private let soundChip = NSButton(title: "", target: nil, action: nil)
+    private let soundClose = NSButton(title: "✕", target: nil, action: nil)
+    private(set) var soundTitle: String?
+    private(set) var soundActive = false
+    var onSoundClick: ((NSView) -> Void)?
+    var onSoundClose: (() -> Void)?
     // ➕ attachments waiting to be sent with the next message.
     private var plusButton: NSButton!
     private let attachLabel = NSTextField(labelWithString: "")
@@ -1546,6 +1553,7 @@ final class Bubble: NSObject {
         shareClose.toolTip = "这次对话不分享这个页面"
         card.addSubview(shareClose)
         for (b, sel, tip) in [(listenChip, #selector(listenClicked), "选一段喵传听到的内容来聊"),
+                              (soundChip, #selector(soundClicked), "让小猫一起听这个应用的声音（在本机转成文字，只留最近 10 分钟，不保存）"),
                               (attachClear, #selector(clearAttachments), "移除附件")] {
             b.isBordered = false
             b.target = self
@@ -1567,6 +1575,23 @@ final class Bubble: NSObject {
         listenClose.action = #selector(closeListen)
         listenClose.toolTip = "这次对话不带收听内容"
         card.addSubview(listenClose)
+        for (chip, close, sel, tip) in [(soundChip, soundClose, #selector(closeSound), "这次对话不带这个声音")] {
+            chip.wantsLayer = true
+            chip.layer?.cornerRadius = 11
+            chip.layer?.backgroundColor = Theme.fg.withAlphaComponent(0.10).cgColor
+            chip.font = .systemFont(ofSize: 11)
+            chip.contentTintColor = Theme.fg
+            chip.alignment = .left
+            chip.lineBreakMode = .byTruncatingTail
+            card.addSubview(chip)
+            close.isBordered = false
+            close.font = .systemFont(ofSize: 11)
+            close.contentTintColor = .secondaryLabelColor
+            close.target = self
+            close.action = sel
+            close.toolTip = tip
+            card.addSubview(close)
+        }
         attachLabel.font = .systemFont(ofSize: 11)
         attachLabel.textColor = .secondaryLabelColor
         attachLabel.lineBreakMode = .byTruncatingTail
@@ -1609,6 +1634,19 @@ final class Bubble: NSObject {
     // MARK: 🎧 正在收听
     @objc private func listenClicked() { onListenMenu?(listenChip) }
     @objc private func closeListen() { onListenClose?() }
+
+    // MARK: 🔊 正在听
+    @objc private func soundClicked() { onSoundClick?(soundChip) }
+    @objc private func closeSound() { onSoundClose?() }
+
+    /// title nil hides the chip; active shows ✕ (the sound is brought into the chat).
+    func setSound(title: String?, active: Bool) {
+        guard title != soundTitle || active != soundActive else { return }
+        soundTitle = title
+        soundActive = active && title != nil
+        if let t = title { soundChip.title = "  " + t + (soundActive ? "  ⌄" : "") }
+        if isShown { layout(scrollToEnd: false) }
+    }
 
     /// title nil hides the chip; active shows ✕ (something is being brought into the chat).
     func setListen(title: String?, active: Bool) {
@@ -1723,6 +1761,8 @@ final class Bubble: NSObject {
         shareChip.contentTintColor = Theme.fg
         listenChip.layer?.backgroundColor = Theme.fg.withAlphaComponent(0.10).cgColor
         listenChip.contentTintColor = Theme.fg
+        soundChip.layer?.backgroundColor = Theme.fg.withAlphaComponent(0.10).cgColor
+        soundChip.contentTintColor = Theme.fg
         railLine.fillColor = Theme.fg.withAlphaComponent(0.10)
         refreshRail()
         for b in choiceButtons {
@@ -1941,9 +1981,11 @@ final class Bubble: NSObject {
         let chipH: CGFloat = showChip ? 32 : 0
         let showListen = chatMode && listenTitle != nil
         let listenH: CGFloat = showListen ? (showChip ? 26 : 32) : 0
+        let showSound = chatMode && soundTitle != nil
+        let soundH: CGFloat = showSound ? ((showChip || showListen) ? 26 : 32) : 0
         let hasAttach = chatMode && !attachLabel.stringValue.isEmpty
         let attachH: CGFloat = hasAttach ? 20 : 0
-        var h = pad + 18 + 10 + textH + choicesH + actionH + chipH + listenH + attachH + chatH + pad
+        var h = pad + 18 + 10 + textH + choicesH + actionH + chipH + soundH + listenH + attachH + chatH + pad
         // The rail never gets cut off: grow the text area if the card would be shorter than the icons.
         let railH = pad * 2 + CGFloat(railIcons.count) * 42 - 10
         if railShown && h < railH { textH += railH - h; h = railH }
@@ -1999,6 +2041,15 @@ final class Bubble: NSObject {
             let cw = min(inner - 28, shareChip.frame.width + 14)
             shareChip.frame = NSRect(x: left, y: y + 6, width: cw, height: 22)
             shareClose.frame = NSRect(x: left + cw + 4, y: y + 6, width: 22, height: 22)
+        }
+        soundChip.isHidden = !showSound
+        soundClose.isHidden = !showSound || !soundActive
+        if showSound {
+            y -= soundH
+            soundChip.sizeToFit()
+            let cw = min(inner - 28, soundChip.frame.width + 14)
+            soundChip.frame = NSRect(x: left, y: y + soundH - 26, width: cw, height: 22)
+            soundClose.frame = NSRect(x: left + cw + 4, y: y + soundH - 26, width: 22, height: 22)
         }
         listenChip.isHidden = !showListen
         listenClose.isHidden = !showListen || !listenActive
@@ -3389,6 +3440,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bubble.onSend = { [weak self] text, imgs in self?.ask(text, images: imgs) }
         bubble.onNotice = { [weak self] msg in self?.bubble.setText(msg) }
         bubble.onListenMenu = { [weak self] v in self?.showListenMenu(v) }
+        bubble.onSoundClick = { [weak self] v in self?.soundClicked(v) }
+        bubble.onSoundClose = { [weak self] in self?.setSoundOn(false) }
         bubble.onListenClose = { [weak self] in
             guard let self = self else { return }
             self.listenPick = nil; self.listenUserOff = true; self.refreshListen()
@@ -4438,6 +4491,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if m.running && listenPick == nil && !listenUserOff { listenPick = .live(5) }
         if case .record(let id, _)? = listenPick, MiaoRecords.load(id) == nil { listenPick = nil }
+        if !m.running { listenPick = nil }   // 喵传 off: nothing from it rides along, and the line hides
         let app = m.listeningApp
         let short: (String, Int) -> String = { t, n in t.count > n ? String(t.prefix(n)) + "…" : t }
         var title: String?
@@ -4446,13 +4500,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             title = mins == nil ? "🎧 正在收听「\(short(app, 20))」· 整场"
                                 : "🎧 正在收听「\(short(app, 20))」· 刚才 \(Int(mins!)) 分钟"
         case .record(_, let t)?:
-            title = "🎧 喵传记录「\(short(t, 20))」"
+            title = m.running ? "🎧 喵传记录「\(short(t, 20))」" : nil
         case nil:
-            if m.running {
-                title = "⚪️ 正在收听「\(short(app, 20))」· 点这里带上"
-            } else if Billing.isUnlocked("miao") && !MiaoRecords.all().isEmpty {
-                title = "🎧 选一段喵传记录来聊"
-            }
+            // 喵传 not running: no 🎧 line at all (records can be picked again once it runs).
+            if m.running { title = "⚪️ 正在收听「\(short(app, 20))」· 点这里带上" }
         }
         bubble.setListen(title: title, active: listenPick != nil)
     }
@@ -4496,13 +4547,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if m.numberOfItems == 0 { return }
         m.popUp(positioning: nil, at: NSPoint(x: 0, y: v.bounds.height + 4), in: v)
     }
+    // MARK: 🔊 正在听 (an app on this Mac making sound)
+
+    /// The user switched the sound on for this chat (default off; resets when the bubble closes).
+    private var soundOn = false
+    /// The app last heard playing, and when; the line stays 6 s after the sound stops so it doesn't flicker.
+    private var soundPlayer: AudioPlayers.Player?
+    private var soundLastHeard = Date.distantPast
+
+    private func refreshSound() {
+        let now = Date()
+        let mc = MiaoChuan.shared
+        // 喵传 already listens to that app: no second line for it.
+        let players = AudioPlayers.playing().filter { !(mc.running && $0.name == mc.listeningApp) }
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        if let p = players.first(where: { $0.bundleID == soundPlayer?.bundleID })
+            ?? players.first(where: { $0.bundleID == front }) ?? players.first {
+            soundPlayer = p
+            soundLastHeard = now
+            if soundOn { SoundListen.shared.start(p) }
+        }
+        let playing = now.timeIntervalSince(soundLastHeard) < 6
+        let short: (String) -> String = { $0.count > 20 ? String($0.prefix(20)) + "…" : $0 }
+        var title: String?
+        if soundOn {
+            let sl = SoundListen.shared
+            let name = playing ? (soundPlayer?.name ?? sl.appName) : sl.appName
+            // On: stays while sound plays or while there is text heard in the last 10 minutes.
+            if playing { title = "🔊 正在听「\(short(name))」· 已带上" }
+            else if sl.hasText { title = "🔊 刚才听到「\(short(name))」· 已带上" }
+        } else if playing, let p = soundPlayer {
+            title = "⚪️ 正在听「\(short(p.name))」· 点这里带上"
+        }
+        bubble.setSound(title: title, active: soundOn && title != nil)
+    }
+
+    private func setSoundOn(_ on: Bool) {
+        soundOn = on
+        if on, let p = soundPlayer { SoundListen.shared.start(p) }
+        if !on { SoundListen.shared.stop(clear: true) }
+        refreshSound()
+    }
+
+    private func soundClicked(_ v: NSView) {
+        guard soundOn else { setSoundOn(true); return }
+        let m = NSMenu()
+        let head = NSMenuItem(title: L10n.t("听的语言"), action: nil, keyEquivalent: "")
+        head.isEnabled = false
+        m.addItem(head)
+        for src in MiaoChuan.sources {
+            m.addItem(BlockMenuItem(src.1, on: SoundListen.language == src.0) {
+                SoundListen.language = src.0
+                SoundListen.shared.relisten()
+            })
+        }
+        m.addItem(.separator())
+        m.addItem(BlockMenuItem("不带这个声音") { [weak self] in self?.setSoundOn(false) })
+        m.popUp(positioning: nil, at: NSPoint(x: 0, y: v.bounds.height + 4), in: v)
+    }
+
+    /// The bubble closed: stop listening and forget what was heard.
+    private func endSound() {
+        soundOn = false
+        soundPlayer = nil
+        soundLastHeard = .distantPast
+        SoundListen.shared.stop(clear: true)
+        bubble.setSound(title: nil, active: false)
+    }
+
     private func startShareWatch() {
         refreshListen()
+        refreshSound()
         shareWatch?.invalidate()
         shareWatch = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] t in
             guard let self = self else { t.invalidate(); return }
-            guard self.bubble.isShown && self.bubble.chatMode else { t.invalidate(); return }
+            guard self.bubble.isShown && self.bubble.chatMode else { t.invalidate(); self.endSound(); return }
             self.refreshListen()
+            self.refreshSound()
             guard Prefs.pageShare else { return }
             let page = self.hub.shareableWindow()
             if page?.title != self.bubble.shareTitle {
@@ -4622,6 +4743,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let gen = bubbleGen
         let listenCtx: String? = (inBubble && bubble.chatMode && pageOverride == nil) ? listenPick.flatMap { ListenContext.text(for: $0) } : nil
+        let soundCtx: String? = (inBubble && bubble.chatMode && pageOverride == nil && soundOn) ? SoundListen.shared.context() : nil
         let pointish = ["重点", "关键", "在哪", "哪里", "哪儿", "标出", "圈", "指出", "找到", "highlight", "circle", "point"]
             .contains { text.lowercased().contains($0) }
         // Asked where something is on screen (a summary that merely says 重点 doesn't count).
@@ -4683,6 +4805,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if let lc = listenCtx {
                 context = context.map { lc + "\n\n" + $0 } ?? lc
+            }
+            if let sc = soundCtx {
+                context = context.map { sc + "\n\n" + $0 } ?? sc
             }
             // A project's standing note is kept in mind for every chat inside it.
             if let p = project, !p.note.isEmpty {

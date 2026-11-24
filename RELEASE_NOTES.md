@@ -1,3 +1,13 @@
+# OrdCat v0.2.59
+
+- 电脑里有应用在出声时（比如微信语音、视频），小猫弹窗「正在分享」下面会多一行「🔊 正在听「应用」」，没声音就不显示；点一下让小猫一起听：在本机转成文字，只在内存里留最近 10 分钟，不保存，关掉弹窗就清空；点它还能换听的语言，点 ✕ 就不带
+- 喵传没开时不再显示 🎧 那一行
+
+**English**
+
+- When an app on your Mac is playing sound (a WeChat voice message, a video…), a “🔊 Hearing “app”” row appears under Sharing in the bubble, and hides when there's no sound. Click it to let the cat listen too: speech is turned into text on your Mac, only the last 10 minutes are kept in memory, nothing is saved, and it's cleared when the bubble closes. Click again to change the language; ✕ leaves it out
+- The 🎧 row no longer shows while MiaoChuan is off (macOS 14.2 or later needed for 🔊)
+
 # OrdCat v0.2.58
 
 - 圈重点更准：画圈前先用本机文字识别核对那里真的是这段文字，对不上就不圈；不再在页面换了以后沿用旧位置；圈只包住文字本身，不会拉到侧边栏

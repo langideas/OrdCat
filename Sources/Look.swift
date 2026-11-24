@@ -484,6 +484,11 @@ enum L10n {
         "添加图片或文件": "Add an image or file",
         "选一段喵传听到的内容来聊": "Pick something MiaoChuan heard to chat about",
         "这次对话不带收听内容": "Don't include what's heard in this chat",
+        // 小猫弹窗：🔊 正在听 (v0.2.59)
+        "听的语言": "Language to listen for",
+        "不带这个声音": "Don't include this sound",
+        "这次对话不带这个声音": "Don't include this sound in this chat",
+        "让小猫一起听这个应用的声音（在本机转成文字，只留最近 10 分钟，不保存）": "Let the cat listen to this app's sound too (turned into text on your Mac, only the last 10 minutes kept, never saved)",
         // 喵手设置和操作记录 (v0.2.56)
         "「喵手」现在是关着的，先在技能栏打开它。": "MiaoShou is off right now. Turn it on in the skill bar first.",
         "怎么执行": "How it runs",
@@ -1273,6 +1278,9 @@ enum L10n {
         ("⚪️ 正在收听「{}」· 点这里带上", "⚪️ Listening to “{}” · click to include"),
         ("🎧 喵传记录「{}」", "🎧 MiaoChuan record “{}”"),
         ("正在收听「{}」", "Listening to “{}”"),
+        ("⚪️ 正在听「{}」· 点这里带上", "⚪️ Hearing “{}” · click to include"),
+        ("🔊 正在听「{}」· 已带上", "🔊 Hearing “{}” · included"),
+        ("🔊 刚才听到「{}」· 已带上", "🔊 Just heard “{}” · included"),
         ("📎 待发送：{}", "📎 To send: {}"),
         ("💬 在聊之前的「{}」· 点这里改回当前页面", "💬 Continuing “{}” · click to go back to the current page"),
         ("删除对话「{}」？", "Delete chat “{}”?"),
