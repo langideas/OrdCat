@@ -120,8 +120,8 @@ final class CatLevel {
     /// Hours still needed to finish the current day.
     var hoursToNextDay: Int { Int(ceil(Double(86400 - onlineSeconds % 86400) / 3600)) }
 
-    /// 订阅会员 tier from my own subscriptions: 会员 Max beats 会员 Pro.
-    /// 徽章只看会员 Pro / 会员 Max；技能只在技能栏用光圈区分点亮（Lang 2026-11-23）
+    /// 订阅会员 tier from my own subscriptions: Max beats Pro.
+    /// 徽章只看Pro / Max；技能只在技能栏用光圈区分点亮（Lang 2026-11-23）
     static var tier: MemberTier { Billing.isSubscribed("max") ? .max : (Billing.isSubscribed("pro") ? .pro : .none) }
     static var isMember: Bool { tier != .none }
 
@@ -328,8 +328,8 @@ enum MemberTier: Equatable {
     var label: String { self == .max ? "MAX" : (self == .pro ? "PRO" : "") }
     var name: String {
         switch self {
-        case .max: return L10n.english ? "Member Max" : "会员 Max"
-        case .pro: return L10n.english ? "Member Pro" : "会员 Pro"
+        case .max: return L10n.english ? "Max" : "Max"
+        case .pro: return L10n.english ? "Pro" : "Pro"
         case .none: return ""
         }
     }
@@ -339,8 +339,8 @@ private let kGraphite = NSColor(calibratedRed: 0.24, green: 0.24, blue: 0.235, a
 private let kCream = NSColor(calibratedRed: 1.0, green: 0.925, blue: 0.78, alpha: 1)
 
 /// A round avatar with the member badge. The badge differs by shape, not only colour:
-/// - 会员 Pro: one amber glowing ring + a round amber chip with a graphite cat paw.
-/// - 会员 Max: a sunset (coral → amber) double ring + a cat-head gem chip (two ears) with cream eyes and a spark.
+/// - Pro: one amber glowing ring + a round amber chip with a graphite cat paw.
+/// - Max: a sunset (coral → amber) double ring + a cat-head gem chip (two ears) with cream eyes and a spark.
 /// The chip sits bottom-right. The result is drawn inside its own square, so don't round-clip the image view.
 func memberAvatar(_ src: NSImage, tier: MemberTier, size s: CGFloat) -> NSImage {
     NSImage(size: NSSize(width: s, height: s), flipped: false) { _ in
@@ -391,7 +391,7 @@ func memberAvatar(_ src: NSImage, tier: MemberTier, size s: CGFloat) -> NSImage 
     }
 }
 
-/// 会员 Pro chip: round amber chip, graphite cat paw (bottom-right).
+/// Pro chip: round amber chip, graphite cat paw (bottom-right).
 private func drawPawChip(_ s: CGFloat) {
     let c = s * 0.36
     let cx = s - c / 2, cy = c / 2
@@ -408,7 +408,7 @@ private func drawPawChip(_ s: CGFloat) {
     }
 }
 
-/// 会员 Max chip: a cat-head gem (two ears, cut jaw) in a coral → amber gradient, graphite face, cream eyes, amber spark.
+/// Max chip: a cat-head gem (two ears, cut jaw) in a coral → amber gradient, graphite face, cream eyes, amber spark.
 private func drawCatGemChip(_ s: CGFloat) {
     let c = s * 0.40
     let cx = s - c * 0.68, cy = c * 0.52

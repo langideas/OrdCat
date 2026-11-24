@@ -1,9 +1,9 @@
 // OrdCat · 开通会员 / 买加油包 / 管理订阅（Stripe Checkout + Customer Portal）。
 // App 带着登录 token 调用：POST /functions/v1/stripe-checkout
-//   {"item":"pro","interval":"month"|"year"}      会员 Pro  €9.9/月，年付 €95
-//   {"item":"max","interval":"month"|"year"}      会员 Max  €59/月，年付 €566（包含全部技能）
+//   {"item":"pro","interval":"month"|"year"}      Pro  €9.9/月，年付 €95
+//   {"item":"max","interval":"month"|"year"}      Max  €59/月，年付 €566（包含全部技能）
 //   {"item":"topup"}                              加油包 €2.99 = 1500 条（一次性付款）
-//   {"item":"x"} / {"item":"agent"} / {"item":"miao"}   技能订阅 €3/月；会员 Pro 用 8 折价（x.month.member…）
+//   {"item":"x"} / {"item":"agent"} / {"item":"miao"}   技能订阅 €3/月；Pro 用 8 折价（x.month.member…）
 //   {"portal":true}                              管理订阅 / 取消 / 换卡
 // 返回 {"url":"https://checkout.stripe.com/…"}，App 用浏览器打开。
 //
@@ -54,9 +54,12 @@ Deno.serve(async (req) => {
       .eq("user_id", uid).not("customer_id", "is", null).limit(1);
     let customer: string | undefined = rows?.[0]?.customer_id ?? undefined;
 
+    // Stripe's own page text follows the app language (zh → Simplified Chinese).
+    const locale = body.locale === "en" ? "en" : body.locale === "zh" ? "zh" : "auto";
+
     if (body.portal) {
       if (!customer) return json({ error: "还没有订阅记录" }, 400);
-      const s = await stripe("billing_portal/sessions", { customer, return_url: site });
+      const s = await stripe("billing_portal/sessions", { customer, return_url: site, ...(locale === "auto" ? {} : { locale }) });
       return json({ url: s.url });
     }
 
@@ -67,7 +70,7 @@ Deno.serve(async (req) => {
     let priceKey = item === "topup" ? "topup" : `${item}.${interval}`;
     if (isSkill) {
       const { data: plan } = await admin.rpc("ord_plan", { p_user: uid });
-      if (plan === "max") return json({ error: "会员 Max 已经包含全部技能，不用再买" }, 400);
+      if (plan === "max") return json({ error: "Max 已经包含全部技能，不用再买" }, 400);
       if (plan === "pro" && prices[`${priceKey}.member`]) priceKey = `${priceKey}.member`;
     }
     const price = prices[priceKey];
@@ -84,9 +87,10 @@ Deno.serve(async (req) => {
       "line_items[0][quantity]": "1",
       "metadata[user_id]": uid,
       "metadata[item]": item,
-      success_url: `${site}/?paid=1`,
-      cancel_url: `${site}/?paid=0`,
+      success_url: `${site}/pricing.html?paid=1`,
+      cancel_url: `${site}/pricing.html?paid=0`,
       allow_promotion_codes: "true",
+      locale,
       "automatic_tax[enabled]": Deno.env.get("STRIPE_TAX") === "1" ? "true" : "false",
     };
     if (item === "topup") {

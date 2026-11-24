@@ -19,7 +19,7 @@ import Cocoa
 enum Billing {
     private static let d = UserDefaults.standard
     static let defaultPrice = "€3/月"
-    /// Paid skills. 会员 Max includes all of them (plan v2, Lang 2026-11-24).
+    /// Paid skills. Max includes all of them (plan v2, Lang 2026-11-24).
     static let skillIDs: Set<String> = ["x", "agent", "miao"]
 
     // MARK: remote settings
@@ -64,7 +64,7 @@ enum Billing {
     static func licenseKey(_ id: String) -> String { Keychain.get(service: "app.ordcat.license.\(id)") }
 
     static func isSubscribed(_ id: String) -> Bool {
-        if skillIDs.contains(id) && isSubscribed("max") { return true }   // 会员 Max includes every skill
+        if skillIDs.contains(id) && isSubscribed("max") { return true }   // Max includes every skill
         if let a = Account.shared.subscribedUntil(id), a > Date() { return true }   // bound to the account
         guard let u = paidUntil(id) else { return false }
         return u > Date()

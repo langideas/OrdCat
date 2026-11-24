@@ -2,14 +2,14 @@
 --
 -- 方案 v2（Lang 2026-11-24 同意）：
 --   免费      自带 Key 什么都能用；新用户一次性送 100 条托管额度试用
---   会员 Pro  €9.9（¥78）/月，年付 €95（¥748）：每月 3000 条，每天最多 300 条
---   会员 Max  €59（¥458）/月，年付 €566（¥4398）：每月 25000 条，每天最多 1500 条，
+--   Pro  €9.9（¥78）/月，年付 €95（¥748）：每月 3000 条，每天最多 300 条
+--   Max  €59（¥458）/月，年付 €566（¥4398）：每月 25000 条，每天最多 1500 条，
 --             可选高级模型（按倍数扣），包含全部技能
 --   额度用完：慢速模型每天 30 条（Max 100 条）；或买加油包 €2.99（¥22）= 1500 条
 -- 1 条 = 一条普通消息；带截图 +1；上下文超过 8k token +1；高级模型 × 倍数。
 --
 -- subscriptions.skill 现在可以是：pro | max（会员）| x | agent | miao（技能）。
--- 旧名字（v1：member = 会员，pro = 会员 Pro）在下面一次性改成新名字，只改一次。
+-- 旧名字（v1：member = 会员，pro = Pro）在下面一次性改成新名字，只改一次。
 
 alter table public.subscriptions add column if not exists provider text not null default 'lemon';
 alter table public.subscriptions add column if not exists customer_id text;
@@ -32,7 +32,7 @@ begin
   end if;
 end $$;
 
--- 「订阅会员」只算会员 Pro / 会员 Max（技能订阅不算会员）。信号站的「仅会员」条件也按这个算。
+-- 「订阅会员」只算Pro / Max（技能订阅不算会员）。信号站的「仅会员」条件也按这个算。
 create or replace function public.ord_is_member(p_user uuid) returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from subscriptions s
@@ -56,7 +56,7 @@ language sql stable security definer set search_path = public as $$
   select nullif(ord_plan(p_user), 'free');
 $$;
 
--- Owns this skill: its own subscription, or 会员 Max (includes every skill).
+-- Owns this skill: its own subscription, or Max (includes every skill).
 create or replace function public.ord_has_skill(p_user uuid, p_skill text) returns boolean
 language sql stable security definer set search_path = public as $$
   select ord_plan(p_user) = 'max'

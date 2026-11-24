@@ -12,7 +12,7 @@
 //     "premium": {"gpt-6.1-terra":{"base":"https://api.openai.com/v1","key":"OPENAI_KEY","model":"gpt-6.1-terra","mult":10,"in":1,"out":5},
 //                 "gemini-3.8-flash":{"base":"https://generativelanguage.googleapis.com/v1beta/openai","key":"GEMINI_KEY","model":"gemini-3.8-flash","mult":15,"in":1.5,"out":7.5},
 //                 "claude-sonnet-5-5":{"base":"https://api.anthropic.com/v1","key":"ANTHROPIC_KEY","model":"claude-sonnet-5-5","mult":20,"in":2,"out":10}}
-// 高级模型只给会员 Max。
+// 高级模型只给Max。
 //   }'
 //   DASHSCOPE_KEY=… OPENAI_KEY=… ZHIPU_KEY=…   （"key" 写的是 secret 的名字，不是 Key 本身）
 // "in"/"out" = 每 1M token 的美元价，只用来记账。
@@ -31,7 +31,7 @@ function err(status: number, code: string, message: string) {
   });
 }
 
-// Context per message (about 3 characters a token): free 16k, 会员 Pro 32k, 会员 Max 128k tokens.
+// Context per message (about 3 characters a token): free 16k, Pro 32k, Max 128k tokens.
 const LIMITS: Record<string, { ctxChars: number }> = {
   free: { ctxChars: 48_000 }, pro: { ctxChars: 96_000 }, max: { ctxChars: 384_000 },
 };

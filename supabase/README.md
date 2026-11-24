@@ -12,7 +12,7 @@
 ## 会员 + Stripe + OrdCat 托管模型（v0.2.46 起）
 
 1. SQL Editor 运行 `account2.sql`，再运行 `membership.sql`（会员额度、用量记录、加油包、徽章分档）。`membership.sql` 要最后运行：以后重新运行 `signal.sql` 的话，记得再运行一次 `membership.sql`。
-2. Stripe（Dashboard → Product catalog）建价格（方案 v2）：会员 Pro €9.9/月、€95/年；会员 Max €59/月、€566/年；加油包 €2.99（一次性，1500 条）；技能 喵推 / 喵手 / 喵传 各 €3/月，另建 8 折价 €2.4/月给会员 Pro（会员 Max 已包含全部技能，不用买）。
+2. Stripe（Dashboard → Product catalog）建价格（方案 v2）：Pro €9.9/月、€95/年；Max €59/月、€566/年；加油包 €2.99（一次性，1500 条）；技能 喵推 / 喵手 / 喵传 各 €3/月，另建 8 折价 €2.4/月给Pro（Max 已包含全部技能，不用买）。
 3. 部署函数：
    ```
    supabase functions deploy chat-proxy

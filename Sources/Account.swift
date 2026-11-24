@@ -274,12 +274,13 @@ final class Account {
         request("POST", "/rest/v1/rpc/credits_status", json: [:]) { obj, err in done(obj as? [String: Any], err) }
     }
 
-    /// Stripe checkout page for 会员 Pro (pro) / 会员 Max (max) / 加油包 (topup) / a skill, or the
+    /// Stripe checkout page for Pro (pro) / Max (max) / 加油包 (topup) / a skill, or the
     /// subscription management page (portal).
     func stripeLink(item: String?, yearly: Bool = false, portal: Bool = false, done: @escaping (URL?, String?) -> Void) {
         guard signedIn else { done(nil, "先登录账号（设置 → 用户）"); return }
         var body: [String: Any] = portal ? ["portal": true] : ["item": item ?? "pro", "interval": yearly ? "year" : "month"]
         if portal { body["item"] = "" }
+        body["locale"] = L10n.english ? "en" : "zh"
         request("POST", "/functions/v1/stripe-checkout", json: body) { obj, err in
             let o = obj as? [String: Any]
             if let u = (o?["url"] as? String).flatMap(URL.init(string:)) { done(u, nil); return }

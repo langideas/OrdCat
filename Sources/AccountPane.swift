@@ -138,7 +138,7 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
         gm.add(SK.info(memberLine))
         gm.add(SK.row("付款方式", billingCycle, fill: false))
         p.add(gm)
-        p.add(SK.buttons([button("开通会员 Pro", #selector(buyPro)), button("开通会员 Max", #selector(buyMax)),
+        p.add(SK.buttons([button("开通 Pro", #selector(buyPro)), button("开通 Max", #selector(buyMax)),
                           button("加油包", #selector(buyTopup)), button("管理会员", #selector(manageMember))]))
         p.add(memberStatus)
 
@@ -274,10 +274,10 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
     // MARK: 会员
 
     private static let plans: [String: (zh: String, en: String)] = [
-        "pro": ("会员 Pro €9.9/月（年付 €95，省 20%）· 每月 3000 条，看图，听写 300 分钟，技能 8 折",
-                "Member Pro €9.9/mo (€95/yr, save 20%) · 3,000 messages a month, image viewing, 300 min dictation, 20% off skills"),
-        "max": ("会员 Max €59/月（年付 €566，省 20%）· 每月 25000 条，可选高级模型，听写 1200 分钟，包含全部技能",
-                "Member Max €59/mo (€566/yr, save 20%) · 25,000 messages a month, premium models, 1,200 min dictation, all skills included"),
+        "pro": ("Pro €9.9/月（年付 €95，省 20%）· 每月 3000 条，看图，听写 300 分钟，技能 8 折",
+                "Pro €9.9/mo (€95/yr, save 20%) · 3,000 messages a month, image viewing, 300 min dictation, 20% off skills"),
+        "max": ("Max €59/月（年付 €566，省 20%）· 每月 25000 条，可选高级模型，听写 1200 分钟，包含全部技能",
+                "Max €59/mo (€566/yr, save 20%) · 25,000 messages a month, premium models, 1,200 min dictation, all skills included"),
     ]
 
     private func refreshMember() {
@@ -336,14 +336,14 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
 
     @objc private func buyPro() {
         let y = billingCycle.selectedSegment == 1
-        openStripe(item: "pro", title: L10n.english ? "Get Member Pro?" : "开通会员 Pro？",
+        openStripe(item: "pro", title: L10n.english ? "Get Pro?" : "开通 Pro？",
                    info: L10n.english ? (y ? "€95 a year (save 20%)" : "€9.9 a month") + ". 3,000 messages a month with OrdCat's hosted models, no key needed, image viewing, 300 min dictation, 20% off skills. Paid securely with Stripe; cancel anytime."
                                       : (y ? "€95/年（省 20%）" : "€9.9/月") + "，每月 3000 条托管模型额度，不用自己的 Key，可以看图，听写 300 分钟，技能 8 折。通过 Stripe 安全付款，随时可以取消。")
     }
 
     @objc private func buyMax() {
         let y = billingCycle.selectedSegment == 1
-        openStripe(item: "max", title: L10n.english ? "Get Member Max?" : "开通会员 Max？",
+        openStripe(item: "max", title: L10n.english ? "Get Max?" : "开通 Max？",
                    info: L10n.english ? (y ? "€566 a year (save 20%)" : "€59 a month") + ". 25,000 messages a month, premium models, 1,200 min dictation, and every skill included. Paid securely with Stripe; cancel anytime."
                                       : (y ? "€566/年（省 20%）" : "€59/月") + "，每月 25000 条额度，可选高级模型，听写 1200 分钟，包含全部技能。通过 Stripe 安全付款，随时可以取消。")
     }

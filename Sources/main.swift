@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 // MARK: - Theme
 
 let kAmber = NSColor(calibratedRed: 1.0, green: 0.71, blue: 0.28, alpha: 1)
-/// 会员 Max sunset coral (gradient partner of kAmber).
+/// Max sunset coral (gradient partner of kAmber).
 let kSunset = NSColor(calibratedRed: 1.0, green: 0.50, blue: 0.38, alpha: 1)
 let kFur = NSColor(calibratedRed: 0.07, green: 0.07, blue: 0.08, alpha: 1)
 let kRim = NSColor(calibratedWhite: 1.0, alpha: 0.22)
@@ -961,7 +961,7 @@ final class CatView: NSView {
     var onRightClick: (() -> Void)?
     var onMoved: (() -> Void)?
 
-    private let aura = CALayer()      // 会员 Max: the wide sunset glow around the rig
+    private let aura = CALayer()      // Max: the wide sunset glow around the rig
     private let rig = CALayer()
     private let cat = CALayer()
     private let head = CAShapeLayer()
@@ -973,7 +973,7 @@ final class CatView: NSView {
     private let excl = CAShapeLayer()
 
     /// 订阅会员 glow around the whole cat (follows its shape and peeks), same as the avatar badge:
-    /// 会员 Pro = one soft amber glow; 会员 Max = a tight amber rim plus a wide sunset (coral) glow. Off for everyone else.
+    /// Pro = one soft amber glow; Max = a tight amber rim plus a wide sunset (coral) glow. Off for everyone else.
     func setMember(_ tier: MemberTier) {
         rig.shadowColor = kAmber.cgColor
         rig.shadowOffset = .zero

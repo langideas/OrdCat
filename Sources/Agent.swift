@@ -127,7 +127,7 @@ final class DesktopAgent {
         if Prefs.agentNotify {
             let word = result == "done" ? "完成" : (result == "failed" ? "没成功" : "停下了")
             let en = result == "done" ? "done" : (result == "failed" ? "didn't work" : "stopped")
-            NotifCenter.shared.add(L10n.english ? "🤖 MiaoShou \(en): \(goal)" : "🤖 喵手\(word)：\(goal)", open: "agentlog")
+            NotifCenter.shared.add(L10n.english ? "🤖 Mac Agent \(en): \(goal)" : "🤖 喵手\(word)：\(goal)", open: "agentlog")
         }
         goal = ""
     }

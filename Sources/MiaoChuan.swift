@@ -220,7 +220,7 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
         let a = NSAlert()
         a.messageText = L10n.t("结束喵传？")
         a.informativeText = L10n.english
-            ? "Listened for \(mins) min, \(lines.count) lines. Save a record? The cat tidies it into the original and the translation with your model, and keeps it only on this Mac. Find it later in Settings → Skills → MiaoChuan → MiaoChuan records, or in the cat's menu bar menu."
+            ? "Listened for \(mins) min, \(lines.count) lines. Save a record? The cat tidies it into the original and the translation with your model, and keeps it only on this Mac. Find it later in Settings → Skills → Live Subtitles → Live Subtitles records, or in the cat's menu bar menu."
             : "这次听了 \(mins) 分钟、\(lines.count) 句。要保存记录吗？小猫会用你的模型整理成原文和译文，只存在这台 Mac 上。以后在 设置 → 技能 → 喵传 →「喵传记录」或菜单栏小猫菜单里查看和下载。"
         a.addButton(withTitle: L10n.t("保存记录并结束"))
         a.addButton(withTitle: L10n.t("不保存，结束"))
@@ -271,7 +271,7 @@ final class MiaoChuan: NSObject, SCStreamOutput, SCStreamDelegate {
         presentActions?(L10n.t("📂 喵传记录已保存，小猫正在整理原文和译文…"), [(L10n.t("打开"), { open(rec.id) })])
         MiaoTidier.start(rec) { [weak self] done in
             let msg = done.tidyError == nil
-                ? (L10n.english ? "📂 Your MiaoChuan record is ready: \(done.title)" : "📂 喵传记录整理好了：\(done.title)")
+                ? (L10n.english ? "📂 Your Live Subtitles record is ready: \(done.title)" : "📂 喵传记录整理好了：\(done.title)")
                 : (L10n.english ? "📂 Record saved, but part of it couldn't be tidied, so the raw subtitles are kept: \(done.tidyError ?? "")" : "📂 记录已保存，有一部分没整理好，先保留了原始字幕：\(done.tidyError ?? "")")
             self?.presentActions?(msg, [(L10n.t("打开"), { open(done.id) }), (L10n.t("下载"), { MiaoExport.run(MiaoRecords.load(done.id) ?? done) })])
         }
