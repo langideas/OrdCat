@@ -79,7 +79,7 @@ footer a{color:var(--mute)}
 <div class="wrap">
 <nav>
   <a class="brand" href="#"><img class="eyes" src="eyes.svg" alt="OrdCat"><span class="wm">OrdCat</span></a>
-  <div class="links"><a href="#features" data-i="nav1">功能</a><a href="#install" data-i="nav2">安装</a><a href="#faq" data-i="nav3">常见问题</a><a href="#contact" data-i="nav4">联系我们</a><a href="https://github.com/langideas/OrdCat">GitHub</a>
+  <div class="links"><a href="#features" data-i="nav1">功能</a><a href="#install" data-i="nav2">安装</a><a href="pricing.html" data-i="navp">价格</a><a href="#faq" data-i="nav3">常见问题</a><a href="#contact" data-i="nav4">联系我们</a><a href="https://github.com/langideas/OrdCat">GitHub</a>
     <button class="tg" id="langBtn" onclick="ocToggleLang()">EN</button><button class="tg" id="themeBtn" onclick="ocCycleTheme()">◐</button></div>
 </nav>
 
@@ -140,7 +140,7 @@ footer a{color:var(--mute)}
 
 <section id="faq">
   <h2 data-i="qh">常见问题</h2>
-  <details><summary data-i="q1">要花钱吗？</summary><p data-i="a1">OrdCat 本身免费。用云端模型的话，按你自己在模型平台的账号计费；用本地 Ollama 完全免费。</p></details>
+  <details><summary data-i="q1">要花钱吗？</summary><p data-i="a1">OrdCat 本身免费。用云端模型的话，按你自己在模型平台的账号计费；用本地 Ollama 完全免费。不想配置 Key，也可以开通会员，直接用我们托管的模型，详见 <a href="pricing.html">价格</a>。</p></details>
   <details><summary data-i="q2">它会一直录屏吗？</summary><p data-i="a2">不会。小猫平时不截屏、不录音，只有你主动分享页面时才读取内容。</p></details>
   <details><summary data-i="q3">为什么第一次打开要右键？</summary><p data-i="a3">OrdCat 还没有经过苹果公证，macOS 会多问一句。右键打开一次之后就和普通应用一样了。</p></details>
   <details><summary data-i="q4">怎么卸载？</summary><p data-i="a4">退出 OrdCat（菜单栏 🐈‍⬛ → 退出），把「应用程序」里的 OrdCat 拖进废纸篓即可。</p></details>
@@ -163,12 +163,14 @@ footer a{color:var(--mute)}
 
 <footer>
   <span>© 2026 OrdCat · Lang</span>
-  <span><a href="https://github.com/langideas/OrdCat/releases" data-i="ft1">更新记录</a> · <a href="privacy.html" data-i="ft2">隐私政策</a> · <a href="terms.html" data-i="ft3">用户协议</a> · <a href="impressum.html">Impressum</a> · <a href="mailto:support@ordcat.de">support@ordcat.de</a></span>
+  <span><a href="https://github.com/langideas/OrdCat/releases" data-i="ft1">更新记录</a> · <a href="pricing.html" data-i="ftp">价格</a> · <a href="privacy.html" data-i="ft2">隐私政策</a> · <a href="terms.html" data-i="ft3">用户协议</a> · <a href="impressum.html">Impressum</a> · <a href="mailto:support@ordcat.de">support@ordcat.de</a></span>
 </footer>
 </div>
 <script>
+(function(){var p=new URLSearchParams(location.search).get("paid");if(p==="1"||p==="0")location.replace("pricing.html?paid="+p);})();
 window.OC_I18N={
  __title:"OrdCat",
+ navp:"Pricing",ftp:"Pricing",
  __desc:"OrdCat is an AI cat that lives at the edge of your Mac screen: low power, no burden, sees what you see, and keeps you company with the AI model you choose.",
  nav1:"Features",nav2:"Install",nav3:"FAQ",
  h1:"The AI cat that'll<br><em>always be with you</em>",
@@ -189,7 +191,7 @@ window.OC_I18N={
  s3:"<b>First launch</b>: in Applications, <b>right-click OrdCat → Open → Open</b>. If macOS refuses, go to System Settings → Privacy &amp; Security, scroll to OrdCat and click “Open Anyway”.",
  s4:"<b>Pick a model</b>: right-click the cat → Settings → Model, choose a model and paste your key (local Ollama needs none). Click “Always Allow” on the Keychain prompt.",
  qh:"FAQ",
- q1:"Does it cost anything?",a1:"OrdCat is free. Cloud models bill through your own provider account; local Ollama is completely free.",
+ q1:"Does it cost anything?",a1:"OrdCat is free. Cloud models bill through your own provider account; local Ollama is completely free. If you'd rather skip the keys, a membership gives you our hosted models. See <a href=\"pricing.html\">Pricing</a>.",
  q2:"Is it recording my screen?",a2:"No. The cat doesn't capture your screen or audio in the background – it only reads a page when you share it.",
  q3:"Why right-click on first launch?",a3:"OrdCat isn't notarized by Apple yet, so macOS asks once. After that it opens like any other app.",
  q4:"How do I uninstall?",a4:"Quit OrdCat (menu bar 🐈‍⬛ → Quit) and drag OrdCat from Applications to the Trash.",
