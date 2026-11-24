@@ -40,7 +40,6 @@ h1{font-size:44px;line-height:1.2;margin:0 0 12px;letter-spacing:-.4px}
 .plan.pro{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber),0 24px 60px var(--shadow)}
 .plan.max{border:1px solid transparent;background:linear-gradient(var(--card),var(--card)) padding-box,linear-gradient(135deg,var(--coral),var(--amber)) border-box;box-shadow:0 24px 60px var(--shadow)}
 .pick{position:absolute;top:-13px;left:50%;transform:translateX(-50%);background:var(--amber);color:var(--ink);font-size:12px;font-weight:700;padding:3px 12px;border-radius:999px;white-space:nowrap}
-.name{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:700}
 .tag{font:800 11px/1 -apple-system,sans-serif;letter-spacing:.6px;padding:4px 8px;border-radius:999px}
 .tag.pro{color:#b06e14;border:1px solid var(--amber);background:rgba(245,181,61,.14)}
 [data-theme=dark] .tag.pro{color:var(--amber)}
@@ -79,6 +78,13 @@ footer{color:var(--mute);font-size:13px;padding:40px 0 56px;display:flex;justify
 footer a{color:var(--mute)}
 html:not([data-lang=en]) .en{display:none!important}[data-lang=en] .zh{display:none!important}
 @media(max-width:900px){.plans{grid-template-columns:1fr}.extras{grid-template-columns:1fr}h1{font-size:34px}nav .links a{display:none}}
+.name{font-size:30px;font-weight:700;letter-spacing:-.3px;display:flex;align-items:center;gap:10px}
+.sub{color:var(--fg);opacity:.82;font-size:15px;margin-top:6px;min-height:54px}
+.plan .btn{border-radius:999px;display:flex;align-items:center;justify-content:center;gap:6px;margin:16px 0 4px}
+.inc{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;color:var(--fg);padding:18px 0 14px;border-bottom:1px solid var(--line)}
+.plan.pro .inc svg{color:var(--amber)} .plan.max .inc svg{color:var(--coral)}
+.plan ul{margin:10px 0 18px}
+.foot{color:var(--mute);font-size:12.5px;border-top:1px dashed var(--line);padding-top:12px}
 </style>
 </head>
 <body>
@@ -103,48 +109,61 @@ html:not([data-lang=en]) .en{display:none!important}[data-lang=en] .zh{display:n
 
 <div class="plans">
   <div class="plan">
-    <div class="name"><span class="zh">免费</span><span class="en">Free</span></div>
-    <div class="price">€0</div>
+    <div class="name"><span class="zh">免费版</span><span class="en">Free</span></div>
+    <div class="sub"><span class="zh">用你自己的模型，陪你每天看屏幕</span><span class="en">Your own model, a cat that watches your screen with you</span></div>
+    <div class="price">€0<small><span class="zh">/每月</span><span class="en">/month</span></small></div>
     <div class="per"><span class="zh">一直免费</span><span class="en">Free forever</span></div>
+    <a class="btn ghost" href="https://github.com/langideas/OrdCat/releases/latest/download/OrdCat-macOS.zip"><span class="zh">免费下载</span><span class="en">Download free</span> <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+    <div class="inc"><span class="zh">包含：</span><span class="en">Includes:</span></div>
     <ul>
-      <li><span class="zh"><b>用自己的模型</b>（OpenAI、Claude、Gemini、通义、Ollama 等）不限条数</span><span class="en"><b>Bring your own model</b> (OpenAI, Claude, Gemini, Qwen, Ollama…) with no message limit</span></li>
-      <li><span class="zh">新用户送 <b>100 条</b>托管模型试用</span><span class="en"><b>100 messages</b> on hosted models to try</span></li>
-      <li><span class="zh">屏幕理解、重点圈出、记忆、猫帮圈</span><span class="en">Screen understanding, highlights, memory, Cat Circle</span></li>
+      <li><span class="zh"><b>用自己的模型</b>不限条数（OpenAI、Claude、Gemini、通义、Ollama 等）</span><span class="en"><b>Your own model</b> with no message limit (OpenAI, Claude, Gemini, Qwen, Ollama…)</span></li>
+      <li><span class="zh">新用户送 100 条托管模型试用</span><span class="en">100 hosted-model messages to try</span></li>
+      <li><span class="zh">屏幕理解和重点圈出</span><span class="en">Screen understanding and highlights</span></li>
+      <li><span class="zh">记忆和猫帮圈</span><span class="en">Memory and Cat Circle</span></li>
       <li><span class="zh">信号站每天看 3 条</span><span class="en">3 Signal Station posts a day</span></li>
       <li><span class="zh">看图需要用自己的 Key</span><span class="en">Image viewing with your own key</span></li>
     </ul>
-    <a class="btn ghost" href="https://github.com/langideas/OrdCat/releases/latest/download/OrdCat-macOS.zip"><span class="zh">免费下载</span><span class="en">Download free</span></a>
+    <div class="foot"><span class="zh">额度用完后每天还有 30 条慢速消息</span><span class="en">30 slow messages a day after your trial</span></div>
   </div>
 
   <div class="plan pro">
     <span class="pick"><span class="zh">推荐</span><span class="en">Recommended</span></span>
-    <div class="name"><span class="zh">会员 Pro</span><span class="en">Member Pro</span><span class="tag pro">PRO</span></div>
-    <div class="price"><span class="pm">€9.9</span><span class="py">€95</span><small class="pm"><span class="zh">/月</span><span class="en">/mo</span></small><small class="py"><span class="zh">/年</span><span class="en">/yr</span></small></div>
+    <div class="name">Pro<span class="tag pro">PRO</span></div>
+    <div class="sub"><span class="zh">最适合每天都在用 OrdCat 的你</span><span class="en">Best if you use OrdCat every day</span></div>
+    <div class="price"><span class="pm">€9.9</span><span class="py">€95</span><small class="pm"><span class="zh">/每月</span><span class="en">/month</span></small><small class="py"><span class="zh">/每年</span><span class="en">/year</span></small></div>
     <div class="per"><span class="py"><span class="zh">折合 €7.9/月，省 €23.8</span><span class="en">€7.9/mo, save €23.8</span></span><span class="pm"><span class="zh">按月付，随时取消</span><span class="en">Billed monthly, cancel anytime</span></span></div>
+    <a class="btn" href="#how"><span class="zh">取得 Pro</span><span class="en">Get Pro</span> <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+    <div class="inc"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 1.5l1.6 4.9 4.9 1.6-4.9 1.6L8 14.5l-1.6-4.9L1.5 8l4.9-1.6z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span class="zh">免费版的所有功能，再加上：</span><span class="en">Everything in Free, plus:</span></div>
     <ul>
-      <li><span class="zh">每月 <b>3000 条</b>托管模型消息（每天最多 300 条）</span><span class="en"><b>3,000 messages</b> a month on hosted models (up to 300 a day)</span></li>
-      <li><span class="zh">不用自己的 Key，<b>可以看图</b></span><span class="en">No key needed, <b>image viewing included</b></span></li>
-      <li><span class="zh">32k 上下文 · 听写 300 分钟/月</span><span class="en">32k context · 300 min dictation a month</span></li>
+      <li><span class="zh">每月 <b>3000 条</b>托管模型消息，不用自己的 Key</span><span class="en"><b>3,000 messages</b> a month on hosted models, no key needed</span></li>
+      <li><span class="zh">可以看图</span><span class="en">Image viewing included</span></li>
+      <li><span class="zh">32k 上下文</span><span class="en">32k context</span></li>
+      <li><span class="zh">听写每月 300 分钟</span><span class="en">300 minutes of dictation a month</span></li>
       <li><span class="zh">信号站每天 20 条，含会员专属</span><span class="en">20 Signal Station posts a day, members-only included</span></li>
       <li><span class="zh">技能 <b>8 折</b>（€2.4/月）</span><span class="en">Skills <b>20% off</b> (€2.4/mo)</span></li>
-      <li><span class="zh">琥珀光环徽章 + PRO 标签</span><span class="en">Amber ring badge + PRO tag</span></li>
+      <li><span class="zh">琥珀光环徽章和 PRO 标签</span><span class="en">Amber ring badge and PRO tag</span></li>
     </ul>
-    <a class="btn" href="#how"><span class="zh">在 App 里开通</span><span class="en">Get it in the app</span></a>
+    <div class="foot"><span class="zh">每天最多 300 条</span><span class="en">Up to 300 messages a day</span></div>
   </div>
 
   <div class="plan max">
-    <div class="name"><span class="zh">会员 Max</span><span class="en">Member Max</span><span class="tag max">MAX</span></div>
-    <div class="price"><span class="pm">€59</span><span class="py">€566</span><small class="pm"><span class="zh">/月</span><span class="en">/mo</span></small><small class="py"><span class="zh">/年</span><span class="en">/yr</span></small></div>
+    <div class="name">Max<span class="tag max">MAX</span></div>
+    <div class="sub"><span class="zh">最适合重度使用和高级模型</span><span class="en">Best for heavy use and premium models</span></div>
+    <div class="price"><span class="pm">€59</span><span class="py">€566</span><small class="pm"><span class="zh">/每月</span><span class="en">/month</span></small><small class="py"><span class="zh">/每年</span><span class="en">/year</span></small></div>
     <div class="per"><span class="py"><span class="zh">折合 €47.2/月，省 €142</span><span class="en">€47.2/mo, save €142</span></span><span class="pm"><span class="zh">按月付，随时取消</span><span class="en">Billed monthly, cancel anytime</span></span></div>
+    <a class="btn" href="#how"><span class="zh">订阅 Max</span><span class="en">Get Max</span> <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+    <div class="inc"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M4 2.5h8l2.5 3.5L8 14 1.5 6z M1.5 6h13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span class="zh">Pro 的所有功能，再加上：</span><span class="en">Everything in Pro, plus:</span></div>
     <ul>
-      <li><span class="zh">每月 <b>25000 条</b>托管模型消息（每天最多 1500 条）</span><span class="en"><b>25,000 messages</b> a month on hosted models (up to 1,500 a day)</span></li>
-      <li><span class="zh">可选<b>高级模型</b>：GPT-6.1 Terra、Gemini 3.8 Flash、Claude Sonnet 5.5</span><span class="en"><b>Premium models</b>: GPT-6.1 Terra, Gemini 3.8 Flash, Claude Sonnet 5.5</span></li>
-      <li><span class="zh"><b>包含全部技能</b>（喵推、喵手、喵传）</span><span class="en"><b>Every skill included</b> (MiaoTui, MiaoShou, MiaoChuan)</span></li>
-      <li><span class="zh">128k 上下文 · 听写 1200 分钟/月</span><span class="en">128k context · 1,200 min dictation a month</span></li>
-      <li><span class="zh">信号站不限条数，新功能抢先用，高峰优先</span><span class="en">Unlimited Signal Station, early access, priority at peak times</span></li>
-      <li><span class="zh">日落双环徽章 + MAX 标签</span><span class="en">Sunset double ring badge + MAX tag</span></li>
+      <li><span class="zh">每月 <b>25000 条</b>托管模型消息</span><span class="en"><b>25,000 messages</b> a month on hosted models</span></li>
+      <li><span class="zh"><b>高级模型</b>：GPT-6.1 Terra、Gemini 3.8 Flash、Claude Sonnet 5.5</span><span class="en"><b>Premium models</b>: GPT-6.1 Terra, Gemini 3.8 Flash, Claude Sonnet 5.5</span></li>
+      <li><span class="zh"><b>包含全部技能</b>：喵推、喵手、喵传</span><span class="en"><b>Every skill included</b>: MiaoTui, MiaoShou, MiaoChuan</span></li>
+      <li><span class="zh">128k 上下文</span><span class="en">128k context</span></li>
+      <li><span class="zh">听写每月 1200 分钟</span><span class="en">1,200 minutes of dictation a month</span></li>
+      <li><span class="zh">信号站不限条数</span><span class="en">Unlimited Signal Station</span></li>
+      <li><span class="zh">抢先用新功能，高峰时优先</span><span class="en">Early access to new features, priority at peak times</span></li>
+      <li><span class="zh">日落双环徽章和 MAX 标签</span><span class="en">Sunset double ring badge and MAX tag</span></li>
     </ul>
-    <a class="btn" href="#how"><span class="zh">在 App 里开通</span><span class="en">Get it in the app</span></a>
+    <div class="foot"><span class="zh">每天最多 1500 条，高级模型按倍数计</span><span class="en">Up to 1,500 a day; premium models count extra</span></div>
   </div>
 </div>
 <p class="note"><span class="zh">价格以欧元计，已含增值税。通过 Stripe 安全付款，随时可以在 App 里取消，当期结束前照常使用。</span><span class="en">Prices in euros, VAT included. Paid securely with Stripe. Cancel anytime in the app; you keep access until the end of the paid period.</span></p>
