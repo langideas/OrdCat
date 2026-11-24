@@ -767,7 +767,7 @@ final class SquareWindow: NSObject, NSWindowDelegate {
         caps.stringValue = "我的小猫：" + TaskSquare.capsLine
         let acc = Account.shared
         nameLabel.stringValue = acc.profile.displayName
-        avatarIV.image = memberAvatar(acc.avatarImage(size: 112), member: CatLevel.isMember, size: 56)
+        avatarIV.image = memberAvatar(acc.avatarImage(size: 112), tier: CatLevel.tier, size: 56)
         let lv = CatLevel.shared.level
         levelIV.image = lv > 0 ? RankIcon.strip(level: lv, height: 13) : nil
         levelIV.isHidden = lv == 0
@@ -811,8 +811,8 @@ final class SquareWindow: NSObject, NSWindowDelegate {
             let av = NSImageView()
             av.translatesAutoresizingMaskIntoConstraints = false
             av.imageScaling = .scaleProportionallyUpOrDown
-            av.image = mine ? memberAvatar(Account.shared.avatarImage(size: 80), member: CatLevel.isMember, size: 40)
-                            : memberAvatar(AvatarCache.placeholder(80), member: false, size: 40)
+            av.image = mine ? memberAvatar(Account.shared.avatarImage(size: 80), tier: CatLevel.tier, size: 40)
+                            : memberAvatar(AvatarCache.placeholder(80), tier: .none, size: 40)
             let who = mine ? Account.shared.profile.displayName : (t.posterName.isEmpty ? "一位用户" : t.posterName)
             let name = NSTextField(labelWithString: who)
             name.font = .systemFont(ofSize: 13, weight: .semibold)

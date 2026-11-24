@@ -6,7 +6,7 @@
 //   "billing": {
 //     "enabled": false,                       // false = 公测期: every skill is free
 //     "trialDays": 7,
-//     "skills": { "x": { "price": "¥39/月", "checkout": "https://…" } },
+//     "skills": { "x": { "price": "€3/月", "checkout": "https://…" } },
 //     "validate": "https://api.lemonsqueezy.com/v1/licenses/validate"
 //   }
 //
@@ -18,7 +18,9 @@ import Cocoa
 
 enum Billing {
     private static let d = UserDefaults.standard
-    static let defaultPrice = "¥39/月"
+    static let defaultPrice = "€3/月"
+    /// Paid skills. 会员 Max includes all of them (plan v2, Lang 2026-11-24).
+    static let skillIDs: Set<String> = ["x", "agent", "miao"]
 
     // MARK: remote settings
 
@@ -62,6 +64,7 @@ enum Billing {
     static func licenseKey(_ id: String) -> String { Keychain.get(service: "app.ordcat.license.\(id)") }
 
     static func isSubscribed(_ id: String) -> Bool {
+        if skillIDs.contains(id) && isSubscribed("max") { return true }   // 会员 Max includes every skill
         if let a = Account.shared.subscribedUntil(id), a > Date() { return true }   // bound to the account
         guard let u = paidUntil(id) else { return false }
         return u > Date()
@@ -79,7 +82,8 @@ enum Billing {
         if !enabled { return "公测期免费（正式开启后 \(price(id))）" }
         if isSubscribed(id) {
             let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
-            let until = [Account.shared.subscribedUntil(id), paidUntil(id)].compactMap { $0 }.max() ?? Date()
+            let until = [Account.shared.subscribedUntil(id), paidUntil(id), skillIDs.contains(id) ? Account.shared.subscribedUntil("max") : nil]
+                .compactMap { $0 }.max() ?? Date()
             return "✅ 已订阅（有效期到 \(df.string(from: until))）"
         }
         if trialStart(id) != nil {

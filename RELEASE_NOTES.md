@@ -1,3 +1,17 @@
+# OrdCat v0.2.60
+
+- 会员改成两档：会员 Pro €9.9/月（年付 €95）每月 3000 条，会员 Max €59/月（年付 €566）每月 25000 条、可选高级模型、包含全部技能；年付省 20%，默认选年付
+- 加油包改成 €2.99 = 1500 条；技能 €3/月，会员 Pro 打 8 折
+- 新会员徽章，看形状就能分：会员 Pro 是琥珀光环加猫爪章，会员 Max 是日落渐变双环加猫头宝石章；名字旁多了 PRO / MAX 标签
+- 桌面小猫的光圈跟着会员档位变：Pro 琥珀光，Max 日落双层光
+
+**English**
+
+- Membership now has two tiers: Member Pro €9.9/mo (€95/yr) with 3,000 messages a month, and Member Max €59/mo (€566/yr) with 25,000 messages a month, premium models and every skill included. Yearly saves 20% and is picked by default
+- Top-up is now €2.99 for 1,500 messages; skills are €3/mo, 20% off with Member Pro
+- New member badges you can tell apart by shape: Member Pro gets an amber ring with a paw chip, Member Max a sunset double ring with a cat-head gem; a PRO / MAX tag shows next to names
+- The desktop cat's glow follows your tier: amber for Pro, a two-layer sunset glow for Max
+
 # OrdCat v0.2.59
 
 - 电脑里有应用在出声时（比如微信语音、视频），小猫弹窗「正在分享」下面会多一行「🔊 正在听「应用」」，没声音就不显示；点一下让小猫一起听：在本机转成文字，只在内存里留最近 10 分钟，不保存，关掉弹窗就清空；点它还能换听的语言，点 ✕ 就不带

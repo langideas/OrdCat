@@ -9,11 +9,15 @@
     "trialDays": 7,
     "skills": {
       "x": {
-        "price": "¥39/月",
+        "price": "€3/月",
         "checkout": ""
       },
       "agent": {
-        "price": "¥39/月",
+        "price": "€3/月",
+        "checkout": ""
+      },
+      "miao": {
+        "price": "€3/月",
         "checkout": ""
       }
     },

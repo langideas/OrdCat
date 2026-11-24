@@ -32,6 +32,7 @@ struct CatStats {
     var followers: Int = 0
     var following: Int = 0
     var member: Bool = false
+    var tier: MemberTier = .none
     var iFollow: Bool = false
 
     init() {}
@@ -43,6 +44,7 @@ struct CatStats {
         followers = CatStats.int(r["followers"])
         following = CatStats.int(r["following"])
         member = r["member"] as? Bool ?? false
+        tier = MemberTier(r["tier"] as? String) ?? (member ? .pro : .none)
         iFollow = r["i_follow"] as? Bool ?? false
     }
     static func int(_ v: Any?) -> Int {
@@ -118,9 +120,10 @@ final class CatLevel {
     /// Hours still needed to finish the current day.
     var hoursToNextDay: Int { Int(ceil(Double(86400 - onlineSeconds % 86400) / 3600)) }
 
-    /// Any active subscription (account-bound or license key) → 订阅会员.
-    /// 徽章只看会员 / 会员 Pro；技能只在技能栏用光圈区分点亮（Lang 2026-11-23）
-    static var isMember: Bool { ["member", "pro"].contains { Billing.isSubscribed($0) } }
+    /// 订阅会员 tier from my own subscriptions: 会员 Max beats 会员 Pro.
+    /// 徽章只看会员 Pro / 会员 Max；技能只在技能栏用光圈区分点亮（Lang 2026-11-23）
+    static var tier: MemberTier { Billing.isSubscribed("max") ? .max : (Billing.isSubscribed("pro") ? .pro : .none) }
+    static var isMember: Bool { tier != .none }
 
     // MARK: online clock
 
@@ -316,12 +319,33 @@ enum RankIcon: CaseIterable {
 
 // MARK: - Avatars with the 订阅会员 badge
 
-/// A round avatar. Members get an amber glowing ring and a small eyes chip (graphite circle, two amber capsules)
-/// at the bottom-right. The result is drawn inside its own square, so don't round-clip the image view.
-func memberAvatar(_ src: NSImage, member: Bool, size s: CGFloat) -> NSImage {
+/// 订阅会员 tier (plan v2, Lang 2026-11-24). Server names: "pro" | "max".
+enum MemberTier: Equatable {
+    case none, pro, max
+    init?(_ s: String?) {
+        switch s { case "max": self = .max; case "pro": self = .pro; default: return nil }
+    }
+    var label: String { self == .max ? "MAX" : (self == .pro ? "PRO" : "") }
+    var name: String {
+        switch self {
+        case .max: return L10n.english ? "Member Max" : "会员 Max"
+        case .pro: return L10n.english ? "Member Pro" : "会员 Pro"
+        case .none: return ""
+        }
+    }
+}
+
+private let kGraphite = NSColor(calibratedRed: 0.24, green: 0.24, blue: 0.235, alpha: 1)
+private let kCream = NSColor(calibratedRed: 1.0, green: 0.925, blue: 0.78, alpha: 1)
+
+/// A round avatar with the member badge. The badge differs by shape, not only colour:
+/// - 会员 Pro: one amber glowing ring + a round amber chip with a graphite cat paw.
+/// - 会员 Max: a sunset (coral → amber) double ring + a cat-head gem chip (two ears) with cream eyes and a spark.
+/// The chip sits bottom-right. The result is drawn inside its own square, so don't round-clip the image view.
+func memberAvatar(_ src: NSImage, tier: MemberTier, size s: CGFloat) -> NSImage {
     NSImage(size: NSSize(width: s, height: s), flipped: false) { _ in
-        let ring = member ? max(1.5, s * 0.045) : 0
-        let inset = member ? ring + max(1.5, s * 0.04) : 0
+        let ring: CGFloat = tier == .none ? 0 : max(1.5, s * 0.045)
+        let inset: CGFloat = tier == .none ? 0 : ring + max(1.5, s * (tier == .max ? 0.06 : 0.04))
         let face = NSRect(x: inset, y: inset, width: s - inset * 2, height: s - inset * 2)
         NSGraphicsContext.current?.saveGraphicsState()
         NSBezierPath(ovalIn: face).addClip()
@@ -330,34 +354,139 @@ func memberAvatar(_ src: NSImage, member: Bool, size s: CGFloat) -> NSImage {
         let w = sz.width * scale, h = sz.height * scale
         src.draw(in: NSRect(x: face.midX - w / 2, y: face.midY - h / 2, width: w, height: h))
         NSGraphicsContext.current?.restoreGraphicsState()
-        guard member else { return true }
+        guard tier != .none else { return true }
+
+        let outer = NSRect(x: ring / 2 + 0.5, y: ring / 2 + 0.5, width: s - ring - 1, height: s - ring - 1)
         NSGraphicsContext.current?.saveGraphicsState()
         let sh = NSShadow()
-        sh.shadowColor = kAmber.withAlphaComponent(0.85)
-        sh.shadowBlurRadius = max(2, s * 0.08)
+        sh.shadowColor = (tier == .max ? kSunset : kAmber).withAlphaComponent(0.85)
+        sh.shadowBlurRadius = max(2, s * (tier == .max ? 0.11 : 0.08))
         sh.shadowOffset = .zero
         sh.set()
-        kAmber.setStroke()
-        let r = NSBezierPath(ovalIn: NSRect(x: ring / 2 + 0.5, y: ring / 2 + 0.5, width: s - ring - 1, height: s - ring - 1))
-        r.lineWidth = ring
-        r.stroke()
-        NSGraphicsContext.current?.restoreGraphicsState()
-        // Eyes chip, bottom-right.
-        let c = s * 0.34
-        let chip = NSRect(x: s - c, y: 0, width: c, height: c)
-        NSColor(calibratedRed: 0.24, green: 0.24, blue: 0.235, alpha: 1).setFill()
-        NSBezierPath(ovalIn: chip).fill()
-        NSColor.windowBackgroundColor.withAlphaComponent(0.9).setStroke()
-        let edge = NSBezierPath(ovalIn: chip.insetBy(dx: 0.5, dy: 0.5))
-        edge.lineWidth = max(1, s * 0.02)
-        edge.stroke()
-        kAmber.setFill()
-        let ew = c * 0.16, eh = c * 0.40, gap = c * 0.14
-        for x in [chip.midX - gap / 2 - ew, chip.midX + gap / 2] {
-            NSBezierPath(roundedRect: NSRect(x: x, y: chip.midY - eh / 2, width: ew, height: eh), xRadius: ew / 2, yRadius: ew / 2).fill()
+        if tier == .pro {
+            kAmber.setStroke()
+            let r = NSBezierPath(ovalIn: outer)
+            r.lineWidth = ring
+            r.stroke()
+            NSGraphicsContext.current?.restoreGraphicsState()
+        } else {
+            // Glow first (stroke once with the shadow), then the gradient ring on top.
+            kSunset.setStroke()
+            let g = NSBezierPath(ovalIn: outer); g.lineWidth = ring; g.stroke()
+            NSGraphicsContext.current?.restoreGraphicsState()
+            NSGraphicsContext.current?.saveGraphicsState()
+            let band = NSBezierPath(ovalIn: outer.insetBy(dx: -ring / 2, dy: -ring / 2))
+            band.append(NSBezierPath(ovalIn: outer.insetBy(dx: ring / 2, dy: ring / 2)))
+            band.windingRule = .evenOdd
+            band.addClip()
+            NSGradient(starting: kSunset, ending: kAmber)?.draw(in: NSRect(x: 0, y: 0, width: s, height: s), angle: 45)
+            NSGraphicsContext.current?.restoreGraphicsState()
+            kCream.setStroke()
+            let inner = NSBezierPath(ovalIn: outer.insetBy(dx: ring * 0.5 + max(1, s * 0.02), dy: ring * 0.5 + max(1, s * 0.02)))
+            inner.lineWidth = max(0.75, s * 0.012)
+            inner.stroke()
         }
+        if tier == .pro { drawPawChip(s) } else { drawCatGemChip(s) }
         return true
     }
+}
+
+/// 会员 Pro chip: round amber chip, graphite cat paw (bottom-right).
+private func drawPawChip(_ s: CGFloat) {
+    let c = s * 0.36
+    let cx = s - c / 2, cy = c / 2
+    let edge = max(1, s * 0.025)
+    NSColor.windowBackgroundColor.setFill()
+    NSBezierPath(ovalIn: NSRect(x: cx - c / 2 - edge, y: cy - c / 2 - edge, width: c + edge * 2, height: c + edge * 2)).fill()
+    kAmber.setFill()
+    NSBezierPath(ovalIn: NSRect(x: cx - c / 2, y: cy - c / 2, width: c, height: c)).fill()
+    kGraphite.setFill()
+    NSBezierPath(ovalIn: NSRect(x: cx - c * 0.255, y: cy - c * 0.285, width: c * 0.51, height: c * 0.36)).fill()
+    for (dx, dy, r) in [(-0.62, -0.42, 0.20), (-0.22, -0.72, 0.21), (0.22, -0.72, 0.21), (0.62, -0.42, 0.20)] as [(CGFloat, CGFloat, CGFloat)] {
+        let x = cx + dx * c * 0.5, y = cy - dy * c * 0.5 - c * 0.06, rr = r * c * 0.5
+        NSBezierPath(ovalIn: NSRect(x: x - rr, y: y - rr * 1.15, width: rr * 2, height: rr * 2.3)).fill()
+    }
+}
+
+/// 会员 Max chip: a cat-head gem (two ears, cut jaw) in a coral → amber gradient, graphite face, cream eyes, amber spark.
+private func drawCatGemChip(_ s: CGFloat) {
+    let c = s * 0.40
+    let cx = s - c * 0.68, cy = c * 0.52
+    func path(_ pts: [(CGFloat, CGFloat)], grow g: CGFloat = 0) -> NSBezierPath {
+        let p = NSBezierPath()
+        for (i, (dx, dy)) in pts.enumerated() {
+            // dy is measured downwards (as in the design sketch); grow pushes every point out from the centre.
+            let len = max(0.001, (dx * dx + dy * dy).squareRoot())
+            let pt = NSPoint(x: cx + dx * c + dx / len * g, y: cy - dy * c - dy / len * g)
+            if i == 0 { p.move(to: pt) } else { p.line(to: pt) }
+        }
+        p.close()
+        p.lineJoinStyle = .round
+        return p
+    }
+    let head: [(CGFloat, CGFloat)] = [(-0.50, -0.10), (-0.46, -0.62), (-0.16, -0.36), (0.16, -0.36), (0.46, -0.62),
+                                      (0.50, -0.10), (0.50, 0.18), (0.22, 0.48), (-0.22, 0.48), (-0.50, 0.18)]
+    let face: [(CGFloat, CGFloat)] = [(-0.36, -0.08), (-0.30, -0.38), (-0.12, -0.22), (0.12, -0.22), (0.30, -0.38),
+                                      (0.36, -0.08), (0.36, 0.12), (0.15, 0.34), (-0.15, 0.34), (-0.36, 0.12)]
+    NSColor.windowBackgroundColor.setFill()
+    path(head, grow: max(1, s * 0.025)).fill()
+    NSGraphicsContext.current?.saveGraphicsState()
+    path(head).addClip()
+    NSGradient(starting: kSunset, ending: kAmber)?.draw(in: NSRect(x: cx - c, y: cy - c, width: c * 2, height: c * 2), angle: 90)
+    NSGraphicsContext.current?.restoreGraphicsState()
+    kGraphite.setFill()
+    path(face).fill()
+    kCream.setFill()
+    let eh = c * 0.28, ew = eh * 0.32, gap = eh * 0.28, ey = cy - c * 0.04
+    for x in [cx - gap / 2 - ew, cx + gap / 2] {
+        NSBezierPath(roundedRect: NSRect(x: x, y: ey - eh / 2, width: ew, height: eh), xRadius: ew / 2, yRadius: ew / 2).fill()
+    }
+    // Four-point spark above the right ear.
+    let sx = cx + c * 0.50, sy = cy + c * 0.66, sr = c * 0.16, k = sr * 0.28
+    let spark = NSBezierPath()
+    let pts = [NSPoint(x: sx, y: sy + sr), NSPoint(x: sx + k, y: sy + k), NSPoint(x: sx + sr, y: sy), NSPoint(x: sx + k, y: sy - k),
+               NSPoint(x: sx, y: sy - sr), NSPoint(x: sx - k, y: sy - k), NSPoint(x: sx - sr, y: sy), NSPoint(x: sx - k, y: sy + k)]
+    spark.move(to: pts[0]); for p in pts.dropFirst() { spark.line(to: p) }; spark.close()
+    kAmber.setFill()
+    spark.fill()
+}
+
+/// The PRO / MAX tag next to a name: PRO = amber outline pill; MAX = solid coral → amber gradient pill.
+func memberTagImage(_ tier: MemberTier, height h: CGFloat = 16) -> NSImage? {
+    guard tier != .none else { return nil }
+    let font = NSFont.systemFont(ofSize: h * 0.58, weight: .heavy)
+    let text = NSAttributedString(string: tier.label, attributes: [
+        .font: font,
+        .foregroundColor: tier == .max ? NSColor(calibratedRed: 0.27, green: 0.16, blue: 0.10, alpha: 1)
+                                        : NSColor(calibratedRed: 0.69, green: 0.43, blue: 0.08, alpha: 1),
+        .kern: 0.4])
+    let tw = ceil(text.size().width)
+    let w = tw + h * 0.9
+    return NSImage(size: NSSize(width: w, height: h), flipped: false) { _ in
+        let r = NSRect(x: 0.5, y: 0.5, width: w - 1, height: h - 1)
+        let pill = NSBezierPath(roundedRect: r, xRadius: r.height / 2, yRadius: r.height / 2)
+        if tier == .max {
+            NSGradient(starting: kSunset, ending: kAmber)?.draw(in: pill, angle: 0)
+        } else {
+            kAmber.withAlphaComponent(0.14).setFill(); pill.fill()
+            kAmber.setStroke(); pill.lineWidth = 1; pill.stroke()
+        }
+        let ts = text.size()
+        text.draw(at: NSPoint(x: (w - ts.width) / 2, y: (h - ts.height) / 2))
+        return true
+    }
+}
+
+/// An image view holding the PRO / MAX tag (hidden for non-members).
+func memberTagView(_ tier: MemberTier, height: CGFloat = 16) -> NSImageView {
+    let v = NSImageView()
+    v.imageScaling = .scaleNone
+    v.image = memberTagImage(tier, height: height)
+    v.isHidden = tier == .none
+    v.toolTip = tier == .none ? nil : tier.name
+    v.setContentHuggingPriority(.required, for: .horizontal)
+    v.setContentCompressionResistancePriority(.required, for: .horizontal)
+    return v
 }
 
 /// Small in-memory cache for other users' avatars (public storage links).

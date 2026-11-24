@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
     const userId = sub.metadata?.user_id ?? null;
     const it = sub.items?.data?.[0];
     const priceId = it?.price?.id ?? "";
-    const item = sub.metadata?.item ?? itemOfPrice(priceId) ?? "member";
+    const item = sub.metadata?.item ?? itemOfPrice(priceId) ?? "pro";
     const periodEnd = sub.current_period_end ?? it?.current_period_end ?? null;   // newer API versions keep it on the item
     const { error } = await admin.from("subscriptions").upsert({
       id: sub.id,
@@ -61,7 +61,7 @@ Deno.serve(async (req) => {
       updated_at: new Date().toISOString(),
     });
     if (error) throw new Error(error.message);
-    if (userId && (item === "member" || item === "pro")) await admin.rpc("ord_wallet_sync", { p_user: userId });
+    if (userId && (item === "pro" || item === "max")) await admin.rpc("ord_wallet_sync", { p_user: userId });
     return userId;
   };
 
@@ -70,7 +70,7 @@ Deno.serve(async (req) => {
       case "checkout.session.completed": {
         const userId = obj.metadata?.user_id ?? obj.client_reference_id;
         if (obj.mode === "payment" && obj.metadata?.item === "topup" && obj.payment_status === "paid" && userId) {
-          await admin.rpc("credit_topup", { p_session: obj.id, p_user: userId, p_credits: Number(obj.metadata?.credits ?? 1200) });
+          await admin.rpc("credit_topup", { p_session: obj.id, p_user: userId, p_credits: Number(obj.metadata?.credits ?? 1500) });
         } else if (obj.mode === "subscription" && obj.subscription) {
           await saveSub(await stripeGet(`subscriptions/${obj.subscription}`));
         }

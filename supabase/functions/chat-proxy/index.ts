@@ -9,7 +9,10 @@
 //     "cn":   {"base":"https://dashscope.aliyuncs.com/compatible-mode/v1","key":"DASHSCOPE_KEY","model":"qwen3.8-flash","in":0.11,"out":0.38,"extra":{"enable_thinking":false}},
 //     "intl": {"base":"https://api.openai.com/v1","key":"OPENAI_KEY","model":"gpt-6-luna","in":0.10,"out":0.50},
 //     "slow": {"base":"https://open.bigmodel.cn/api/paas/v4","key":"ZHIPU_KEY","model":"glm-4.7-flash","in":0,"out":0,"extra":{"thinking":{"type":"disabled"}}},
-//     "premium": {"gpt-6.1-terra":{"base":"https://api.openai.com/v1","key":"OPENAI_KEY","model":"gpt-6.1-terra","mult":10,"in":1,"out":5}}
+//     "premium": {"gpt-6.1-terra":{"base":"https://api.openai.com/v1","key":"OPENAI_KEY","model":"gpt-6.1-terra","mult":10,"in":1,"out":5},
+//                 "gemini-3.8-flash":{"base":"https://generativelanguage.googleapis.com/v1beta/openai","key":"GEMINI_KEY","model":"gemini-3.8-flash","mult":15,"in":1.5,"out":7.5},
+//                 "claude-sonnet-5-5":{"base":"https://api.anthropic.com/v1","key":"ANTHROPIC_KEY","model":"claude-sonnet-5-5","mult":20,"in":2,"out":10}}
+// 高级模型只给会员 Max。
 //   }'
 //   DASHSCOPE_KEY=… OPENAI_KEY=… ZHIPU_KEY=…   （"key" 写的是 secret 的名字，不是 Key 本身）
 // "in"/"out" = 每 1M token 的美元价，只用来记账。
@@ -28,8 +31,9 @@ function err(status: number, code: string, message: string) {
   });
 }
 
+// Context per message (about 3 characters a token): free 16k, 会员 Pro 32k, 会员 Max 128k tokens.
 const LIMITS: Record<string, { ctxChars: number }> = {
-  free: { ctxChars: 48_000 }, member: { ctxChars: 48_000 }, pro: { ctxChars: 96_000 },
+  free: { ctxChars: 48_000 }, pro: { ctxChars: 96_000 }, max: { ctxChars: 384_000 },
 };
 
 // Keep the system prompt and the newest turns within the plan's context size.
@@ -88,7 +92,7 @@ Deno.serve(async (req) => {
   let mult = 1;
   const asked = String(body.model ?? "ordcat");
   if (tier === "slow") up = cfg.slow;
-  else if (plan === "pro" && cfg.premium?.[asked]) { up = cfg.premium[asked]; mult = up!.mult ?? 1; }
+  else if (plan === "max" && cfg.premium?.[asked]) { up = cfg.premium[asked]; mult = up!.mult ?? 1; }
   else up = cfg[region] ?? cfg.intl ?? cfg.cn;
   if (!up) return err(503, "not_configured", "托管模型还没配置好");
   const key = Deno.env.get(up.key) ?? "";

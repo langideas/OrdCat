@@ -1,18 +1,20 @@
 // OrdCat · 开通会员 / 买加油包 / 管理订阅（Stripe Checkout + Customer Portal）。
 // App 带着登录 token 调用：POST /functions/v1/stripe-checkout
-//   {"item":"member","interval":"month"|"year"}   会员
-//   {"item":"pro","interval":"month"|"year"}      会员 Pro
-//   {"item":"topup"}                              加油包（一次性付款）
-//   {"item":"x"} / {"item":"agent"}              技能订阅
+//   {"item":"pro","interval":"month"|"year"}      会员 Pro  €9.9/月，年付 €95
+//   {"item":"max","interval":"month"|"year"}      会员 Max  €59/月，年付 €566（包含全部技能）
+//   {"item":"topup"}                              加油包 €2.99 = 1500 条（一次性付款）
+//   {"item":"x"} / {"item":"agent"} / {"item":"miao"}   技能订阅 €3/月；会员 Pro 用 8 折价（x.month.member…）
 //   {"portal":true}                              管理订阅 / 取消 / 换卡
 // 返回 {"url":"https://checkout.stripe.com/…"}，App 用浏览器打开。
 //
 // 部署：supabase functions deploy stripe-checkout
 // Secrets：
 //   STRIPE_SECRET_KEY=sk_live_…
-//   STRIPE_PRICES='{"member.month":"price_…","member.year":"price_…","pro.month":"price_…","pro.year":"price_…",
-//                   "topup":"price_…","x.month":"price_…","agent.month":"price_…"}'
-//   TOPUP_CREDITS=1200
+//   STRIPE_PRICES='{"pro.month":"price_…","pro.year":"price_…","max.month":"price_…","max.year":"price_…",
+//                   "topup":"price_…","x.month":"price_…","agent.month":"price_…","miao.month":"price_…",
+//                   "x.month.member":"price_…","agent.month.member":"price_…","miao.month.member":"price_…"}'
+//   （*.member = 会员 8 折价 €2.4；没填就用原价）
+//   TOPUP_CREDITS=1500
 //   SITE_URL=https://ordcat.de
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -61,7 +63,13 @@ Deno.serve(async (req) => {
     const item = String(body.item ?? "");
     const interval = body.interval === "year" ? "year" : "month";
     const prices = JSON.parse(Deno.env.get("STRIPE_PRICES") ?? "{}");
-    const priceKey = item === "topup" ? "topup" : `${item}.${interval}`;
+    const isSkill = !["pro", "max", "topup"].includes(item);
+    let priceKey = item === "topup" ? "topup" : `${item}.${interval}`;
+    if (isSkill) {
+      const { data: plan } = await admin.rpc("ord_plan", { p_user: uid });
+      if (plan === "max") return json({ error: "会员 Max 已经包含全部技能，不用再买" }, 400);
+      if (plan === "pro" && prices[`${priceKey}.member`]) priceKey = `${priceKey}.member`;
+    }
     const price = prices[priceKey];
     if (!price) return json({ error: `还没开放：${priceKey}` }, 400);
 
@@ -83,7 +91,7 @@ Deno.serve(async (req) => {
     };
     if (item === "topup") {
       p.mode = "payment";
-      p["metadata[credits]"] = Deno.env.get("TOPUP_CREDITS") ?? "1200";
+      p["metadata[credits]"] = Deno.env.get("TOPUP_CREDITS") ?? "1500";
     } else {
       p.mode = "subscription";
       p["subscription_data[metadata][user_id]"] = uid;

@@ -11,8 +11,8 @@
 
 ## 会员 + Stripe + OrdCat 托管模型（v0.2.46 起）
 
-1. SQL Editor 运行 `account2.sql`，再运行 `membership.sql`（会员额度、用量记录、加油包）。
-2. Stripe（Dashboard → Product catalog）建 5 个价格：会员 月/年、会员 Pro 月/年、加油包（一次性）。技能「陪你刷推」「帮我操作电脑」要走 Stripe 的话再各建一个月付价格。
+1. SQL Editor 运行 `account2.sql`，再运行 `membership.sql`（会员额度、用量记录、加油包、徽章分档）。`membership.sql` 要最后运行：以后重新运行 `signal.sql` 的话，记得再运行一次 `membership.sql`。
+2. Stripe（Dashboard → Product catalog）建价格（方案 v2）：会员 Pro €9.9/月、€95/年；会员 Max €59/月、€566/年；加油包 €2.99（一次性，1500 条）；技能 喵推 / 喵手 / 喵传 各 €3/月，另建 8 折价 €2.4/月给会员 Pro（会员 Max 已包含全部技能，不用买）。
 3. 部署函数：
    ```
    supabase functions deploy chat-proxy
@@ -21,8 +21,8 @@
    ```
 4. Secrets：
    ```
-   supabase secrets set STRIPE_SECRET_KEY=sk_live_... STRIPE_WEBHOOK_SECRET=whsec_... SITE_URL=https://ordcat.de TOPUP_CREDITS=1200
-   supabase secrets set STRIPE_PRICES='{"member.month":"price_...","member.year":"price_...","pro.month":"price_...","pro.year":"price_...","topup":"price_..."}'
+   supabase secrets set STRIPE_SECRET_KEY=sk_live_... STRIPE_WEBHOOK_SECRET=whsec_... SITE_URL=https://ordcat.de TOPUP_CREDITS=1500
+   supabase secrets set STRIPE_PRICES='{"pro.month":"price_...","pro.year":"price_...","max.month":"price_...","max.year":"price_...","topup":"price_...","x.month":"price_...","agent.month":"price_...","miao.month":"price_...","x.month.member":"price_...","agent.month.member":"price_...","miao.month.member":"price_..."}'
    supabase secrets set DASHSCOPE_KEY=... OPENAI_KEY=... ZHIPU_KEY=...
    supabase secrets set HOSTED_MODELS='{"cn":{"base":"https://dashscope.aliyuncs.com/compatible-mode/v1","key":"DASHSCOPE_KEY","model":"qwen3.8-flash","in":0.11,"out":0.38,"extra":{"enable_thinking":false}},"intl":{"base":"https://api.openai.com/v1","key":"OPENAI_KEY","model":"gpt-6-luna","in":0.1,"out":0.5},"slow":{"base":"https://open.bigmodel.cn/api/paas/v4","key":"ZHIPU_KEY","model":"glm-4.7-flash","extra":{"thinking":{"type":"disabled"}}}}'
    ```

@@ -1,34 +1,68 @@
 -- OrdCat · 会员与托管模型额度（Stripe）。在 schema.sql / signal.sql / account2.sql 之后运行，可以重复运行。
 --
--- 方案（Lang 2026-11-23 同意）：
+-- 方案 v2（Lang 2026-11-24 同意）：
 --   免费      自带 Key 什么都能用；新用户一次性送 100 条托管额度试用
---   会员      ¥30 / €3.99 每月 2000 条，每天最多 200 条
---   会员 Pro  ¥68 / €8.99 每月 6000 条，每天最多 500 条，可选高级模型（按倍数扣）
---   额度用完：每天 30 条慢速模型；或买加油包 ¥18 = 1200 条
+--   会员 Pro  €9.9（¥78）/月，年付 €95（¥748）：每月 3000 条，每天最多 300 条
+--   会员 Max  €59（¥458）/月，年付 €566（¥4398）：每月 25000 条，每天最多 1500 条，
+--             可选高级模型（按倍数扣），包含全部技能
+--   额度用完：慢速模型每天 30 条（Max 100 条）；或买加油包 €2.99（¥22）= 1500 条
 -- 1 条 = 一条普通消息；带截图 +1；上下文超过 8k token +1；高级模型 × 倍数。
 --
--- subscriptions.skill 现在可以是：member | pro | x | agent（技能）。
+-- subscriptions.skill 现在可以是：pro | max（会员）| x | agent | miao（技能）。
+-- 旧名字（v1：member = 会员，pro = 会员 Pro）在下面一次性改成新名字，只改一次。
 
 alter table public.subscriptions add column if not exists provider text not null default 'lemon';
 alter table public.subscriptions add column if not exists customer_id text;
 alter table public.subscriptions add column if not exists price_id text;
 
--- 「订阅会员」只算会员 / 会员 Pro（技能订阅不算会员）。信号站的「仅会员」条件也按这个算。
+-- One-time rename v1 → v2: pro → max first, then member → pro. A marker row makes sure it never runs twice.
+create table if not exists public.ord_migrations (id text primary key, at timestamptz not null default now());
+alter table public.ord_migrations enable row level security;
+do $$
+begin
+  if not exists (select 1 from ord_migrations where id = 'plan-v2') then
+    update subscriptions set skill = 'max' where skill = 'pro';
+    update subscriptions set skill = 'pro' where skill = 'member';
+    if to_regclass('public.credit_wallets') is not null then
+      update credit_wallets set plan = 'max' where plan = 'pro';
+      update credit_wallets set plan = 'pro' where plan = 'member';
+      update credit_wallets set period_end = null where plan <> 'free';   -- new quotas start now
+    end if;
+    insert into ord_migrations (id) values ('plan-v2');
+  end if;
+end $$;
+
+-- 「订阅会员」只算会员 Pro / 会员 Max（技能订阅不算会员）。信号站的「仅会员」条件也按这个算。
 create or replace function public.ord_is_member(p_user uuid) returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from subscriptions s
-                 where s.user_id = p_user and s.skill in ('member', 'pro') and s.status not in ('expired', 'unpaid', 'canceled', 'incomplete_expired')
+                 where s.user_id = p_user and s.skill in ('pro', 'max') and s.status not in ('expired', 'unpaid', 'canceled', 'incomplete_expired')
                    and coalesce(s.ends_at, s.renews_at, now() + interval '32 days') > now());
 $$;
 
 create or replace function public.ord_plan(p_user uuid) returns text
 language sql stable security definer set search_path = public as $$
-  select coalesce((select case when bool_or(s.skill = 'pro') then 'pro' else 'member' end
+  select coalesce((select case when bool_or(s.skill = 'max') then 'max' else 'pro' end
                    from subscriptions s
-                   where s.user_id = p_user and s.skill in ('member', 'pro')
+                   where s.user_id = p_user and s.skill in ('pro', 'max')
                      and s.status not in ('expired', 'unpaid', 'canceled', 'incomplete_expired')
                      and coalesce(s.ends_at, s.renews_at, now() + interval '32 days') > now()
                    having count(*) > 0), 'free');
+$$;
+
+-- Badge tier for anyone: 'max' | 'pro' | null.
+create or replace function public.ord_member_tier(p_user uuid) returns text
+language sql stable security definer set search_path = public as $$
+  select nullif(ord_plan(p_user), 'free');
+$$;
+
+-- Owns this skill: its own subscription, or 会员 Max (includes every skill).
+create or replace function public.ord_has_skill(p_user uuid, p_skill text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select ord_plan(p_user) = 'max'
+      or exists (select 1 from subscriptions s
+                 where s.user_id = p_user and s.skill = p_skill and s.status not in ('expired', 'unpaid')
+                   and coalesce(s.ends_at, s.renews_at, now() + interval '32 days') > now());
 $$;
 
 -- ---------- 额度钱包 ----------
@@ -69,10 +103,14 @@ create table if not exists public.credit_topups (
 alter table public.credit_topups enable row level security;
 
 create or replace function public.ord_quota(p_plan text) returns int language sql immutable as $$
-  select case p_plan when 'pro' then 6000 when 'member' then 2000 else 0 end;
+  select case p_plan when 'max' then 25000 when 'pro' then 3000 else 0 end;
 $$;
 create or replace function public.ord_daily_cap(p_plan text) returns int language sql immutable as $$
-  select case p_plan when 'pro' then 500 when 'member' then 200 else 100 end;
+  select case p_plan when 'max' then 1500 when 'pro' then 300 else 100 end;
+$$;
+-- Slow model after the credits run out (messages a day).
+create or replace function public.ord_slow_cap(p_plan text) returns int language sql immutable as $$
+  select case p_plan when 'max' then 100 else 30 end;
 $$;
 
 -- Make sure the wallet exists and matches the current plan; start a new month of credits when due.
@@ -101,8 +139,8 @@ begin
     if pend > now() + interval '32 days' then pend := now() + interval '1 month'; end if;
     update credit_wallets
        set plan = p,
-           monthly_left = case when w.plan = 'member' and p = 'pro' and w.period_end > now()
-                               then ord_quota('pro') - (ord_quota('member') - w.monthly_left)   -- upgrade mid-month
+           monthly_left = case when w.plan = 'pro' and p = 'max' and w.period_end > now()
+                               then ord_quota('max') - (ord_quota('pro') - w.monthly_left)   -- upgrade mid-month
                                else ord_quota(p) end,
            period_end = pend, updated_at = now()
      where user_id = p_user returning * into w;
@@ -125,7 +163,7 @@ begin
   return json_build_object('plan', w.plan, 'monthly_left', w.monthly_left, 'monthly_total', ord_quota(w.plan),
                            'bonus', w.bonus, 'period_end', w.period_end,
                            'today_used', used, 'daily_cap', ord_daily_cap(w.plan),
-                           'slow_today', slow, 'slow_cap', 30);
+                           'slow_today', slow, 'slow_cap', ord_slow_cap(w.plan));
 end $$;
 
 -- Proxy, before calling the model: may this user send one more message, and on which tier?
@@ -141,13 +179,13 @@ begin
   select coalesce(sum(credits) filter (where tier = 'hosted'), 0), count(*) filter (where tier = 'slow')
     into used, slow from usage_ledger where user_id = p_user and at > date_trunc('day', now());
   select count(*) into recent from usage_ledger where user_id = p_user and at > now() - interval '1 minute';
-  if recent >= 20 then
+  if recent >= (case when w.plan = 'max' then 40 else 20 end) then
     return json_build_object('ok', false, 'plan', w.plan, 'reason', 'too_fast');
   end if;
   if w.monthly_left + w.bonus > 0 and used < ord_daily_cap(w.plan) then
     return json_build_object('ok', true, 'tier', 'hosted', 'plan', w.plan, 'left', w.monthly_left + w.bonus);
   end if;
-  if slow < 30 then
+  if slow < ord_slow_cap(w.plan) then
     return json_build_object('ok', true, 'tier', 'slow', 'plan', w.plan,
                              'reason', case when used >= ord_daily_cap(w.plan) then 'daily_cap' else 'no_credits' end);
   end if;
@@ -204,4 +242,75 @@ grant execute on function public.ord_wallet_sync(uuid), public.proxy_admit(uuid)
   public.consume_credits(uuid, text, int, text, int, int, numeric), public.credit_topup(text, uuid, int),
   public.credit_new_period(uuid), public.ord_plan(uuid) to service_role;
 grant execute on function public.credits_status() to authenticated;
-grant execute on function public.ord_quota(text), public.ord_daily_cap(text) to authenticated;
+grant execute on function public.ord_quota(text), public.ord_daily_cap(text), public.ord_slow_cap(text) to authenticated;
+revoke all on function public.ord_member_tier(uuid), public.ord_has_skill(uuid, text) from public, anon;
+grant execute on function public.ord_member_tier(uuid), public.ord_has_skill(uuid, text) to authenticated, service_role;
+
+-- ---------- 徽章分档：cat_stats 和 signal_feed 多带一个 tier（'pro' | 'max' | null）----------
+-- （和 signal.sql 里的同名函数一样，只多了 tier；以后改 signal.sql 时记得这里也要同步）
+-- Level, 喵友 and membership of one user (default: me).
+create or replace function public.cat_stats(p_user uuid default null) returns json
+language plpgsql stable security definer set search_path = public as $$
+declare me uuid := auth.uid(); u uuid := coalesce(p_user, auth.uid()); d int;
+begin
+  if me is null then raise exception '还没登录'; end if;
+  select days into d from cat_levels where user_id = u;
+  d := coalesce(d, 0);
+  return json_build_object(
+    'user_id', u,
+    'days', d,
+    'level', ord_level(d),
+    'followers', (select count(*) from cat_follows where followee_id = u),
+    'following', (select count(*) from cat_follows where follower_id = u),
+    'member', ord_is_member(u),
+    'tier', ord_member_tier(u),
+    'i_follow', exists (select 1 from cat_follows where follower_id = me and followee_id = u));
+end $$;
+
+-- 信号流 / 我发出的 / 单条信号. Body is null (and lacks lists what is missing) unless the reader qualifies.
+-- lacks items: level:<n> | followers:<n> | member | skill:<id>
+drop function if exists public.signal_feed(boolean, int, uuid);
+create or replace function public.signal_feed(p_mine boolean default false, p_limit int default 60, p_id uuid default null)
+returns table (id uuid, author_id uuid, author_name text, author_avatar text, author_level int, author_followers int,
+               author_member boolean, title text, grade int, min_level int, min_followers int, member_only boolean,
+               need_skills text[], source_app text, created_at timestamptz, lacks text[], unlocked boolean,
+               body text, i_follow boolean, author_tier text)
+language sql stable security definer set search_path = public as $$
+  with me as (
+    select auth.uid() as uid,
+           ord_level(coalesce((select c.days from cat_levels c where c.user_id = auth.uid()), 0)) as lvl,
+           (select count(*)::int from cat_follows f where f.followee_id = auth.uid()) as fans,
+           ord_is_member(auth.uid()) as member
+  ),
+  cand as (
+    select s.*, me.uid as viewer,
+           array_remove(array[
+               case when s.min_level > me.lvl then 'level:' || s.min_level end,
+               case when s.min_followers > me.fans then 'followers:' || s.min_followers end,
+               case when s.member_only and not me.member then 'member' end]::text[]
+             || coalesce((select array_agg('skill:' || k) from unnest(s.need_skills) k
+                          where not ord_has_skill(me.uid, k)), '{}'::text[]),
+             null) as lacks0
+    from signals s cross join me
+    where me.uid is not null and s.status = 'live'
+      and (not coalesce(p_mine, false) or s.author_id = me.uid)
+      and (p_id is null or s.id = p_id)
+    order by s.created_at desc
+    limit least(greatest(coalesce(p_limit, 60), 1), 100)
+  )
+  select c.id, c.author_id, c.author_name, c.author_avatar,
+         ord_level(coalesce((select l.days from cat_levels l where l.user_id = c.author_id), 0)),
+         (select count(*)::int from cat_follows f where f.followee_id = c.author_id),
+         ord_is_member(c.author_id),
+         c.title, c.grade, c.min_level, c.min_followers, c.member_only, c.need_skills, c.source_app, c.created_at,
+         case when c.author_id = c.viewer then '{}'::text[] else c.lacks0 end,
+         (c.author_id = c.viewer or cardinality(c.lacks0) = 0),
+         case when c.author_id = c.viewer or cardinality(c.lacks0) = 0 then c.body else null end,
+         exists (select 1 from cat_follows f where f.follower_id = c.viewer and f.followee_id = c.author_id),
+         ord_member_tier(c.author_id)
+  from cand c
+  order by c.created_at desc;
+$$;
+
+revoke all on function public.cat_stats(uuid), public.signal_feed(boolean, int, uuid) from public, anon;
+grant execute on function public.cat_stats(uuid), public.signal_feed(boolean, int, uuid) to authenticated;

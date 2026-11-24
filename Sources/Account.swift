@@ -267,18 +267,18 @@ final class Account {
         }
     }
 
-    /// Plan and credits left: plan (free | member | pro), monthly_left, monthly_total, bonus, period_end,
+    /// Plan and credits left: plan (free | pro | max), monthly_left, monthly_total, bonus, period_end,
     /// today_used, daily_cap, slow_today, slow_cap.
     func credits(_ done: @escaping ([String: Any]?, String?) -> Void) {
         guard signedIn else { done(nil, "还没登录"); return }
         request("POST", "/rest/v1/rpc/credits_status", json: [:]) { obj, err in done(obj as? [String: Any], err) }
     }
 
-    /// Stripe checkout page for 会员 (member) / 会员 Pro (pro) / 加油包 (topup) / a skill, or the
+    /// Stripe checkout page for 会员 Pro (pro) / 会员 Max (max) / 加油包 (topup) / a skill, or the
     /// subscription management page (portal).
     func stripeLink(item: String?, yearly: Bool = false, portal: Bool = false, done: @escaping (URL?, String?) -> Void) {
         guard signedIn else { done(nil, "先登录账号（设置 → 用户）"); return }
-        var body: [String: Any] = portal ? ["portal": true] : ["item": item ?? "member", "interval": yearly ? "year" : "month"]
+        var body: [String: Any] = portal ? ["portal": true] : ["item": item ?? "pro", "interval": yearly ? "year" : "month"]
         if portal { body["item"] = "" }
         request("POST", "/functions/v1/stripe-checkout", json: body) { obj, err in
             let o = obj as? [String: Any]
@@ -316,6 +316,10 @@ final class Account {
             let iso = ISO8601DateFormatter()
             iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             let iso2 = ISO8601DateFormatter()
+            // Start from the server's list, so renamed or removed plans (v1 member/pro → v2 pro/max) don't linger.
+            if obj is [[String: Any]] {
+                for k in self.d.dictionaryRepresentation().keys where k.hasPrefix("account.sub.") { self.d.removeObject(forKey: k) }
+            }
             for row in (obj as? [[String: Any]]) ?? [] {
                 guard let skill = row["skill"] as? String else { continue }
                 let status = row["status"] as? String ?? ""

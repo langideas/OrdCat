@@ -29,6 +29,7 @@ struct Signal {
     let minLevel: Int
     let minFollowers: Int
     let memberOnly: Bool
+    let authorTier: MemberTier
     let needSkills: [String]
     let sourceApp: String
     let created: Date?
@@ -46,6 +47,7 @@ struct Signal {
         authorLevel = CatStats.int(r["author_level"])
         authorFollowers = CatStats.int(r["author_followers"])
         authorMember = r["author_member"] as? Bool ?? false
+        authorTier = MemberTier(r["author_tier"] as? String) ?? (authorMember ? .pro : .none)
         self.title = title
         grade = max(1, min(4, CatStats.int(r["grade"])))
         minLevel = CatStats.int(r["min_level"])
@@ -284,15 +286,15 @@ private func sigLabel(_ s: String, size: CGFloat = 12, bold: Bool = false, gray:
 }
 
 /// A round avatar view with the member badge, filled in when the picture arrives.
-private func avatarView(_ url: String?, member: Bool, size: CGFloat) -> NSImageView {
+private func avatarView(_ url: String?, tier: MemberTier, size: CGFloat) -> NSImageView {
     let v = NSImageView()
     v.translatesAutoresizingMaskIntoConstraints = false
     v.imageScaling = .scaleProportionallyUpOrDown
     v.widthAnchor.constraint(equalToConstant: size).isActive = true
     v.heightAnchor.constraint(equalToConstant: size).isActive = true
-    v.image = memberAvatar(AvatarCache.placeholder(size * 2), member: member, size: size)
+    v.image = memberAvatar(AvatarCache.placeholder(size * 2), tier: tier, size: size)
     AvatarCache.shared.load(url) { [weak v] img in
-        if let i = img { v?.image = memberAvatar(i, member: member, size: size) }
+        if let i = img { v?.image = memberAvatar(i, tier: tier, size: size) }
     }
     return v
 }
@@ -420,7 +422,7 @@ final class SignalWindow: NSObject, NSWindowDelegate {
         for (i, s) in items.enumerated() {
             let row = OCCard()
             row.translatesAutoresizingMaskIntoConstraints = false
-            let av = avatarView(s.authorAvatar, member: s.authorMember, size: 40)
+            let av = avatarView(s.authorAvatar, tier: s.authorTier, size: 40)
             let name = NSTextField(labelWithString: s.who)
             name.font = .systemFont(ofSize: 12.5, weight: .semibold)
             name.lineBreakMode = .byTruncatingTail
@@ -429,7 +431,10 @@ final class SignalWindow: NSObject, NSWindowDelegate {
             let fans = NSTextField(labelWithString: "\(L10n.t("喵友")) \(s.authorFollowers)")
             fans.font = .systemFont(ofSize: 11)
             fans.textColor = .secondaryLabelColor
-            let authorLine = NSStackView(views: [name, levelView(s.authorLevel), fans])
+            var authorViews: [NSView] = [name, levelView(s.authorLevel)]
+            if s.authorTier != .none { authorViews.append(memberTagView(s.authorTier, height: 14)) }
+            authorViews.append(fans)
+            let authorLine = NSStackView(views: authorViews)
             authorLine.spacing = 8
             authorLine.alignment = .centerY
             let lock = s.unlocked ? "" : "🔒 "
@@ -612,15 +617,16 @@ final class SignalDetailWindow: NSObject, NSWindowDelegate {
     func update(_ s: Signal) {
         signal = s
         for v in avatarHost.subviews { v.removeFromSuperview() }
-        let av = avatarView(s.authorAvatar, member: s.authorMember, size: 44)
+        let av = avatarView(s.authorAvatar, tier: s.authorTier, size: 44)
         avatarHost.addSubview(av)
         av.leadingAnchor.constraint(equalTo: avatarHost.leadingAnchor).isActive = true
         av.topAnchor.constraint(equalTo: avatarHost.topAnchor).isActive = true
         name.stringValue = s.who
         for v in levelHost.arrangedSubviews { levelHost.removeArrangedSubview(v); v.removeFromSuperview() }
         levelHost.addArrangedSubview(levelView(s.authorLevel, height: 14))
+        if s.authorTier != .none { levelHost.addArrangedSubview(memberTagView(s.authorTier, height: 15)) }
         var f = "\(L10n.t("喵友")) \(s.authorFollowers)"
-        if s.authorMember { f += " · " + L10n.t("订阅会员") }
+        if s.authorTier != .none { f += " · " + s.authorTier.name }
         fans.stringValue = f
         let mine = s.authorID == station.myID
         followBtn.isHidden = mine

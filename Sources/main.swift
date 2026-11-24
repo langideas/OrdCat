@@ -12,6 +12,8 @@ import UniformTypeIdentifiers
 // MARK: - Theme
 
 let kAmber = NSColor(calibratedRed: 1.0, green: 0.71, blue: 0.28, alpha: 1)
+/// 会员 Max sunset coral (gradient partner of kAmber).
+let kSunset = NSColor(calibratedRed: 1.0, green: 0.50, blue: 0.38, alpha: 1)
 let kFur = NSColor(calibratedRed: 0.07, green: 0.07, blue: 0.08, alpha: 1)
 let kRim = NSColor(calibratedWhite: 1.0, alpha: 0.22)
 
@@ -959,6 +961,7 @@ final class CatView: NSView {
     var onRightClick: (() -> Void)?
     var onMoved: (() -> Void)?
 
+    private let aura = CALayer()      // 会员 Max: the wide sunset glow around the rig
     private let rig = CALayer()
     private let cat = CALayer()
     private let head = CAShapeLayer()
@@ -969,12 +972,22 @@ final class CatView: NSView {
     private let paw = CAShapeLayer()
     private let excl = CAShapeLayer()
 
-    /// 订阅会员: a soft amber rim glow around the whole cat (follows its shape and peeks). Off for everyone else.
-    func setMember(_ on: Bool) {
+    /// 订阅会员 glow around the whole cat (follows its shape and peeks), same as the avatar badge:
+    /// 会员 Pro = one soft amber glow; 会员 Max = a tight amber rim plus a wide sunset (coral) glow. Off for everyone else.
+    func setMember(_ tier: MemberTier) {
         rig.shadowColor = kAmber.cgColor
-        rig.shadowRadius = 7
         rig.shadowOffset = .zero
-        rig.shadowOpacity = on ? 0.55 : 0
+        aura.shadowColor = kSunset.cgColor
+        aura.shadowOffset = .zero
+        switch tier {
+        case .none:
+            rig.shadowOpacity = 0; aura.shadowOpacity = 0
+        case .pro:
+            rig.shadowRadius = 7; rig.shadowOpacity = 0.55; aura.shadowOpacity = 0
+        case .max:
+            rig.shadowRadius = 3.5; rig.shadowOpacity = 0.9
+            aura.shadowRadius = 12; aura.shadowOpacity = 0.75
+        }
     }
 
     private let tilt: CGFloat = 18 * .pi / 180
@@ -1054,8 +1067,10 @@ final class CatView: NSView {
 
     private func build() {
         guard let root = layer else { return }
+        aura.frame = bounds
+        root.addSublayer(aura)
         rig.frame = bounds
-        root.addSublayer(rig)
+        aura.addSublayer(rig)
         let h = baseHead
 
         cat.bounds = CGRect(x: -130, y: -130, width: 260, height: 260)
@@ -3576,7 +3591,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bubble.onLevel = { [weak self] in self?.settings.show(page: .user) }
         bubble.skillItems = { [weak self] in self?.settings.skillsPane.railItems() ?? [] }
         bubble.onSkillToggle = { [weak self] id in self?.settings.skillsPane.toggle(id) }
-        catView.setMember(CatLevel.isMember)
+        catView.setMember(CatLevel.tier)
         CatLevel.shared.startClock()
         Social.onUnread = { [weak self] n in
             guard let self = self, !self.bubble.chatMode else { return }
@@ -3600,7 +3615,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CatLevel.shared.refresh()
         Account.shared.observe { [weak self] in
             guard let self = self else { return }
-            self.catView.setMember(CatLevel.isMember)
+            self.catView.setMember(CatLevel.tier)
             let uid = Account.shared.signedIn ? (Account.shared.profile.userID ?? "") : ""
             if uid != self.levelUser { self.levelUser = uid; CatLevel.shared.refresh() }
         }

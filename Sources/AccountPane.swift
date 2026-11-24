@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 final class AccountPane: NSObject, NSTextFieldDelegate {
     private let acc = Account.shared
     private let avatar = NSImageView()
+    private let nameTag = NSImageView()      // PRO / MAX tag after the level icons
     private let headerName = SK.WrapLabel("", size: 15, secondary: false, weight: .bold)
     private let levelText = NSTextField(labelWithString: "")
     private let levelIcons = NSImageView()
@@ -34,7 +35,7 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
     private let subLines = SK.WrapLabel()
     private let memberLine = SK.WrapLabel()
     private let memberStatus = SK.WrapLabel()
-    private let billingCycle = NSSegmentedControl(labels: ["月付", "年付（约 8 折）"], trackingMode: .selectOne, target: nil, action: nil)
+    private let billingCycle = NSSegmentedControl(labels: ["月付", "年付（省 20%）"], trackingMode: .selectOne, target: nil, action: nil)
     private let dataStatus = SK.WrapLabel()
     private var loginFold: SK.Fold?
     var onOpenSkills: (() -> Void)?
@@ -132,12 +133,12 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
         p.header("会员")
         memberLine.font = .systemFont(ofSize: 12.5)
         memberLine.textColor = .labelColor
-        billingCycle.selectedSegment = 0
+        billingCycle.selectedSegment = 1      // 主推年付（Lang 2026-11-24）
         let gm = SK.Group()
         gm.add(SK.info(memberLine))
         gm.add(SK.row("付款方式", billingCycle, fill: false))
         p.add(gm)
-        p.add(SK.buttons([button("开通会员", #selector(buyMember)), button("开通会员 Pro", #selector(buyPro)),
+        p.add(SK.buttons([button("开通会员 Pro", #selector(buyPro)), button("开通会员 Max", #selector(buyMax)),
                           button("加油包", #selector(buyTopup)), button("管理会员", #selector(manageMember))]))
         p.add(memberStatus)
 
@@ -185,7 +186,11 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
         levelText.textColor = .labelColor
         levelIcons.imageScaling = .scaleNone
         levelIcons.setContentHuggingPriority(.required, for: .horizontal)
-        let levelRow = NSStackView(views: [levelText, levelIcons])
+        nameTag.imageScaling = .scaleNone
+        nameTag.setContentHuggingPriority(.required, for: .horizontal)
+        nameTag.setContentCompressionResistancePriority(.required, for: .horizontal)
+        nameTag.isHidden = true
+        let levelRow = NSStackView(views: [levelText, levelIcons, nameTag])
         levelRow.spacing = 6
         levelRow.alignment = .centerY
         levelRow.translatesAutoresizingMaskIntoConstraints = false
@@ -219,10 +224,13 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
     }
 
     private func refreshHeader() {
-        let member = CatLevel.isMember
-        avatar.image = memberAvatar(acc.avatarImage(size: 144), member: member, size: 64)
-        avatar.toolTip = member ? L10n.t("订阅会员") : nil
+        let tier = CatLevel.tier
+        avatar.image = memberAvatar(acc.avatarImage(size: 144), tier: tier, size: 64)
+        avatar.toolTip = tier == .none ? nil : tier.name
         headerName.stringValue = acc.profile.displayName
+        nameTag.image = memberTagImage(tier, height: 16)
+        nameTag.isHidden = tier == .none
+        nameTag.toolTip = tier == .none ? nil : tier.name
         let lc = CatLevel.shared
         let lv = lc.level
         levelText.stringValue = "Lv\(lv)"
@@ -266,16 +274,18 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
     // MARK: 会员
 
     private static let plans: [String: (zh: String, en: String)] = [
-        "member": ("会员 ¥30/月（年付 ¥298）· 每月 2000 条", "Member €3.99/mo (€39/yr) · 2,000 messages a month"),
-        "pro": ("会员 Pro ¥68/月（年付 ¥648）· 每月 6000 条，可选高级模型", "Member Pro €8.99/mo (€89/yr) · 6,000 messages a month, premium models"),
+        "pro": ("会员 Pro €9.9/月（年付 €95，省 20%）· 每月 3000 条，看图，听写 300 分钟，技能 8 折",
+                "Member Pro €9.9/mo (€95/yr, save 20%) · 3,000 messages a month, image viewing, 300 min dictation, 20% off skills"),
+        "max": ("会员 Max €59/月（年付 €566，省 20%）· 每月 25000 条，可选高级模型，听写 1200 分钟，包含全部技能",
+                "Member Max €59/mo (€566/yr, save 20%) · 25,000 messages a month, premium models, 1,200 min dictation, all skills included"),
     ]
 
     private func refreshMember() {
         let base = L10n.english
             ? "Free: bring your own model key and everything works. Members get OrdCat's hosted models with no key: pick 「OrdCat 托管」 in Settings → Model."
             : "免费版：填自己的模型 Key，所有功能都能用。会员不用 Key，直接用 OrdCat 托管模型（设置 → 模型 选「OrdCat 托管」）。"
-        let offer = L10n.english ? "\n• \(AccountPane.plans["member"]!.en)\n• \(AccountPane.plans["pro"]!.en)\n• Top-up: 1,200 messages, never expire"
-                                 : "\n• \(AccountPane.plans["member"]!.zh)\n• \(AccountPane.plans["pro"]!.zh)\n• 加油包：1200 条，不过期"
+        let offer = L10n.english ? "\n• \(AccountPane.plans["pro"]!.en)\n• \(AccountPane.plans["max"]!.en)\n• Top-up: €2.99 for 1,500 messages, never expire"
+                                 : "\n• \(AccountPane.plans["pro"]!.zh)\n• \(AccountPane.plans["max"]!.zh)\n• 加油包：€2.99 = 1500 条，不过期"
         guard acc.signedIn else { memberLine.stringValue = base + offer; return }
         acc.credits { [weak self] o, err in
             guard let self = self else { return }
@@ -294,8 +304,8 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
             }
             var line: String
             switch plan {
-            case "member", "pro":
-                let name = plan == "pro" ? (L10n.english ? "Member Pro" : "会员 Pro") : (L10n.english ? "Member" : "会员")
+            case "pro", "max":
+                let name = (MemberTier(plan) ?? .pro).name
                 line = L10n.english
                     ? "✨ \(name) · \(left) of \(total) left this month (resets \(reset)) · top-up \(bonus) · today \(today)/\(cap)"
                     : "✨ \(name) · 本月还剩 \(left) / \(total) 条（\(reset) 重置）· 加油包 \(bonus) 条 · 今天已用 \(today) / \(cap)"
@@ -324,23 +334,23 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
         }
     }
 
-    @objc private func buyMember() {
-        let y = billingCycle.selectedSegment == 1
-        openStripe(item: "member", title: L10n.english ? "Become a member?" : "开通会员？",
-                   info: L10n.english ? (y ? "€39 a year" : "€3.99 a month") + ". 2,000 messages a month with OrdCat's hosted models, no key needed. Paid securely with Stripe; cancel anytime."
-                                      : (y ? "¥298/年" : "¥30/月") + "，每月 2000 条托管模型额度，不用自己的 Key。通过 Stripe 安全付款，随时可以取消。")
-    }
-
     @objc private func buyPro() {
         let y = billingCycle.selectedSegment == 1
         openStripe(item: "pro", title: L10n.english ? "Get Member Pro?" : "开通会员 Pro？",
-                   info: L10n.english ? (y ? "€89 a year" : "€8.99 a month") + ". 6,000 messages a month and premium models. Paid securely with Stripe; cancel anytime."
-                                      : (y ? "¥648/年" : "¥68/月") + "，每月 6000 条额度，可选高级模型。通过 Stripe 安全付款，随时可以取消。")
+                   info: L10n.english ? (y ? "€95 a year (save 20%)" : "€9.9 a month") + ". 3,000 messages a month with OrdCat's hosted models, no key needed, image viewing, 300 min dictation, 20% off skills. Paid securely with Stripe; cancel anytime."
+                                      : (y ? "€95/年（省 20%）" : "€9.9/月") + "，每月 3000 条托管模型额度，不用自己的 Key，可以看图，听写 300 分钟，技能 8 折。通过 Stripe 安全付款，随时可以取消。")
+    }
+
+    @objc private func buyMax() {
+        let y = billingCycle.selectedSegment == 1
+        openStripe(item: "max", title: L10n.english ? "Get Member Max?" : "开通会员 Max？",
+                   info: L10n.english ? (y ? "€566 a year (save 20%)" : "€59 a month") + ". 25,000 messages a month, premium models, 1,200 min dictation, and every skill included. Paid securely with Stripe; cancel anytime."
+                                      : (y ? "€566/年（省 20%）" : "€59/月") + "，每月 25000 条额度，可选高级模型，听写 1200 分钟，包含全部技能。通过 Stripe 安全付款，随时可以取消。")
     }
 
     @objc private func buyTopup() {
         openStripe(item: "topup", title: L10n.english ? "Buy a top-up?" : "买一个加油包？",
-                   info: L10n.english ? "1,200 messages that never expire, used after your monthly credits." : "¥18 = 1200 条，不过期，月额度用完后自动接着用。")
+                   info: L10n.english ? "€2.99 for 1,500 messages that never expire, used after your monthly credits." : "€2.99 = 1500 条，不过期，月额度用完后自动接着用。")
     }
 
     @objc private func manageMember() {
