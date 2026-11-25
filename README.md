@@ -24,6 +24,8 @@
 open build/OrdCat.app
 ```
 
+编译仅限作者开发使用，其他人请从 ordcat.de 下载官方版本，详见 LICENSE。
+
 ## Roadmap
 
 - v0.2：单窗口陪看（ScreenCaptureKit + 1~2fps 差分抽帧）、语音输入与 150ms 打断（Silero-VAD + AEC）
@@ -31,3 +33,8 @@ open build/OrdCat.app
 - Phase 2：社交广场、助手串门、装扮家园、陪伴等级、Pro 徽章
 
 产品需求见 `docs/OrdCat_PRD_v4.0.pdf`。
+
+## 许可 License
+
+源码公开但不是开源：保留所有权利，禁止复制、改名发布或商用，详见 [LICENSE](LICENSE)。
+Source available, not open source: all rights reserved. No copying, rebranding or commercial use. See [LICENSE](LICENSE).

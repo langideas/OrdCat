@@ -1,0 +1,59 @@
+OrdCat Source License (All Rights Reserved)
+
+Copyright (c) 2026 Axun Conor. All rights reserved.
+"OrdCat", the OrdCat cat logo and the OrdCat brand assets are the property of Axun Conor.
+
+The source code, assets and documentation in this repository ("the Software")
+are published for transparency only. They are NOT open source.
+
+You MAY:
+  1. View and read the Software on GitHub.
+  2. Fork the repository on GitHub, as allowed by the GitHub Terms of Service,
+     only to view it, review it or propose changes back to this repository.
+  3. Download and use the official OrdCat app released at
+     https://ordcat.de or in this repository's Releases, for personal use.
+  4. Report security issues to support@ordcat.de.
+
+You MAY NOT, without prior written permission from Axun Conor:
+  1. Copy, modify, compile, publish or distribute the Software or any part of it,
+     including in a modified, renamed or rebranded form.
+  2. Use the Software or any part of it in another product or service,
+     whether free or commercial.
+  3. Sell, sublicense, rent or offer the Software as a service.
+  4. Use the name "OrdCat", the logo, or anything confusingly similar.
+  5. Remove or change this notice.
+
+Contributions: by submitting a pull request, issue or other contribution, you
+agree that Axun Conor may use it in OrdCat under any license, without payment.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY ARISING FROM THE SOFTWARE OR ITS USE, TO THE EXTENT PERMITTED BY LAW.
+
+For permission requests: support@ordcat.de
+
+----------------------------------------------------------------------
+中文说明（以英文为准）
+
+OrdCat 源码许可（保留所有权利）
+
+版权所有 (c) 2026 Axun Conor。「OrdCat」名称、小猫标志和品牌素材归 Axun Conor 所有。
+
+本仓库的源码、素材和文档只为公开透明而发布，不是开源软件。
+
+你可以：
+  1. 在 GitHub 上查看和阅读。
+  2. 按 GitHub 服务条款 Fork 本仓库，仅用于查看、审查或向本仓库提交修改建议。
+  3. 从 ordcat.de 或本仓库 Releases 下载官方 OrdCat 供个人使用。
+  4. 向 support@ordcat.de 报告安全问题。
+
+未经 Axun Conor 书面许可，你不可以：
+  1. 复制、修改、编译、发布或分发本软件或其任何部分，包括改名或换品牌后的版本。
+  2. 把本软件或其任何部分用在其他产品或服务中，无论免费还是商用。
+  3. 出售、转授权、出租本软件，或把它作为服务提供。
+  4. 使用「OrdCat」名称、标志或容易混淆的近似名称和标志。
+  5. 删除或修改本声明。
+
+贡献：提交 PR、Issue 或其他内容，即表示你同意 Axun Conor 可以在 OrdCat 中以任何许可方式使用，且无需付费。
+
+本软件按「现状」提供，不作任何保证。在法律允许范围内，作者不对使用本软件产生的任何损失负责。
