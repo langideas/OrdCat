@@ -203,7 +203,7 @@ final class FollowListWindow: NSObject, NSWindowDelegate {
             self.users = ((o as? [[String: Any]]) ?? []).compactMap(PalUser.init)
             if self.users.isEmpty {
                 self.status.stringValue = kind == "following"
-                    ? L10n.t("你还没关注别的小猫。在信号站和猫帮圈里点「加喵友」就能关注。")
+                    ? L10n.t("你还没关注别的小猫。在信号站和喵副本里点「加喵友」就能关注。")
                     : L10n.t("还没有喵友关注你。把邀请码发给朋友，一起养猫吧。")
             } else {
                 self.status.stringValue = L10n.english ? "\(self.users.count) in total" : "共 \(self.users.count) 位"
@@ -302,11 +302,11 @@ final class InviteWindow: NSObject {
     }
 
     private func build() {
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 330), styleMask: [.titled, .closable],
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 400), styleMask: [.titled, .closable],
                          backing: .buffered, defer: false)
         w.title = "邀请好友"
         w.isReleasedWhenClosed = false
-        let title = SK.WrapLabel("把邀请码发给朋友。朋友注册后 7 天内填上，你们俩各得 50 小鱼干，还会自动互加喵友。", size: 12.5, secondary: false)
+        let title = SK.WrapLabel("把邀请码发给朋友。朋友注册后 7 天内填上，马上得 30 条奖励鱼干，你们自动互加喵友。朋友验证邮箱、小猫陪满 3 天后，你得 50 条；朋友第一次充值，你再得充值数的 10%（最多 500 条）。", size: 12.5, secondary: false)
         codeLabel.font = .monospacedSystemFont(ofSize: 30, weight: .bold)
         codeLabel.textColor = kAmber
         codeLabel.alignment = .center
@@ -342,14 +342,22 @@ final class InviteWindow: NSObject {
 
     private func load() {
         info.stringValue = L10n.t("正在获取你的邀请码…")
-        Social.rpc("invite_my_code") { [weak self] o, e in
+        Social.rpc("invite_my_code", ["p_device": Fish.deviceHash]) { [weak self] o, e in
             guard let self = self else { return }
             if let e = e { self.info.stringValue = "⚠️ " + e; return }
             let d = o as? [String: Any] ?? [:]
             self.code = d["code"] as? String ?? ""
             self.codeLabel.stringValue = self.code
-            let n = CatStats.int(d["invited"])
-            self.info.stringValue = L10n.english ? "\(n) friends joined with your code" : "已经有 \(n) 位朋友用了你的邀请码"
+            let n = CatStats.int(d["invited"]), ok = CatStats.int(d["effective"]), wait = CatStats.int(d["pending"])
+            var line = L10n.t("已邀请 \(n) · 已生效 \(ok) · 待生效 \(wait)")
+            if CatStats.int(d["month_effective"]) >= CatStats.int(d["month_cap"]) && CatStats.int(d["month_cap"]) > 0 {
+                line += "\n" + L10n.t("本月生效的邀请已满 \(CatStats.int(d["month_cap"])) 个，其余下个月再发奖励")
+            }
+            if CatStats.int(d["just_settled"]) > 0 {
+                line += "\n" + L10n.t("🐟 刚到账 \(CatStats.int(d["just_settled"]) * 50) 条奖励鱼干")
+                Fish.refresh()
+            }
+            self.info.stringValue = line
         }
     }
 
@@ -371,11 +379,11 @@ final class InviteWindow: NSObject {
         let c = redeemField.stringValue.trimmingCharacters(in: .whitespaces).uppercased()
         guard c.count == 6 else { status.stringValue = L10n.t("邀请码是 6 位"); return }
         guard OCConfirm.ask(L10n.english ? "Use invite code \(c)?" : "使用邀请码 \(c)？",
-                            L10n.t("每个账号只能填一次。填好后你们俩各得 50 小鱼干，并互加喵友。"), ok: "领取") else { return }
+                            L10n.t("每个账号、每台 Mac 只能填一次。填好后你马上得 30 条奖励鱼干，并和邀请人互加喵友。"), ok: "领取") else { return }
         status.stringValue = L10n.t("正在领取…")
-        Social.rpc("invite_redeem", ["p_code": c]) { [weak self] _, e in
-            self?.status.stringValue = e.map { "⚠️ " + $0 } ?? L10n.t("🐟 领到 50 小鱼干，已经互加喵友啦")
-            if e == nil { CatLevel.shared.refresh() }
+        Social.rpc("invite_redeem", ["p_code": c, "p_device": Fish.deviceHash]) { [weak self] _, e in
+            self?.status.stringValue = e.map { "⚠️ " + L10n.t($0) } ?? L10n.t("🐟 领到 30 条奖励鱼干，已经互加喵友啦")
+            if e == nil { CatLevel.shared.refresh(); Fish.refresh() }
         }
     }
 }

@@ -4,7 +4,7 @@
 --   免费      自带 Key 什么都能用；新用户一次性送 100 条托管额度试用
 --   Pro  €9.9（¥78）/月，年付 €95（¥748）：每月 3000 条，每天最多 300 条
 --   Max  €59（¥458）/月，年付 €566（¥4398）：每月 25000 条，每天最多 1500 条，
---             可选高级模型（按倍数扣），包含全部技能
+--             可选高级模型（按倍数扣）；技能单独卖，Pro / Max 8 折
 --   额度用完：慢速模型每天 30 条（Max 100 条）；或买加油包 €2.99（¥22）= 1500 条
 -- 1 条 = 一条普通消息；带截图 +1；上下文超过 8k token +1；高级模型 × 倍数。
 --
@@ -56,11 +56,10 @@ language sql stable security definer set search_path = public as $$
   select nullif(ord_plan(p_user), 'free');
 $$;
 
--- Owns this skill: its own subscription, or Max (includes every skill).
+-- Owns this skill: its own subscription only (no plan includes skills, Lang 2026-11-25).
 create or replace function public.ord_has_skill(p_user uuid, p_skill text) returns boolean
 language sql stable security definer set search_path = public as $$
-  select ord_plan(p_user) = 'max'
-      or exists (select 1 from subscriptions s
+  select exists (select 1 from subscriptions s
                  where s.user_id = p_user and s.skill = p_skill and s.status not in ('expired', 'unpaid')
                    and coalesce(s.ends_at, s.renews_at, now() + interval '32 days') > now());
 $$;

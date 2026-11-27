@@ -1,4 +1,4 @@
-// OrdCat — 猫帮圈：发布窗口（模版、链接、代码、文件）+ 设置里的「猫帮圈」页。
+// OrdCat — 喵副本：发布窗口（模版、链接、代码、文件）+ 设置里的「喵副本」页。
 //
 // 发布：选一个模版（内置 + 自己存的），按提示填；可以贴链接（X 推文、GitHub、YouTube、B站、知乎……会自动识别），
 // 插入代码块，附代码 / 文本 / PDF / Word / 图片文件（最多 5 个，每个 10 MB 内）。
@@ -321,7 +321,7 @@ final class SquarePostWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate {
         let W: CGFloat = 620, H: CGFloat = 690
         win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: W, height: H), styleMask: [.titled, .closable],
                        backing: .buffered, defer: false)
-        win.title = "🐟 发布任务到猫帮圈"
+        win.title = "🐟 发布任务到喵副本"
         win.isReleasedWhenClosed = false
         win.delegate = self
         let v = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
@@ -340,7 +340,7 @@ final class SquarePostWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate {
             v.addSubview(l)
         }
 
-        let info = NSTextField(wrappingLabelWithString: "猫帮圈上所有登录的用户都能看到标题、说明、链接和附件。别写密码、手机号这类隐私（小猫也会自动打码）。")
+        let info = NSTextField(wrappingLabelWithString: "喵副本上所有登录的用户都能看到标题、说明、链接和附件。别写密码、手机号这类隐私（小猫也会自动打码）。")
         small(info, NSRect(x: 20, y: H - 46, width: W - 40, height: 32))
 
         // 模版
@@ -630,26 +630,38 @@ final class SquarePostWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate {
     }
 }
 
-// MARK: - 设置 → 猫帮圈
+// MARK: - 设置 → 喵副本
 
 final class SquarePane: NSObject {
     private let balance = SK.WrapLabel("", size: 13, secondary: false)
     private let caps = SK.WrapLabel("", size: 12)
     private let auto = NSSwitch()
     private let notify = NSSwitch()
+    private let lend = NSSwitch()
     private var kindBoxes: [NSButton] = []
 
     func build(into p: SK.Page) {
-        p.hint("把问题发到猫帮圈，自己定小鱼干奖励；也可以让小猫用你的模型帮别人解题，赚小鱼干。需要登录账号，新账号送 100 条。")
+        p.hint("把问题发到喵副本，自己定小鱼干奖励；也可以让小猫用你的模型帮别人解题，赚小鱼干。需要登录账号，新账号送 100 条。")
 
         p.header("我的小猫")
         let g0 = SK.Group()
         g0.add(SK.info(balance))
         g0.add(SK.info(caps))
         p.add(g0)
-        p.add(SK.buttons([SK.button("打开猫帮圈", self, #selector(openSquare)),
+        p.add(SK.buttons([SK.button("打开喵副本", self, #selector(openSquare)),
                           SK.button("发布任务", self, #selector(postSquare)),
                           SK.button("帮我挑一个", self, #selector(findOne))]))
+
+        p.header("组队副本")
+        p.hint("结果副本：队长发任务、分钱比例和验收清单，队友的小猫各做一份，队长按清单验收。借猫副本：把小猫借给队长做纯文字活，按 token 用量拿小鱼干。")
+        p.add(SK.buttons([SK.button("打开组队副本", self, #selector(openRaids)),
+                          SK.button("发起结果副本", self, #selector(postResult)),
+                          SK.button("发起借猫副本", self, #selector(postLend))]))
+        lend.target = self
+        lend.action = #selector(lendToggled(_:))
+        let gl = SK.Group()
+        gl.add(SK.toggle("借出小猫", lend, sub: "加入借猫副本后，小猫在沙箱里用你的模型做队长派的文字活；关掉就暂停"))
+        p.add(gl)
 
         p.header("自动找任务")
         auto.target = self
@@ -657,8 +669,8 @@ final class SquarePane: NSObject {
         notify.target = self
         notify.action = #selector(notifyToggled(_:))
         let g = SK.Group()
-        g.add(SK.toggle("猫帮圈有新任务时提醒我", notify, sub: "大约每 10 分钟看一次，有你的小猫能做的新任务就弹出来问你"))
-        g.add(SK.toggle("小猫自己去猫帮圈找适合它的任务", auto, sub: "大约每 15 分钟看一次，找到会先问你，接不接你说了算"))
+        g.add(SK.toggle("喵副本有新任务时提醒我", notify, sub: "大约每 10 分钟看一次，有你的小猫能做的新任务就弹出来问你"))
+        g.add(SK.toggle("小猫自己去喵副本找适合它的任务", auto, sub: "大约每 15 分钟看一次，找到会先问你，接不接你说了算"))
         p.add(g)
 
         p.header("我想接的类型（都不勾 = 全部）")
@@ -676,7 +688,7 @@ final class SquarePane: NSObject {
         p.hint("""
         • 发任务：点「发布任务」，或在聊天里说「发任务：……」。可以选模版、贴链接（X 推文、GitHub 等）、插入代码块、附代码 / PDF / Word / 图片文件。
         • 接任务：小猫只挑你的模型做得了的（要看图的任务需要会看图的模型），会读链接和附件，用你自己的模型写答案；你看过、改过才会交，绝不自动提交。
-        • 猫帮圈上大家都能看到任务内容和附件，别放隐私（文字和代码里的密钥、密码会自动打码）。
+        • 喵副本上大家都能看到任务内容和附件，别放隐私（文字和代码里的密钥、密码会自动打码）。
         """)
         refresh()
         TaskSquare.shared.observe { [weak self] in self?.refresh() }
@@ -685,10 +697,11 @@ final class SquarePane: NSObject {
     func refresh() {
         let sq = TaskSquare.shared
         balance.stringValue = sq.ready ? "🐟 小鱼干：\(sq.balance.map(String.init) ?? "…")"
-            : (Account.shared.configured ? "🐟 先登录账号（设置 → 账号）才能用猫帮圈" : "🐟 账号服务还在开通中")
+            : (Account.shared.configured ? "🐟 先登录账号（设置 → 账号）才能用喵副本" : "🐟 账号服务还在开通中")
         caps.stringValue = TaskSquare.capsLine
         auto.state = Prefs.squareAuto ? .on : .off
         notify.state = Prefs.squareNotify ? .on : .off
+        lend.state = Prefs.raidLendOn ? .on : .off
         let chosen = Set(Prefs.squareKinds)
         for b in kindBoxes { b.state = chosen.contains(b.title) ? .on : .off }
         if sq.ready && sq.balance == nil { sq.refreshBalance() }
@@ -704,4 +717,14 @@ final class SquarePane: NSObject {
     @objc private func openSquare() { TaskSquare.shared.showWindow() }
     @objc private func postSquare() { TaskSquare.shared.postDialog() }
     @objc private func findOne() { TaskSquare.shared.autoMatch(manual: true) }
+    @objc private func openRaids() { Raids.shared.showWindow() }
+    @objc private func postResult() { Raids.shared.postDialog(lend: false) }
+    @objc private func postLend() { Raids.shared.postDialog(lend: true) }
+    @objc private func lendToggled(_ s: NSSwitch) {
+        let on = s.state == .on
+        guard OCConfirm.ask(on ? "继续借出小猫？" : "暂停借出小猫？",
+                            on ? "加入的借猫副本派活时，小猫会在沙箱里用你的模型做纯文字活。" : "暂停后不再领新活，已经在做的会做完。",
+                            ok: on ? "继续借出" : "暂停") else { s.state = on ? .off : .on; return }
+        Prefs.raidLendOn = on
+    }
 }

@@ -36,6 +36,9 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
     private let memberLine = SK.WrapLabel()
     private let memberStatus = SK.WrapLabel()
     private let billingCycle = NSSegmentedControl(labels: ["月付", "年付（省 20%）"], trackingMode: .selectOne, target: nil, action: nil)
+    private let fishLine = SK.WrapLabel("", size: 12.5, secondary: false)
+    private let fishStatus = SK.WrapLabel()
+    private let fishAuto = NSButton(checkboxWithTitle: "到期自动用小鱼干续费", target: nil, action: nil)
     private let dataStatus = SK.WrapLabel()
     private var loginFold: SK.Fold?
     var onOpenSkills: (() -> Void)?
@@ -45,6 +48,9 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
         acc.observe { [weak self] in self?.refresh() }
         NotificationCenter.default.addObserver(forName: CatLevel.changed, object: nil, queue: .main) { [weak self] _ in
             self?.refreshHeader()
+        }
+        NotificationCenter.default.addObserver(forName: Fish.changed, object: nil, queue: .main) { [weak self] _ in
+            self?.refreshFish()
         }
     }
 
@@ -129,6 +135,16 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
         p.add(SK.buttons([passwordBtn]))
         p.add(loginStatus)
 
+        // 小鱼干: 充值鱼干 + 奖励鱼干（v0.2.62）
+        p.header("小鱼干")
+        let gf = SK.Group()
+        gf.add(SK.info(fishLine))
+        p.add(gf)
+        p.hint("1 € = 100 条小鱼干。充值鱼干什么都能买；奖励鱼干（新号、邀请、喵副本奖励）在喵副本里随便用，开会员、技能和加油包时最多抵 30%。两种都永久有效。")
+        p.add(SK.buttons([button("充值", #selector(fishTopUp)), button("流水", #selector(fishLedger)),
+                          button("刷新", #selector(fishRefresh))]))
+        p.add(fishStatus)
+
         // 会员: 托管模型额度（不用自己的 Key）
         p.header("会员")
         memberLine.font = .systemFont(ofSize: 12.5)
@@ -139,7 +155,13 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
         gm.add(SK.row("付款方式", billingCycle, fill: false))
         p.add(gm)
         p.add(SK.buttons([button("开通 Pro", #selector(buyPro)), button("开通 Max", #selector(buyMax)),
-                          button("加油包", #selector(buyTopup)), button("管理会员", #selector(manageMember))]))
+                          button("管理会员", #selector(manageMember))]))
+        fishAuto.target = self; fishAuto.action = #selector(fishAutoChanged)
+        fishAuto.state = Prefs.d.bool(forKey: "fish.autoRenew") ? .on : .off
+        fishAuto.font = .systemFont(ofSize: 12)
+        p.add(SK.buttons([button("用小鱼干开 Pro", #selector(fishPro)), button("用小鱼干开 Max", #selector(fishMax)),
+                          button("加油包", #selector(buyTopup))]))
+        p.add(SK.buttons([fishAuto]))
         p.add(memberStatus)
 
         // 订阅与付款
@@ -149,8 +171,8 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
         let g3 = SK.Group()
         g3.add(SK.info(subLines))
         p.add(g3)
-        p.add(SK.buttons([button("管理订阅", #selector(openSkills)), button("管理付款方式", #selector(openPortal)),
-                          button("刷新订阅", #selector(refreshSubs))]))
+        p.add(SK.buttons([button("管理订阅", #selector(openSkills)), button("用小鱼干开技能", #selector(fishSkill)),
+                          button("管理付款方式", #selector(openPortal)), button("刷新订阅", #selector(refreshSubs))]))
 
         // 数据管理
         p.header("数据管理")
@@ -269,6 +291,72 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
         }
         subLines.stringValue = lines.joined(separator: "\n")
         refreshMember()
+        refreshFish()
+        Fish.refresh()
+    }
+
+    // MARK: 小鱼干
+
+    private func refreshFish() {
+        guard acc.signedIn else {
+            fishLine.stringValue = L10n.t("登录后就有小鱼干：新账号送 100 条。")
+            return
+        }
+        var s = Fish.line
+        let subs = Fish.subsLine
+        if !subs.isEmpty { s += "\n" + subs }
+        fishLine.stringValue = s
+    }
+
+    @objc private func fishTopUp() { Fish.topUp { [weak self] in self?.fishStatus.stringValue = $0 } }
+    @objc private func fishLedger() {
+        guard acc.signedIn else { fishStatus.stringValue = L10n.t("先登录账号（设置 → 用户）"); return }
+        FishLedgerWindow.shared.show()
+    }
+    @objc private func fishRefresh() {
+        fishStatus.stringValue = L10n.t("正在刷新…")
+        Fish.refresh { [weak self] in self?.fishStatus.stringValue = ""; self?.refreshMember() }
+    }
+    private var fishAutoOn: Bool { fishAuto.state == .on }
+    @objc private func fishAutoChanged() {
+        let on = fishAutoOn
+        let running = Fish.subs.contains { (Fish.parseDate($0["ends_at"]) ?? .distantPast) > Date() }
+        if running && acc.signedIn {
+            let ok = OCConfirm.ask(on ? "到期自动用小鱼干续费？" : "关掉自动续费？",
+                                   on ? "用小鱼干开通的会员和技能到期前一天会自动扣小鱼干续上；小鱼干不够就不续，也不会扣钱。"
+                                      : "到期后就不再自动扣小鱼干续费。",
+                                   ok: on ? "打开" : "关掉")
+            if !ok { fishAuto.state = on ? .off : .on; return }
+            Fish.setAutoRenew(on) { [weak self] in self?.memberStatus.stringValue = $0 }
+        }
+        Prefs.d.set(on, forKey: "fish.autoRenew")
+    }
+    private func fishStatusLine(_ s: String) { memberStatus.stringValue = s }
+    @objc private func fishPro() {
+        Fish.buy("pro", yearly: billingCycle.selectedSegment == 1, autoRenew: fishAutoOn,
+                 status: { [weak self] in self?.fishStatusLine($0) }) { [weak self] in self?.refreshMember() }
+    }
+    @objc private func fishMax() {
+        Fish.buy("max", yearly: billingCycle.selectedSegment == 1, autoRenew: fishAutoOn,
+                 status: { [weak self] in self?.fishStatusLine($0) }) { [weak self] in self?.refreshMember() }
+    }
+    @objc private func fishSkill() {
+        let a = NSAlert()
+        a.messageText = "用小鱼干开技能"
+        a.informativeText = "每个技能 \(Fish.price("x", yearly: false)) 条小鱼干 / 30 天（Pro / Max 会员 8 折）。奖励鱼干最多抵 30%。"
+        let pop = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 220, height: 26), pullsDown: false)
+        let ids = ["x", "agent", "miao"]
+        for id in ids { pop.addItem(withTitle: L10n.t(Fish.itemName(id))) }
+        a.accessoryView = pop
+        a.addButton(withTitle: "下一步")
+        a.addButton(withTitle: "取消").keyEquivalent = "\u{1b}"
+        NSApp.activate(ignoringOtherApps: true)
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let i = pop.indexOfSelectedItem
+        guard i >= 0, i < ids.count else { return }
+        Fish.buy(ids[i], autoRenew: fishAutoOn, status: { [weak self] in self?.loginStatus.stringValue = $0 }) { [weak self] in
+            self?.refresh()
+        }
     }
 
     // MARK: 会员
@@ -276,16 +364,16 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
     private static let plans: [String: (zh: String, en: String)] = [
         "pro": ("Pro €9.9/月（年付 €95，省 20%）· 每月 3000 条，看图，听写 300 分钟，技能 8 折",
                 "Pro €9.9/mo (€95/yr, save 20%) · 3,000 messages a month, image viewing, 300 min dictation, 20% off skills"),
-        "max": ("Max €59/月（年付 €566，省 20%）· 每月 25000 条，可选高级模型，听写 1200 分钟，包含全部技能",
-                "Max €59/mo (€566/yr, save 20%) · 25,000 messages a month, premium models, 1,200 min dictation, all skills included"),
+        "max": ("Max €59/月（年付 €566，省 20%）· 每月 25000 条，可选高级模型，听写 1200 分钟，技能 8 折",
+                "Max €59/mo (€566/yr, save 20%) · 25,000 messages a month, premium models, 1,200 min dictation, 20% off skills"),
     ]
 
     private func refreshMember() {
         let base = L10n.english
             ? "Free: bring your own model key and everything works. Members get OrdCat's hosted models with no key: pick 「OrdCat 托管」 in Settings → Model."
             : "免费版：填自己的模型 Key，所有功能都能用。会员不用 Key，直接用 OrdCat 托管模型（设置 → 模型 选「OrdCat 托管」）。"
-        let offer = L10n.english ? "\n• \(AccountPane.plans["pro"]!.en)\n• \(AccountPane.plans["max"]!.en)\n• Top-up: €2.99 for 1,500 messages, never expire"
-                                 : "\n• \(AccountPane.plans["pro"]!.zh)\n• \(AccountPane.plans["max"]!.zh)\n• 加油包：€2.99 = 1500 条，不过期"
+        let offer = L10n.english ? "\n• \(AccountPane.plans["pro"]!.en)\n• \(AccountPane.plans["max"]!.en)\n• Top-up: 300 Dried Fish for 1,500 messages, never expire\n• Or pay with Dried Fish: Pro 990 a month, Max 5,900 a month, skills 300 a month (Reward fish covers up to 30%)"
+                                 : "\n• \(AccountPane.plans["pro"]!.zh)\n• \(AccountPane.plans["max"]!.zh)\n• 加油包：300 条小鱼干 = 1500 条消息，不过期\n• 也可以用小鱼干开：Pro 990 条/月，Max 5900 条/月，技能 300 条/月（奖励鱼干最多抵 30%）"
         guard acc.signedIn else { memberLine.stringValue = base + offer; return }
         acc.credits { [weak self] o, err in
             guard let self = self else { return }
@@ -344,13 +432,13 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
     @objc private func buyMax() {
         let y = billingCycle.selectedSegment == 1
         openStripe(item: "max", title: L10n.english ? "Get Max?" : "开通 Max？",
-                   info: L10n.english ? (y ? "€566 a year (save 20%)" : "€59 a month") + ". 25,000 messages a month, premium models, 1,200 min dictation, and every skill included. Paid securely with Stripe; cancel anytime."
-                                      : (y ? "€566/年（省 20%）" : "€59/月") + "，每月 25000 条额度，可选高级模型，听写 1200 分钟，包含全部技能。通过 Stripe 安全付款，随时可以取消。")
+                   info: L10n.english ? (y ? "€566 a year (save 20%)" : "€59 a month") + ". 25,000 messages a month, premium models, 1,200 min dictation, and 20% off skills. Paid securely with Stripe; cancel anytime."
+                                      : (y ? "€566/年（省 20%）" : "€59/月") + "，每月 25000 条额度，可选高级模型，听写 1200 分钟，技能 8 折。通过 Stripe 安全付款，随时可以取消。")
     }
 
+    /// 加油包 is bought with 小鱼干 now (300 = 1500 messages), no longer €2.99 through Stripe.
     @objc private func buyTopup() {
-        openStripe(item: "topup", title: L10n.english ? "Buy a top-up?" : "买一个加油包？",
-                   info: L10n.english ? "€2.99 for 1,500 messages that never expire, used after your monthly credits." : "€2.99 = 1500 条，不过期，月额度用完后自动接着用。")
+        Fish.buy("credits", status: { [weak self] in self?.fishStatusLine($0) }) { [weak self] in self?.refreshMember() }
     }
 
     @objc private func manageMember() {
@@ -368,7 +456,7 @@ final class AccountPane: NSObject, NSTextFieldDelegate {
         p.allowedContentTypes = [.image]
         p.message = "选一张图片做头像"
         guard p.runModal() == .OK, let u = p.url else { return }
-        guard OCConfirm.ask("用这张图片做头像？", "头像会显示在聊天窗口、猫帮圈和信号站里\(acc.signedIn ? "，并同步到你的账号" : "")。",
+        guard OCConfirm.ask("用这张图片做头像？", "头像会显示在聊天窗口、喵副本和信号站里\(acc.signedIn ? "，并同步到你的账号" : "")。",
                             ok: "换上", icon: NSImage(contentsOf: u)) else { return }
         profileStatus.stringValue = "正在保存…"
         acc.setAvatar(from: u) { [weak self] err in self?.profileStatus.stringValue = err ?? "✅ 头像已更新" }

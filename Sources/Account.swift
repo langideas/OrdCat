@@ -327,6 +327,8 @@ final class Account {
                 let dateStr = (row["ends_at"] as? String) ?? (row["renews_at"] as? String) ?? ""
                 var until = iso.date(from: dateStr) ?? iso2.date(from: dateStr) ?? Date().addingTimeInterval(32 * 86400)
                 if ["expired", "unpaid"].contains(status) { until = .distantPast }
+                // Stripe and 小鱼干 can both open the same plan: keep the later end.
+                if let prev = self.d.object(forKey: "account.sub.\(skill)") as? Date, prev > until { until = prev }
                 self.d.set(until, forKey: "account.sub.\(skill)")
                 if let p = row["portal_url"] as? String, !p.isEmpty { self.d.set(p, forKey: "account.portal") }
             }
@@ -410,7 +412,7 @@ final class Account {
 
     // MARK: HTTP
 
-    /// Supabase REST / storage / functions call with the signed-in session (also used by 猫帮圈).
+    /// Supabase REST / storage / functions call with the signed-in session (also used by 喵副本).
     func request(_ method: String, _ path: String, json: Any? = nil, raw: Data? = nil, contentType: String? = nil,
                          headers: [String: String] = [:], auth: Bool = true,
                          done: @escaping (Any?, String?) -> Void) {

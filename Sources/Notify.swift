@@ -3,7 +3,7 @@
 // One bell at the top right of the settings window. Two tabs:
 //   消息 — private-message conversations (live from the server, unread counts)
 //   提醒 — things the cat told you in a bubble that are worth finding again later
-//          (new signals, 猫帮圈 tasks and answers, new versions). Kept on this Mac, newest 80.
+//          (new signals, 喵副本 tasks and answers, new versions). Kept on this Mac, newest 80.
 // To log a new kind of reminder: NotifCenter.shared.add("text", open: "<handler key>") and register the
 // handler key in AppDelegate (handlers["…"] = { … }).
 

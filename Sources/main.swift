@@ -1475,10 +1475,10 @@ final class Bubble: NSObject {
         topicsButton.toolTip = "默认只参考当前页面；想接着聊以前的内容，在这里选"
         card.addSubview(topicsButton)
 
-        squareButton = OCButton(title: "🐟 猫帮圈", target: self, action: #selector(doSquare))
+        squareButton = OCButton(title: "🐟 喵副本", target: self, action: #selector(doSquare))
         (squareButton as? OCButton)?.chip = true
         (squareButton as? OCButton)?.style = .secondary
-        squareButton.toolTip = "打开猫帮圈"
+        squareButton.toolTip = "打开喵副本"
         card.addSubview(squareButton)
 
         signalButton = OCButton(title: L10n.english ? "📶 Signals" : "📶 信号站", target: self, action: #selector(doSignal))
@@ -2725,7 +2725,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
             root.heightAnchor.constraint(greaterThanOrEqualToConstant: 440)])
         let side = SettingsSidebar(items: [
             ("person.crop.circle", "用户"), ("pawprint", "小猫"), ("cpu", "模型"), ("speaker.wave.2", "声音"),
-            ("eye", "感知与记忆"), ("sparkles", "技能"), ("fish", "猫帮圈"),
+            ("eye", "感知与记忆"), ("sparkles", "技能"), ("fish", "喵副本"),
             ("antenna.radiowaves.left.and.right", "信号站"), ("info.circle", "关于")])
         side.onSelect = { [weak self] i in if let pg = SettingsPage(rawValue: i) { self?.select(page: pg) } }
         sidebar = side
@@ -2990,9 +2990,9 @@ final class SettingsController: NSObject, NSWindowDelegate {
         return p
     }
 
-    // 猫帮圈（功能，不是技能）
+    // 喵副本（功能，不是技能）
     private func squarePage() -> SK.Page {
-        let p = SK.Page(title: "猫帮圈")
+        let p = SK.Page(title: "喵副本")
         squarePane.build(into: p)
         return p
     }
@@ -3568,7 +3568,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             if id == "square" {
-                self.bubble.notify(on ? "「猫帮圈」开啦 🐟 说「发任务：……」把问题发到猫帮圈；我也会去猫帮圈找适合我的任务，接之前先问你。" : "「猫帮圈」关掉啦。", hold: 6)
+                self.bubble.notify(on ? "「喵副本」开啦 🐟 说「发任务：……」把问题发到喵副本；我也会去喵副本找适合我的任务，接之前先问你。" : "「喵副本」关掉啦。", hold: 6)
                 return
             }
             guard id == "x" else { return }
@@ -3578,6 +3578,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TaskSquare.shared.present = { [weak self] text, acts, hold in self?.catPopup(text, acts, hold: hold) }
         TaskSquare.shared.openAccount = { [weak self] in self?.settings.show(page: .user) }
         TaskSquare.shared.start()
+        Raids.shared.start()
         // 信号站 + 小猫等级 + 会员光环
         SignalStation.shared.present = { [weak self] text, acts, hold in self?.catPopup(text, acts, hold: hold) }
         SignalStation.shared.openAccount = { [weak self] in self?.settings.show(page: .user) }
@@ -3604,6 +3605,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "signal": { SignalStation.shared.showWindow() },
             "square": { TaskSquare.shared.showWindow() },
             "square.mine": { TaskSquare.shared.showWindow(tab: 1) },
+            "raids": { Raids.shared.showWindow(tab: 1) },
             "update": { [weak self] in self?.installFromMenu() },
             "agentlog": { AgentLogWindow.shared.show() }]
         AgentLogWindow.shared.onRerun = { [weak self] goal in
@@ -3721,7 +3723,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         perceptionItem.target = self
         m.addItem(perceptionItem)
         m.addItem(withTitle: "查看当前上下文", action: #selector(previewContextMenu), keyEquivalent: "").target = self
-        m.addItem(withTitle: "🐟 猫帮圈", action: #selector(menuSquare), keyEquivalent: "").target = self
+        m.addItem(withTitle: "🐟 喵副本", action: #selector(menuSquare), keyEquivalent: "").target = self
         m.addItem(withTitle: "📶 信号站", action: #selector(menuSignal), keyEquivalent: "").target = self
         m.addItem(withTitle: "🎧 喵传（开始 / 停止）", action: #selector(menuMiao), keyEquivalent: "").target = self
         m.addItem(withTitle: "📂 喵传记录", action: #selector(menuMiaoRecords), keyEquivalent: "").target = self
@@ -4688,7 +4690,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             SignalStation.shared.compose(prefill: pre)
             return
         }
-        // 猫帮圈: "发任务：……" opens the post form instead of a chat answer.
+        // 喵副本: "发任务：……" opens the post form instead of a chat answer.
         if images.isEmpty && pageOverride == nil, let pre = TaskSquare.postIntent(text) {
             TaskSquare.shared.postDialog(prefill: pre)
             return

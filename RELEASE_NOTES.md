@@ -1,3 +1,45 @@
+# OrdCat v0.2.63
+
+- 猫帮圈改名「喵副本」：原来的单人悬赏还在，叫「单人副本」；新加两种组队副本
+- 结果副本：队长选模板（翻译 / 长文协作 / 调研总结 / 代码审查）、写任务、定加入条件（等级、技能、会员、模型能看图）、2–5 人、截止时间和奖池；分钱比例和验收清单报名前就能看到，发布后不能改
+- 人齐开打：队长的小猫用队长的模型分工，队友的小猫用自己的模型做自己那一份，看过才提交；队长按清单验收，退回要勾出没达到的条目并写理由，可以返工一次；队长 72 小时不处理自动通过并付鱼干
+- 被退回可以申诉一次（10 条小鱼干，不退），由服务器上的 AI 裁判只按清单逐条判，并引用成果原文
+- 借猫副本：把小猫借给队长做纯文字活（问答、翻译、总结、写作、代码审查），按 token 用量拿小鱼干；借出去的小猫只在沙箱里用你自己的模型，不用喵手、不读文件、不开麦克风、不看屏幕、不碰喵推；用量记录两边都看得到，结束后互相评分
+- 奖池和预算发布时就锁住，结算时按原来充值 / 奖励鱼干的比例付出和退回；同一台 Mac 或同一个网络不能进同一个副本；队长的通过率和输掉的申诉公开显示
+- 设置 → 喵副本 新增「组队副本」：打开、发起结果副本 / 借猫副本，以及「借出小猫」开关
+
+**English**
+
+- Cat Circle is now “Cat Raids”. The single-user bounties are still there as Solo Raids, plus two new kinds of team raid
+- Result Raid: the captain picks a template (translation, long-form writing, research summary, code review), writes the task, sets join conditions (level, skills, membership, a model that reads images), 2–5 people, a deadline and a pool. The split and the acceptance checklist are shown before anyone joins and can't change after posting
+- Once the team is full, the captain's cat splits the work with the captain's model; each teammate's cat does its part with the teammate's own model, and nothing is handed in until they've checked it. The captain reviews against the checklist: a rejection must tick the unmet items and give a reason, and there's one rework. No answer within 72 hours means it passes and is paid automatically
+- A rejected part can be appealed once (10 Dried Fish, not refunded). An AI judge on the server checks only the checklist, item by item, quoting the work as evidence
+- Lend-a-Cat Raid: lend your cat to a captain for text-only jobs (Q&A, translation, summary, writing, code review) and earn Dried Fish by token usage. A lent cat works only in a sandbox with your own model: no Mac Agent, no files, no microphone, no screen, no X Companion. Both sides see the usage log and rate each other at the end
+- Pools and budgets are locked when posted, and payouts and refunds keep the original Paid / Reward mix. Accounts on the same Mac or network can't join the same raid. Each captain's pass rate and lost appeals are public
+- Settings → Cat Raids has a new Team Raids section: open them, start a Result or Lend-a-Cat Raid, and a Lend my cat switch
+
+# OrdCat v0.2.62
+
+- 小鱼干可以充值了：1 € = 100 条，€5 = 500、€10 = 1050、€30 = 3300、€100 = 11500，通过 Stripe 付款
+- 小鱼干分两种，都永久有效：充值鱼干什么都能买；奖励鱼干（新号、邀请、猫帮圈奖励）在猫帮圈里随便用，开会员、技能、加油包时最多抵 30%。原来的余额全部算奖励鱼干
+- 设置 → 用户 新增「小鱼干」卡片：总数和充值 / 奖励明细、充值、流水
+- 可以用小鱼干开会员和技能：Pro 990 条/月（年付 9504）、Max 5900 条/月（年付 56640）、技能 300 条/月（Pro / Max 8 折）；可选到期自动用小鱼干续费
+- 加油包改成用小鱼干买：300 条 = 1500 条消息，不过期
+- 猫帮圈发任务先用奖励鱼干再用充值鱼干，取消时各退回原来那一种；解题拿到的是奖励鱼干；猫帮圈页显示充值 / 奖励明细
+- 技能单独卖，任何会员都不包含；Pro 和 Max 会员买技能都打 8 折
+- 邀请更公平：朋友填码马上得 30 条；朋友验证邮箱、小猫陪满 3 天后你得 50 条；朋友第一次充值你再得 10%（最多 500 条）。每台 Mac 只能领一次，每人每月最多 20 个生效邀请。邀请页显示 已邀请 / 已生效 / 待生效
+
+**English**
+
+- You can now top up Dried Fish: €1 = 100, with packs of €5 = 500, €10 = 1,050, €30 = 3,300 and €100 = 11,500, paid with Stripe
+- Dried Fish comes in two kinds, neither expires: Paid fish buys anything; Reward fish (new account, invites, Cat Circle rewards) works freely in Cat Circle and covers up to 30% of a plan, skill or top-up. Existing balances all count as Reward fish
+- Settings → User has a new Dried Fish card: total, Paid / Reward breakdown, Top up and History
+- Open plans and skills with Dried Fish: Pro 990 a month (9,504 a year), Max 5,900 a month (56,640 a year), skills 300 a month (20% off with Pro or Max), with optional auto-renew from Dried Fish
+- Skills are sold separately and no plan includes them; Pro and Max members get 20% off
+- Top-ups are now bought with Dried Fish: 300 for 1,500 messages that never expire
+- Cat Circle tasks use Reward fish first, then Paid; cancelling refunds each kind to where it came from; solvers are paid in Reward fish; Cat Circle shows the Paid / Reward breakdown
+- Fairer invites: your friend gets 30 right away; you get 50 once they verify their email and their cat has been active for 3 days, plus 10% of their first top-up (up to 500). One redemption per Mac, up to 20 active invites a month. The invite window shows Invited / Active / Pending
+
 # OrdCat v0.2.60
 
 - 会员改成两档：会员 Pro €9.9/月（年付 €95）每月 3000 条，会员 Max €59/月（年付 €566）每月 25000 条、可选高级模型、包含全部技能；年付省 20%，默认选年付

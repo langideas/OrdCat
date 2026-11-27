@@ -21,7 +21,44 @@
         "checkout": ""
       }
     },
-    "validate": "https://api.lemonsqueezy.com/v1/licenses/validate"
+    "validate": "https://api.lemonsqueezy.com/v1/licenses/validate",
+    "fishPacks": [
+      {
+        "id": "5",
+        "eur": 5,
+        "fish": 500,
+        "priceId": ""
+      },
+      {
+        "id": "10",
+        "eur": 10,
+        "fish": 1050,
+        "priceId": ""
+      },
+      {
+        "id": "30",
+        "eur": 30,
+        "fish": 3300,
+        "priceId": ""
+      },
+      {
+        "id": "100",
+        "eur": 100,
+        "fish": 11500,
+        "priceId": ""
+      }
+    ],
+    "fishPrices": {
+      "pro.month": 990,
+      "pro.year": 9504,
+      "max.month": 5900,
+      "max.year": 56640,
+      "skill.month": 300,
+      "skill.month.pro": 240,
+      "credits": 300,
+      "creditsMessages": 1500,
+      "rewardCapPct": 30
+    }
   },
   "account": {
     "supabaseURL": "https://edmfdczdadfaafwkhohj.supabase.co",

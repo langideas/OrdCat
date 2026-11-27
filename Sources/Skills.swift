@@ -485,8 +485,8 @@ final class SkillsPane: NSObject, NSTextFieldDelegate {
             lines.append(L10n.english ? "On trial, \(Billing.trialLeft(sk.id)) days left."
                                       : "试用中，还剩 \(Billing.trialLeft(sk.id)) 天。")
         } else {
-            lines.append(L10n.english ? "Subscribe separately (\(Billing.price(sk.id))) to light it up. Free trial for \(Billing.trialDays) days first. 20% off with Pro; included in Max."
-                                      : "单独订阅 \(Billing.price(sk.id)) 就能点亮，可以先免费试用 \(Billing.trialDays) 天。Pro 打 8 折，Max 已包含。")
+            lines.append(L10n.english ? "Subscribe separately (\(Billing.price(sk.id))) to light it up. Free trial for \(Billing.trialDays) days first. 20% off with Pro or Max."
+                                      : "单独订阅 \(Billing.price(sk.id)) 就能点亮，可以先免费试用 \(Billing.trialDays) 天。Pro / Max 会员 8 折。")
         }
         switch sk.id {
         case "x", "agent": lines.append(L10n.t("开启时还需要：系统设置里的「辅助功能」权限。"))

@@ -1,7 +1,8 @@
-// Stripe → 订阅 / 加油包写进 OrdCat 账号。
+// Stripe → 订阅 / 加油包 / 小鱼干充值写进 OrdCat 账号。
+// 小鱼干充值：fish_topup(session id) 只加一次（重复的 webhook 不会多加），只有这里用 service_role 能调。
 // Stripe 后台 → Developers → Webhooks → Add endpoint：
 //   URL = https://<project>.supabase.co/functions/v1/stripe-webhook
-//   事件：checkout.session.completed, customer.subscription.created, customer.subscription.updated,
+//   事件：checkout.session.completed, checkout.session.async_payment_succeeded, customer.subscription.created, customer.subscription.updated,
 //         customer.subscription.deleted, invoice.paid
 // 部署：supabase functions deploy stripe-webhook --no-verify-jwt
 // Secrets：STRIPE_WEBHOOK_SECRET=whsec_…（同上 STRIPE_SECRET_KEY、STRIPE_PRICES）
@@ -67,9 +68,23 @@ Deno.serve(async (req) => {
 
   try {
     switch (ev.type) {
-      case "checkout.session.completed": {
+      case "checkout.session.completed":
+      case "checkout.session.async_payment_succeeded": {
         const userId = obj.metadata?.user_id ?? obj.client_reference_id;
-        if (obj.mode === "payment" && obj.metadata?.item === "topup" && obj.payment_status === "paid" && userId) {
+        if (obj.mode === "payment" && obj.metadata?.item === "fish") {
+          // Paid now (card) or later (SEPA etc. → async_payment_succeeded). Same session id never adds twice.
+          if (obj.payment_status === "paid" && userId) {
+            const fish = Number(obj.metadata?.fish ?? 0);
+            if (!(fish > 0)) throw new Error("fish top-up without amount");
+            const { error } = await admin.rpc("fish_topup", {
+              p_session: obj.id, p_user: userId, p_fish: fish,
+              p_cents: Number(obj.metadata?.cents ?? obj.amount_subtotal ?? 0), p_pack: String(obj.metadata?.pack ?? ""),
+            });
+            if (error) throw new Error(error.message);
+          }
+        } else if (ev.type === "checkout.session.async_payment_succeeded") {
+          // only fish top-ups are handled here
+        } else if (obj.mode === "payment" && obj.metadata?.item === "topup" && obj.payment_status === "paid" && userId) {
           await admin.rpc("credit_topup", { p_session: obj.id, p_user: userId, p_credits: Number(obj.metadata?.credits ?? 1500) });
         } else if (obj.mode === "subscription" && obj.subscription) {
           await saveSub(await stripeGet(`subscriptions/${obj.subscription}`));

@@ -1,4 +1,4 @@
--- OrdCat · Supabase schema. Run once in Supabase → SQL Editor.
+-- OrdCat · Supabase schema. Run in Supabase → SQL Editor first. Safe to run again.
 
 -- 用户资料
 create table if not exists public.profiles (
@@ -9,8 +9,11 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default now()
 );
 alter table public.profiles enable row level security;
+drop policy if exists "own profile read" on public.profiles;
 create policy "own profile read"   on public.profiles for select using (auth.uid() = id);
+drop policy if exists "own profile insert" on public.profiles;
 create policy "own profile insert" on public.profiles for insert with check (auth.uid() = id);
+drop policy if exists "own profile update" on public.profiles;
 create policy "own profile update" on public.profiles for update using (auth.uid() = id);
 
 -- 订阅（由 lemon-webhook 写入，用户只能读自己的）
@@ -26,11 +29,16 @@ create table if not exists public.subscriptions (
   updated_at timestamptz not null default now()
 );
 alter table public.subscriptions enable row level security;
+drop policy if exists "own subs read" on public.subscriptions;
 create policy "own subs read" on public.subscriptions for select using (auth.uid() = user_id);
 
 -- 头像存储（公开读，只能写自己的 <uid>.png）
 insert into storage.buckets (id, name, public) values ('avatars', 'avatars', true) on conflict do nothing;
+drop policy if exists "avatar read" on storage.objects;
 create policy "avatar read"   on storage.objects for select using (bucket_id = 'avatars');
+drop policy if exists "avatar write" on storage.objects;
 create policy "avatar write"  on storage.objects for insert with check (bucket_id = 'avatars' and name = auth.uid()::text || '.png');
+drop policy if exists "avatar update" on storage.objects;
 create policy "avatar update" on storage.objects for update using (bucket_id = 'avatars' and name = auth.uid()::text || '.png');
+drop policy if exists "avatar delete" on storage.objects;
 create policy "avatar delete" on storage.objects for delete using (bucket_id = 'avatars' and name = auth.uid()::text || '.png');

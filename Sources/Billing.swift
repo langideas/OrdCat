@@ -19,7 +19,7 @@ import Cocoa
 enum Billing {
     private static let d = UserDefaults.standard
     static let defaultPrice = "€3/月"
-    /// Paid skills. Max includes all of them (plan v2, Lang 2026-11-24).
+    /// Paid skills. Sold separately; no plan includes them (Lang 2026-11-25). Pro / Max get 20% off.
     static let skillIDs: Set<String> = ["x", "agent", "miao"]
 
     // MARK: remote settings
@@ -29,6 +29,7 @@ enum Billing {
         d.set(b["enabled"] as? Bool ?? false, forKey: "billing.enabled")
         d.set(b["trialDays"] as? Int ?? 7, forKey: "billing.trialDays")
         if let v = b["validate"] as? String { d.set(v, forKey: "billing.validate") }
+        Fish.applyRemote(b["fishPacks"] as? [[String: Any]])
         if let skills = b["skills"] as? [String: [String: Any]] {
             for (id, s) in skills {
                 if let p = s["price"] as? String { d.set(p, forKey: "billing.price.\(id)") }
@@ -64,7 +65,6 @@ enum Billing {
     static func licenseKey(_ id: String) -> String { Keychain.get(service: "app.ordcat.license.\(id)") }
 
     static func isSubscribed(_ id: String) -> Bool {
-        if skillIDs.contains(id) && isSubscribed("max") { return true }   // Max includes every skill
         if let a = Account.shared.subscribedUntil(id), a > Date() { return true }   // bound to the account
         guard let u = paidUntil(id) else { return false }
         return u > Date()

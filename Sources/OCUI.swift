@@ -63,7 +63,7 @@ final class OCButton: NSButton {
     override var contentTintColor: NSColor? { get { super.contentTintColor } set { } }
 
     static let primaryTitles: Set<String> = [
-        "保存", "发布", "发布任务", "打开猫帮圈", "打开信号站", "发出信号", "提交答案", "立即更新",
+        "保存", "发布", "发布任务", "打开喵副本", "打开信号站", "发出信号", "提交答案", "立即更新",
         "登录 / 注册", "✏️  发起新对话", "分享当前桌面"]
 
     static func auto(_ t: String) -> OCStyle {
@@ -176,7 +176,7 @@ final class OCButton: NSButton {
     }
 }
 
-/// Amber look for the app's segmented tabs (猫帮圈 / 信号站 windows).
+/// Amber look for the app's segmented tabs (喵副本 / 信号站 windows).
 func ocStyleTabs(_ s: NSSegmentedControl) {
     s.segmentStyle = .rounded
     s.selectedSegmentBezelColor = kAmber

@@ -1,8 +1,8 @@
-// OrdCat — 功能「猫帮圈」🐟（设置 → 猫帮圈；不是技能，登录就能用）
+// OrdCat — 功能「喵副本」🐟（设置 → 喵副本；不是技能，登录就能用）
 //
-// 用户通过小猫把需要解决的问题发到猫帮圈，并自己定一份小鱼干奖励（发布时先押上）。
+// 用户通过小猫把需要解决的问题发到喵副本，并自己定一份小鱼干奖励（发布时先押上）。
 // 别的用户的小猫按「自己的模型能力 + 已开的技能」挑合适的任务来解：小猫用主人自己的模型写出答案，
-// 主人看过、改过再交（绝不自动提交）。发布者采纳后，小鱼干转给解题的人；不满意可退回猫帮圈，取消会退回小鱼干。
+// 主人看过、改过再交（绝不自动提交）。发布者采纳后，小鱼干转给解题的人；不满意可退回喵副本，取消会退回小鱼干。
 //
 // Server side: supabase/square.sql (tables + security-definer functions; clients never write the tables directly).
 // Needs a signed-in account (设置 → 账号). New accounts get 100 小鱼干.
@@ -165,10 +165,10 @@ final class TaskSquare: NSObject {
             seen.append(contentsOf: fresh.map { "n:" + $0.id })
             Prefs.squareSeen = seen
             let more = fresh.count > 1 ? "等 \(fresh.count) 个新任务" : ""
-            NotifCenter.shared.add("🐟 猫帮圈上有「\(first.title)」\(more)（\(first.kind) · \(first.reward) 条小鱼干）", open: "square")
-            self.present?("🐟 猫帮圈上有「\(first.title)」\(more)（\(first.kind) · \(first.reward) 条小鱼干），要我接吗？",
+            NotifCenter.shared.add("🐟 喵副本上有「\(first.title)」\(more)（\(first.kind) · \(first.reward) 条小鱼干）", open: "square")
+            self.present?("🐟 喵副本上有「\(first.title)」\(more)（\(first.kind) · \(first.reward) 条小鱼干），要我接吗？",
                           [("接这个", { [weak self] in self?.take(first) }),
-                           ("看看猫帮圈", { [weak self] in self?.showWindow() }),
+                           ("看看喵副本", { [weak self] in self?.showWindow() }),
                            ("不再提醒", { Prefs.squareNotify = false })], 25)
         }
     }
@@ -184,7 +184,7 @@ final class TaskSquare: NSObject {
         let l = e.lowercased()
         if l.contains("schema cache") || l.contains("square_") && l.contains("does not exist")
             || l.contains("could not find the function") || l.contains("fish_") && l.contains("does not exist") {
-            return "猫帮圈服务器还没开通好（管理员需要在 Supabase 运行 supabase/square.sql）"
+            return "喵副本服务器还没开通好（管理员需要在 Supabase 运行 supabase/square.sql）"
         }
         return e
     }
@@ -195,7 +195,8 @@ final class TaskSquare: NSObject {
             if let b = obj as? Int { self?.balance = b }
             else if let n = obj as? NSNumber { self?.balance = n.intValue }
             self?.changed()
-            done?()
+            // 充值 / 奖励 breakdown (fish.sql); the total above still works on older servers.
+            Fish.refresh { self?.changed(); done?() }
         }
     }
 
@@ -234,8 +235,8 @@ final class TaskSquare: NSObject {
             for t in ts where t.status == "answered" && !seen.contains("a:" + t.id) {
                 seen.append("a:" + t.id)
                 Prefs.squareSeen = seen
-                NotifCenter.shared.add("📬 你发到猫帮圈的「\(t.title)」有小猫回答啦", open: "square.mine")
-                self.present?("📬 你发到猫帮圈的「\(t.title)」有小猫回答啦，去看看？",
+                NotifCenter.shared.add("📬 你发到喵副本的「\(t.title)」有小猫回答啦", open: "square.mine")
+                self.present?("📬 你发到喵副本的「\(t.title)」有小猫回答啦，去看看？",
                               [("看回答", { [weak self] in self?.showAnswer(t) })], 20)
                 return
             }
@@ -270,14 +271,14 @@ final class TaskSquare: NSObject {
             let cands = ts.filter { $0.posterID != uid && !skipped.contains($0.id) && self.canDo($0)
                 && (kinds.isEmpty || kinds.contains($0.kind)) }.prefix(8)
             guard !cands.isEmpty else {
-                if manual { self.present?(err.map { "猫帮圈没连上：\($0)" } ?? "猫帮圈上暂时没有适合我的任务 🐾 晚点我再看看。", [], 6) }
+                if manual { self.present?(err.map { "喵副本没连上：\($0)" } ?? "喵副本上暂时没有适合我的任务 🐾 晚点我再看看。", [], 6) }
                 return
             }
             let lines = cands.enumerated().map { i, t in
                 "\(i + 1). [\(t.kind)] \(t.title)｜\(String(t.body.prefix(160)).replacingOccurrences(of: "\n", with: " "))｜奖励 \(t.reward)"
             }.joined(separator: "\n")
             let prompt = """
-            下面是猫帮圈上别人发的问题。你的模型是 \(Prefs.model)，能力：\(TaskSquare.capsLine)。
+            下面是喵副本上别人发的问题。你的模型是 \(Prefs.model)，能力：\(TaskSquare.capsLine)。
             挑出一个你最有把握解得又好又对的任务（只考虑你真能做好的，不要因为奖励高就选）。
             只回一行 JSON：{"pick": 编号, "why": "不超过 25 字的理由"}；一个都没把握就回 {"pick": 0, "why": ""}。
 
@@ -288,14 +289,14 @@ final class TaskSquare: NSObject {
                 guard let self = self else { return }
                 let (pick, why) = TaskSquare.parsePick(text ?? "")
                 guard pick >= 1, pick <= cands.count else {
-                    if manual { self.present?("猫帮圈上的任务我都没太大把握，先不接啦 🐾", [], 6) }
+                    if manual { self.present?("喵副本上的任务我都没太大把握，先不接啦 🐾", [], 6) }
                     return
                 }
                 let t = cands[cands.startIndex + pick - 1]
                 let reason = why.isEmpty ? "" : "\n\(why)"
-                self.present?("🐟 猫帮圈上有个我能帮上忙的任务：「\(t.title)」（\(t.kind) · \(t.reward) 条小鱼干）\(reason)",
+                self.present?("🐟 喵副本上有个我能帮上忙的任务：「\(t.title)」（\(t.kind) · \(t.reward) 条小鱼干）\(reason)",
                               [("接这个", { [weak self] in self?.take(t) }),
-                               ("看看猫帮圈", { [weak self] in self?.showWindow() }),
+                               ("看看喵副本", { [weak self] in self?.showWindow() }),
                                ("跳过", { Prefs.squareSkipped = Prefs.squareSkipped + [t.id] })], 25)
             })
         }
@@ -371,13 +372,13 @@ final class TaskSquare: NSObject {
                     }
                     content = arr
                 } else {
-                    let (desc, err) = await MediaHub.describe(pics, question: question, appName: "猫帮圈里的图片", video: false)
+                    let (desc, err) = await MediaHub.describe(pics, question: question, appName: "喵副本里的图片", video: false)
                     question += "\n\n[任务附带的图片（看图模型的描述）]\n" + (desc ?? "（没看成：\(err ?? "未知原因")）")
                     content = question
                 }
             }
             let ctx = """
-            现在你在 OrdCat 猫帮圈帮另一位用户解决问题。这次不受 80 字限制：请认真、完整、准确地解答，
+            现在你在 OrdCat 喵副本帮另一位用户解决问题。这次不受 80 字限制：请认真、完整、准确地解答，
             结构清楚，能直接用；不确定的地方如实说明，不要编造。不要提到你是在接任务，也不要索要报酬。
             """
             self.solveLLM.stream([["role": "user", "content": content]], context: ctx, onDelta: { _ in },
@@ -386,8 +387,8 @@ final class TaskSquare: NSObject {
                 self.solving = false
                 let ans = (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 if ans.isEmpty {
-                    self.present?("这次没想出来：\(err ?? "模型没有回答")。任务还在你手上，可以在猫帮圈「我接的」里重试或放弃。",
-                                  [("打开猫帮圈", { [weak self] in self?.showWindow(tab: 2) })], 12)
+                    self.present?("这次没想出来：\(err ?? "模型没有回答")。任务还在你手上，可以在喵副本「我接的」里重试或放弃。",
+                                  [("打开喵副本", { [weak self] in self?.showWindow(tab: 2) })], 12)
                     return
                 }
                 self.showDraft(t, answer: ans)
@@ -457,7 +458,7 @@ final class TaskSquare: NSObject {
                 if let e = err { self.present?("没发出去：\(e)", [], 10); return }
                 self.refreshBalance()
                 self.window?.reload(fetch: true)
-                self.present?("发到猫帮圈啦 🐟 押了 \(n) 条小鱼干，有小猫回答我就叫你。", [], 6)
+                self.present?("发到喵副本啦 🐟 押了 \(n) 条小鱼干，有小猫回答我就叫你。", [], 6)
             }
         }
     }
@@ -506,7 +507,7 @@ final class TaskSquare: NSObject {
             a.accessoryView = scroll
             if t.status == "answered" {
                 a.addButton(withTitle: "采纳（给 \(t.reward) 条小鱼干）")
-                a.addButton(withTitle: "不满意，退回猫帮圈")
+                a.addButton(withTitle: "不满意，退回喵副本")
                 a.addButton(withTitle: "先放着")
             } else {
                 a.addButton(withTitle: "好")
@@ -532,7 +533,7 @@ final class TaskSquare: NSObject {
             guard let self = self else { return }
             if let e = err { self.present?(e, [], 6); return }
             self.window?.reload(fetch: true)
-            self.present?(accept ? "已采纳 🎉 \(t.reward) 条小鱼干送给了解题的小猫。" : "退回猫帮圈啦，等别的小猫再试试。", [], 6)
+            self.present?(accept ? "已采纳 🎉 \(t.reward) 条小鱼干送给了解题的小猫。" : "退回喵副本啦，等别的小猫再试试。", [], 6)
         }
     }
 
@@ -559,7 +560,7 @@ final class TaskSquare: NSObject {
     }
 
     private func needLogin() {
-        let msg = acct.configured ? "猫帮圈要先登录账号（新账号送 100 条小鱼干 🐟）。" : "账号服务还在开通中，暂时用不了猫帮圈。"
+        let msg = acct.configured ? "喵副本要先登录账号（新账号送 100 条小鱼干 🐟）。" : "账号服务还在开通中，暂时用不了喵副本。"
         present?(msg, acct.configured ? [("去登录", { [weak self] in self?.openAccount?() })] : [], 8)
     }
 }
@@ -596,7 +597,7 @@ final class SquareDraft: NSObject, NSWindowDelegate {
         text.textContainer?.widthTracksTextView = true
         text.string = answer
         scroll.documentView = text
-        let hint = SK.WrapLabel("这是小猫用你的模型写的。看过、需要的话改一改，再点「提交」。30 分钟内没交会自动退回猫帮圈。", size: 11)
+        let hint = SK.WrapLabel("这是小猫用你的模型写的。看过、需要的话改一改，再点「提交」。30 分钟内没交会自动退回喵副本。", size: 11)
         let submit = OCButton(title: "提交答案", target: self, action: #selector(doSubmit))
         submit.keyEquivalent = "\r"
         let retry = OCButton(title: "重新想", target: self, action: #selector(doRetry))
@@ -637,16 +638,16 @@ final class SquareDraft: NSObject, NSWindowDelegate {
     @objc private func doRetry() { handled = true; win.close(); onRetry?() }
     @objc private func doGiveUp() { handled = true; win.close(); onGiveUp?() }
     func windowWillClose(_ n: Notification) {
-        // Closing the window without choosing keeps the task (it can be finished from 猫帮圈 → 我接的).
+        // Closing the window without choosing keeps the task (it can be finished from 喵副本 → 我接的).
         _ = handled
     }
 }
 
-/// 猫帮圈 window: 猫帮圈 / 我发布的 / 我接的.
+/// 喵副本 window: 喵副本 / 我发布的 / 我接的.
 final class SquareWindow: NSObject, NSWindowDelegate {
     private unowned let square: TaskSquare
     private var win: NSWindow!
-    private let tabs = NSSegmentedControl(labels: ["猫帮圈", "我发布的", "我接的"], trackingMode: .selectOne, target: nil, action: nil)
+    private let tabs = NSSegmentedControl(labels: ["单人副本", "我发布的", "我接的"], trackingMode: .selectOne, target: nil, action: nil)
     private let balance = NSTextField(labelWithString: "")
     private let caps = SK.WrapLabel("", size: 11)
     private let nameLabel = NSTextField(labelWithString: "")
@@ -662,7 +663,7 @@ final class SquareWindow: NSObject, NSWindowDelegate {
         super.init()
         win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 540),
                        styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
-        win.title = "🐟 猫帮圈"
+        win.title = "🐟 喵副本 · 单人副本"
         win.minSize = NSSize(width: 520, height: 380)
         win.isReleasedWhenClosed = false
         win.delegate = self
@@ -678,8 +679,10 @@ final class SquareWindow: NSObject, NSWindowDelegate {
         tabs.selectedSegment = 0
         let post = OCButton(title: "发布任务", target: self, action: #selector(post))
         let find = OCButton(title: "帮我挑一个", target: self, action: #selector(find))
-        find.toolTip = "小猫按你的模型和技能，从猫帮圈挑一个最适合它解的任务"
+        find.toolTip = "小猫按你的模型和技能，从喵副本挑一个最适合它解的任务"
         let refresh = OCButton(title: "刷新", target: self, action: #selector(refreshNow))
+        let raids = OCButton(title: "组队副本", target: self, action: #selector(openRaids))
+        raids.toolTip = "结果副本和借猫副本：和别的小猫组队做大任务"
         // 朋友圈-style cover: avatar, name, level, 小鱼干, what my cat can do; actions on the right.
         let banner = SquareBanner()
         banner.translatesAutoresizingMaskIntoConstraints = false
@@ -693,7 +696,7 @@ final class SquareWindow: NSObject, NSWindowDelegate {
         info.alignment = .leading
         info.spacing = 3
         caps.widthAnchor.constraint(equalTo: info.widthAnchor).isActive = true
-        let btns = NSStackView(views: [find, refresh, post])
+        let btns = NSStackView(views: [raids, find, refresh, post])
         btns.spacing = 8
         btns.setContentHuggingPriority(.required, for: .horizontal)
         btns.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -760,10 +763,15 @@ final class SquareWindow: NSObject, NSWindowDelegate {
     @objc private func post() { square.postDialog() }
     @objc private func find() { square.autoMatch(manual: true) }
     @objc private func refreshNow() { square.refreshBalance(); reload(fetch: true) }
+    @objc private func openRaids() { Raids.shared.showWindow() }
 
     func reload(fetch: Bool) {
         guard win.isVisible || fetch else { return }
-        balance.stringValue = "🐟 小鱼干：\(square.balance.map(String.init) ?? "—")"
+        if let t = Fish.total, t == square.balance || square.balance == nil {
+            balance.stringValue = Fish.line
+        } else {
+            balance.stringValue = "🐟 小鱼干：\(square.balance.map(String.init) ?? "—")"
+        }
         caps.stringValue = "我的小猫：" + TaskSquare.capsLine
         let acc = Account.shared
         nameLabel.stringValue = acc.profile.displayName
@@ -775,7 +783,7 @@ final class SquareWindow: NSObject, NSWindowDelegate {
         guard fetch else { return }
         guard square.ready else {
             items = []
-            render(empty: Account.shared.configured ? "先登录账号才能用猫帮圈（设置 → 账号，新账号送 100 条小鱼干）。" : "账号服务还在开通中。")
+            render(empty: Account.shared.configured ? "先登录账号才能用喵副本（设置 → 账号，新账号送 100 条小鱼干）。" : "账号服务还在开通中。")
             return
         }
         gen += 1
@@ -785,7 +793,7 @@ final class SquareWindow: NSObject, NSWindowDelegate {
             guard let self = self, g == self.gen else { return }
             self.items = ts
             self.status.stringValue = err.map { "没连上：\($0)" } ?? "共 \(ts.count) 个"
-            self.render(empty: ["猫帮圈上还没有任务，发一个试试？", "你还没发过任务。", "你还没接过任务。"][self.tabs.selectedSegment])
+            self.render(empty: ["喵副本上还没有任务，发一个试试？", "你还没发过任务。", "你还没接过任务。"][self.tabs.selectedSegment])
         }
         switch tabs.selectedSegment {
         case 1: square.myPosted(done)
@@ -960,7 +968,7 @@ final class SquareWindow: NSObject, NSWindowDelegate {
                 return [("继续做", #selector(resolve(_:)), true), ("放弃", #selector(giveUp(_:)), true)]
             case "answered": return [("等对方采纳", #selector(noop), false)]
             case "done": return [("已到账 🐟 \(t.reward)", #selector(noop), false)]
-            default: return [("已退回猫帮圈", #selector(noop), false)]
+            default: return [("已退回喵副本", #selector(noop), false)]
             }
         }
     }
@@ -1000,7 +1008,7 @@ final class SquareWindow: NSObject, NSWindowDelegate {
     }
 }
 
-/// The 猫帮圈 cover: a soft amber wash over the window background, rounded.
+/// The 喵副本 cover: a soft amber wash over the window background, rounded.
 final class SquareBanner: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
