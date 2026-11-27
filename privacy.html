@@ -5,7 +5,7 @@
 <nav><a class="brand" href="./"><img class="eyes" src="eyes.svg" alt="OrdCat"><span class="wm">OrdCat</span></a><span><a href="privacy.html"><span class="zh">隐私政策</span><span class="en">Privacy</span></a><a href="terms.html"><span class="zh">用户协议</span><span class="en">Terms</span></a><a href="impressum.html">Impressum</a><button class="tg" id="langBtn" onclick="ocToggleLang()">EN</button><button class="tg" id="themeBtn" onclick="ocCycleTheme()">◐</button></span></nav>
 <div class="zh">
 <h1>隐私政策</h1>
-<p class="date">更新日期：2026 年 11 月 19 日</p>
+<p class="date">更新日期：2026 年 11 月 27 日</p>
 <p class="lang"><a href="#de">Deutsche Fassung ↓</a></p>
 <p>OrdCat 是一款 macOS 桌面应用。我们的原则是：<b>能在你的 Mac 上完成的，就只留在你的 Mac 上</b>。本政策如实说明 OrdCat 应用和 ordcat.de 网站会处理哪些数据、存在哪里、发给谁。</p>
 
@@ -24,7 +24,8 @@
 <p>你可以在 设置 → 账号 / 感知与记忆 中导出或清除这些数据；删除应用和上述文件夹即可全部删除。</p>
 
 <h2>3. 发给你自己选择的 AI 模型服务商</h2>
-<p>OrdCat 不提供模型，由你自己配置（BYOM）。当你提问、分享页面、复制文字让小猫看看、使用看图或语音朗读等功能时，相关内容（你的问题、所选的屏幕文字或截图片段、相关记忆片段）会<b>直接从你的 Mac 发送到你配置的服务商</b>，例如 OpenAI、Anthropic、Google Gemini、DeepSeek、Groq、硅基流动，或你本机的 Ollama。这些数据不经过我们的服务器。服务商如何处理数据，以其各自的隐私政策为准。使用本地 Ollama 时，数据不离开你的电脑。</p>
+<p>免费版不提供模型，由你自己配置（BYOM）。当你提问、分享页面、复制文字让小猫看看、使用看图或语音朗读等功能时，相关内容（你的问题、所选的屏幕文字或截图片段、相关记忆片段）会<b>直接从你的 Mac 发送到你配置的服务商</b>，例如 OpenAI、Anthropic、Google Gemini、DeepSeek、Groq、硅基流动，或你本机的 Ollama。这些数据不经过我们的服务器。服务商如何处理数据，以其各自的隐私政策为准。使用本地 Ollama 时，数据不离开你的电脑。</p>
+<p>如果你开通了会员并使用 <b>OrdCat 托管的模型</b>，请求会经过我们在 Supabase 上的转发服务，再发给我们选用的模型服务商；我们只记录用了多少条额度，不保存你的问题和回答。</p>
 <p>发送前，OrdCat 会在本地尝试给密码、密钥、卡号等内容打码。</p>
 
 <h2>4. 账号与猫帮圈（可选）</h2>
@@ -33,19 +34,25 @@
 <tr><th>数据</th><th>用途</th><th>谁能看到</th></tr>
 <tr><td>邮箱地址、登录记录</td><td>用邮箱验证码登录</td><td>仅你本人和运营者</td></tr>
 <tr><td>用户名、显示名称、头像</td><td>个人资料、猫帮圈署名</td><td>头像公开可访问；名称对登录用户可见</td></tr>
-<tr><td>小鱼干余额和流水</td><td>猫帮圈奖励</td><td>仅你本人</td></tr>
+<tr><td>小鱼干余额</td><td>猫帮圈、喵副本</td><td>仅你本人</td></tr>
 <tr><td>你发布的任务（标题、说明、类型、链接、附件）</td><td>猫帮圈</td><td><b>所有登录用户可见</b>；附件通过公开链接可访问</td></tr>
 <tr><td>你提交的回答、使用的模型名称</td><td>猫帮圈</td><td>任务发布者和你本人</td></tr>
-<tr><td>订阅状态（如以后开通付费）</td><td>开通付费技能</td><td>仅你本人</td></tr>
+<tr><td>订阅、购买记录和小鱼干流水（付费和奖励）</td><td>开通付费功能、记账</td><td>仅你本人</td></tr>
 </table>
-<p>登录验证码邮件通过 <b>Resend</b>（Resend Inc.，美国）从 noreply@ordcat.de 发出，Resend 会处理你的邮箱地址。</p>
-<p>你可以随时在 设置 → 账号 中删除账号，账号和上表中的数据会一并删除。</p>
+<p>登录验证码邮件，以及取消、撤回的确认邮件，通过 <b>Resend</b>（Resend Inc.，美国）从 noreply@ordcat.de 发出，Resend 会处理你的邮箱地址。</p>
+<p>你可以随时在 设置 → 账号 中删除账号，账号和上表中的数据会一并删除（法律要求保留的付款记录除外，见第 6 条）。</p>
 
 <h2>5. 更新检查与下载</h2>
 <p>OrdCat 会定期访问 <b>GitHub</b>（GitHub Inc.，美国）检查新版本并下载更新，同时读取一份公开的配置文件（公告等）。GitHub 会像访问任何网站一样处理你的 IP 地址。我们不在这些请求中发送任何个人信息。</p>
 
-<h2>6. 付费（尚未开通）</h2>
-<p>如果以后开通付费技能，支付将由 <b>Lemon Squeezy</b> 作为经销商处理，我们不会接触你的银行卡信息。开通前会更新本政策。</p>
+<h2>6. 付款</h2>
+<ul>
+<li>购买会员、技能、加油包或小鱼干时，付款由 <b>Stripe Payments Europe, Ltd.</b>（爱尔兰都柏林）处理。你在付款页填写的卡号、银行信息、姓名、邮箱、账单地址由 Stripe 直接收集，按 <a href="https://stripe.com/de/privacy">Stripe 的隐私政策</a>处理；Stripe 也可能把数据传到美国（依据欧盟标准合同条款）。</li>
+<li>我们只从 Stripe 拿到并保存：Stripe 客户编号、购买的商品和金额、订阅状态和到期时间、付款是否成功。<b>我们拿不到完整卡号。</b></li>
+<li>这些数据和小鱼干流水存在 Supabase。</li>
+<li>法律依据：履行合同（GDPR 第 6 条第 1 款 b 项）；保存发票和账目是法定义务（第 6 条第 1 款 c 项），按德国税法保存 10 年，到期删除。删除账号时，法律要求保留的付款记录会继续保存到期满。</li>
+<li>通过官网「Verträge hier kündigen」或「Vertrag widerrufen」提交取消或撤回时，我们保存你填写的内容（邮箱、姓名、合同、理由、日期）、收到时间和 IP 地址的哈希值（用于防止滥用），存在 Supabase，并通过 Resend 给你发确认邮件。法律依据：GDPR 第 6 条第 1 款 b 项和 c 项（德国民法典 §312k、§356a）。这些记录作为凭证保存，到相关的法定保存期限届满后删除。</li>
+</ul>
 
 <h2>7. 网站 ordcat.de</h2>
 <p>网站托管在 <b>GitHub Pages</b>（GitHub Inc.，美国）。访问时 GitHub 会处理你的 IP 地址等技术数据以提供网页。网站不使用 Cookie、不使用统计或广告追踪。下载页会向 GitHub 查询最新版本号。</p>
@@ -54,7 +61,7 @@
 <ul><li>不出售、不出租你的数据。</li><li>不做广告追踪，没有第三方统计。</li><li>不在后台持续录屏或录音。</li></ul>
 
 <h2>9. 法律依据和你的权利（GDPR）</h2>
-<p>我们处理账号数据的依据是履行与你的使用协议（GDPR 第 6 条第 1 款 b 项），更新检查和网站运行基于正当利益（第 6 条第 1 款 f 项）。数据传到欧盟以外（美国、新加坡）时，依据服务商的标准合同条款或欧盟-美国数据隐私框架。</p>
+<p>我们处理账号数据的依据是履行与你的使用协议（GDPR 第 6 条第 1 款 b 项），付款记录的保存另见第 6 条（第 6 条第 1 款 c 项），更新检查和网站运行基于正当利益（第 6 条第 1 款 f 项）。数据传到欧盟以外（美国、新加坡）时，依据服务商的标准合同条款或欧盟-美国数据隐私框架。</p>
 <p>你有权访问、更正、删除、限制处理、数据可携带，以及反对处理。请发邮件到 <a href="mailto:support@ordcat.de">support@ordcat.de</a>。你也可以向数据保护监管机构投诉，例如巴登-符腾堡州数据保护与信息自由专员（LfDI Baden-Württemberg）。</p>
 
 <h2>10. 未成年人</h2>
@@ -65,7 +72,7 @@
 </div>
 <div class="en">
 <h1>Privacy Policy</h1>
-<p class="date">Last updated: 19 November 2026</p>
+<p class="date">Last updated: 27 November 2026</p>
 <p class="lang"><a href="#de">Deutsche Fassung ↓</a> This English text is a convenience translation; the German version prevails.</p>
 <p>OrdCat is a macOS desktop app. Our principle: <b>whatever can stay on your Mac, stays on your Mac</b>. This policy explains which data the OrdCat app and the ordcat.de website process, where it is stored and who receives it.</p>
 <h2>1. Controller</h2>
@@ -73,17 +80,23 @@
 <h2>2. Data that stays on your Mac</h2>
 <p>The following is stored locally in ~/Library/Application Support/OrdCat or in the macOS Keychain and is <b>not sent to us</b>: chat history; local memories (text excerpts of the active window, read via macOS Accessibility or the system's built-in text recognition and filtered locally first); API keys and login data (Keychain); settings. Speech recognition uses macOS and, where the device supports it, runs entirely on-device. You can export or delete this data in Settings.</p>
 <h2>3. Data sent to the AI provider you choose</h2>
-<p>OrdCat does not provide its own AI model. When you ask a question or use a feature, the content needed for it (your question, selected on-screen text or an image excerpt, relevant local memories) is sent <b>directly from your Mac to the provider you configured</b> (e.g. OpenAI, Anthropic, Google, DeepSeek, Groq, SiliconFlow, or a local Ollama). This data does not pass through our servers. The provider's privacy terms apply. Passwords, keys and card numbers are masked locally before sending wherever possible.</p>
+<p>Unless you use a plan's hosted models (see below), OrdCat does not provide an AI model. When you ask a question or use a feature, the content needed for it (your question, selected on-screen text or an image excerpt, relevant local memories) is sent <b>directly from your Mac to the provider you configured</b> (e.g. OpenAI, Anthropic, Google, DeepSeek, Groq, SiliconFlow, or a local Ollama). This data does not pass through our servers. The provider's privacy terms apply. If you have a plan and use <b>OrdCat's hosted models</b>, requests are relayed through our service on Supabase to the model provider we use; we only record how many messages you used and do not store your questions or answers. Passwords, keys and card numbers are masked locally before sending wherever possible.</p>
 <h2>4. Account and Cat Circle (optional)</h2>
-<p>Only if you create an account, we store with our processor <b>Supabase Inc.</b> (data centre in Singapore): email address and login data; username, display name and avatar (publicly retrievable); balance and transactions of “Dried Fish” points; tasks you post including links and attachments (<b>visible to all signed-in users</b>, attachments retrievable via public links); your answers and the name of the model used (visible to the task poster); subscription status where applicable. Sign-in codes are sent via <b>Resend Inc.</b> (USA). You can delete your account at any time in Settings; the data above is deleted with it.</p>
+<p>Only if you create an account, we store with our processor <b>Supabase Inc.</b> (data centre in Singapore): email address and login data; username, display name and avatar (publicly retrievable); your Dried Fish balance; tasks you post including links and attachments (<b>visible to all signed-in users</b>, attachments retrievable via public links); your answers and the name of the model used (visible to the task poster); subscriptions, purchases and Dried Fish transactions (paid and reward), to provide paid features and keep accounts (visible only to you). Sign-in codes and cancellation or withdrawal confirmations are sent via <b>Resend Inc.</b> (USA). You can delete your account at any time in Settings; the data above is deleted with it, except payment records we must keep by law (see section 6).</p>
 <h2>5. Updates</h2>
 <p>The app regularly contacts <b>GitHub</b> (GitHub Inc., USA) to check for and download updates and to read a public configuration file. Your IP address is processed in the process; we do not send personal data.</p>
 <h2>6. Payments</h2>
-<p>There are currently no paid features. In future, payments would be handled by <b>Lemon Squeezy</b> as reseller; we receive no payment data. This policy will be updated beforehand.</p>
+<ul>
+<li>When you buy a plan, a skill, a top-up or Dried Fish, the payment is processed by <b>Stripe Payments Europe, Ltd.</b> (Dublin, Ireland). Your card or bank details, name, email and billing address entered on the checkout page are collected directly by Stripe and handled under <a href="https://stripe.com/privacy">Stripe's privacy policy</a>; Stripe may also transfer data to the USA (based on the EU Standard Contractual Clauses).</li>
+<li>From Stripe we only receive and store: your Stripe customer ID, the items bought and amounts, subscription status and end of the current period, and whether the payment succeeded. <b>We never receive your full card number.</b></li>
+<li>This data and your Dried Fish transactions are stored with Supabase.</li>
+<li>Legal basis: performance of a contract (Art. 6(1)(b) GDPR); keeping invoices and accounting records is a legal obligation (Art. 6(1)(c) GDPR). Under German tax law we keep them for 10 years and then delete them. If you delete your account, payment records we are required to keep are retained until that period ends.</li>
+<li>When you use “Verträge hier kündigen” (cancel contracts) or “Vertrag widerrufen” (withdraw) on our website, we store what you enter (email, name, contract, reason, date), the time received and a hash of your IP address (to prevent abuse) with Supabase, and send you a confirmation email via Resend. Legal basis: Art. 6(1)(b) and (c) GDPR (sections 312k and 356a of the German Civil Code). We keep these records as proof until the applicable statutory retention periods end.</li>
+</ul>
 <h2>7. Website</h2>
 <p>ordcat.de is served via <b>GitHub Pages</b> (GitHub Inc., USA); technically necessary data such as your IP address is processed. We use no cookies, no analytics and no advertising trackers.</p>
 <h2>8. Legal bases, transfers to third countries</h2>
-<p>Account data: Art. 6(1)(b) GDPR (performance of a contract). Update checks and running the website: Art. 6(1)(f) GDPR (legitimate interest in secure operation). Transfers to third countries (USA, Singapore) are based on Standard Contractual Clauses or the EU-US Data Privacy Framework.</p>
+<p>Account data and purchases: Art. 6(1)(b) GDPR (performance of a contract). Retention of payment records: Art. 6(1)(c) GDPR (see section 6). Update checks and running the website: Art. 6(1)(f) GDPR (legitimate interest in secure operation). Transfers to third countries (USA, Singapore) are based on Standard Contractual Clauses or the EU-US Data Privacy Framework.</p>
 <h2>9. Your rights</h2>
 <p>You have the right of access, rectification, erasure, restriction of processing, data portability and objection (Art. 15–21 GDPR). Contact: <a href="mailto:support@ordcat.de">support@ordcat.de</a>. You may also lodge a complaint with a supervisory authority, e.g. the State Commissioner for Data Protection and Freedom of Information of Baden-Württemberg.</p>
 <h2>10. Minimum age</h2>
@@ -93,27 +106,33 @@
 </div>
 <hr id="de">
 <h1>Datenschutzerklärung</h1>
-<p class="date">Stand: 19. November 2026</p>
+<p class="date">Stand: 27. November 2026</p>
 <h2>1. Verantwortlicher</h2>
 <p>Axun Conor, Hedemannstraße 74, 78355 Hohenfels, Baden-Württemberg, Deutschland. E-Mail: <a href="mailto:support@ordcat.de">support@ordcat.de</a>.</p>
 <h2>2. Daten, die nur auf Ihrem Mac bleiben</h2>
 <p>Folgende Daten werden lokal unter ~/Library/Application Support/OrdCat bzw. im macOS-Schlüsselbund gespeichert und <b>nicht an uns übertragen</b>: Chatverläufe; lokale Erinnerungen (Textauszüge des aktiven Fensters, gelesen über die macOS-Bedienungshilfen bzw. die systemeigene Texterkennung, vorab lokal gefiltert); API-Schlüssel und Anmeldedaten (Schlüsselbund); Einstellungen. Die Spracherkennung erfolgt über macOS und, sofern vom Gerät unterstützt, ausschließlich lokal. Sie können diese Daten in den Einstellungen exportieren oder löschen.</p>
 <h2>3. Übermittlung an den von Ihnen gewählten KI-Anbieter</h2>
-<p>OrdCat stellt kein eigenes KI-Modell bereit. Wenn Sie eine Frage stellen oder eine Funktion nutzen, werden die dafür nötigen Inhalte (Ihre Frage, ausgewählter Bildschirmtext oder Bildausschnitt, relevante lokale Erinnerungen) <b>direkt von Ihrem Mac an den von Ihnen konfigurierten Anbieter</b> gesendet (z. B. OpenAI, Anthropic, Google, DeepSeek, Groq, SiliconFlow oder lokal Ollama). Diese Daten laufen nicht über unsere Server. Es gelten die Datenschutzbestimmungen des jeweiligen Anbieters. Passwörter, Schlüssel und Kartennummern werden vor dem Senden lokal möglichst maskiert.</p>
+<p>Sofern Sie nicht die Modelle einer Mitgliedschaft nutzen (siehe unten), stellt OrdCat kein eigenes KI-Modell bereit. Wenn Sie eine Frage stellen oder eine Funktion nutzen, werden die dafür nötigen Inhalte (Ihre Frage, ausgewählter Bildschirmtext oder Bildausschnitt, relevante lokale Erinnerungen) <b>direkt von Ihrem Mac an den von Ihnen konfigurierten Anbieter</b> gesendet (z. B. OpenAI, Anthropic, Google, DeepSeek, Groq, SiliconFlow oder lokal Ollama). Diese Daten laufen nicht über unsere Server. Es gelten die Datenschutzbestimmungen des jeweiligen Anbieters. Nutzen Sie mit einer Mitgliedschaft die <b>von OrdCat bereitgestellten Modelle</b>, werden Anfragen über unseren Weiterleitungsdienst bei Supabase an den von uns eingesetzten Modellanbieter übermittelt; wir speichern dabei nur die Anzahl der verbrauchten Nachrichten, nicht Ihre Fragen und Antworten. Passwörter, Schlüssel und Kartennummern werden vor dem Senden lokal möglichst maskiert.</p>
 <h2>4. Konto und „Cat Circle“ (Katzen-Hilfekreis) (optional)</h2>
-<p>Nur wenn Sie ein Konto anlegen, speichern wir bei unserem Auftragsverarbeiter <b>Supabase Inc.</b> (Rechenzentrum Singapur): E-Mail-Adresse und Anmeldedaten; Benutzername, Anzeigename, Profilbild (öffentlich abrufbar); Guthaben und Buchungen der „Trockenfisch“-Punkte; von Ihnen veröffentlichte Aufgaben einschließlich Links und Anhängen (<b>für alle angemeldeten Nutzer sichtbar</b>, Anhänge über öffentliche Links abrufbar); Ihre Antworten und den Namen des verwendeten Modells (sichtbar für den Aufgabensteller); ggf. Abostatus. Anmeldecodes werden über <b>Resend Inc.</b> (USA) versendet. Sie können Ihr Konto jederzeit in den Einstellungen löschen; die genannten Daten werden dabei gelöscht.</p>
+<p>Nur wenn Sie ein Konto anlegen, speichern wir bei unserem Auftragsverarbeiter <b>Supabase Inc.</b> (Rechenzentrum Singapur): E-Mail-Adresse und Anmeldedaten; Benutzername, Anzeigename, Profilbild (öffentlich abrufbar); Ihr Trockenfisch-Guthaben; von Ihnen veröffentlichte Aufgaben einschließlich Links und Anhängen (<b>für alle angemeldeten Nutzer sichtbar</b>, Anhänge über öffentliche Links abrufbar); Ihre Antworten und den Namen des verwendeten Modells (sichtbar für den Aufgabensteller); Abonnements, Käufe und Trockenfisch-Buchungen (bezahlt und Bonus) zur Bereitstellung kostenpflichtiger Funktionen und zur Buchführung (nur für Sie sichtbar). Anmeldecodes sowie Bestätigungen von Kündigungen und Widerrufen werden über <b>Resend Inc.</b> (USA) versendet. Sie können Ihr Konto jederzeit in den Einstellungen löschen; die genannten Daten werden dabei gelöscht, ausgenommen Zahlungsunterlagen, die wir gesetzlich aufbewahren müssen (siehe Ziffer 6).</p>
 <h2>5. Updates</h2>
 <p>Die App ruft regelmäßig <b>GitHub</b> (GitHub Inc., USA) auf, um nach Updates zu suchen, diese herunterzuladen und eine öffentliche Konfigurationsdatei zu lesen. Dabei wird Ihre IP-Adresse verarbeitet; personenbezogene Daten senden wir dabei nicht.</p>
 <h2>6. Zahlungen</h2>
-<p>Derzeit gibt es keine kostenpflichtigen Funktionen. Künftig würden Zahlungen über <b>Lemon Squeezy</b> als Wiederverkäufer abgewickelt; wir erhalten keine Zahlungsdaten. Diese Erklärung wird vorher aktualisiert.</p>
+<ul>
+<li>Beim Kauf einer Mitgliedschaft, eines Skills, einer Aufladung oder von Trockenfisch wird die Zahlung von der <b>Stripe Payments Europe, Ltd.</b> (Dublin, Irland) abgewickelt. Die auf der Zahlungsseite eingegebenen Karten- bzw. Bankdaten, Ihr Name, Ihre E-Mail-Adresse und Ihre Rechnungsanschrift werden unmittelbar von Stripe erhoben und nach der <a href="https://stripe.com/de/privacy">Datenschutzerklärung von Stripe</a> verarbeitet; Stripe kann Daten auch in die USA übermitteln (auf Grundlage der EU-Standardvertragsklauseln).</li>
+<li>Wir erhalten von Stripe und speichern ausschließlich: Ihre Stripe-Kundennummer, die gekauften Leistungen und Beträge, den Abostatus und das Ende des laufenden Zeitraums sowie die Information, ob die Zahlung erfolgreich war. <b>Ihre vollständige Kartennummer erhalten wir nicht.</b></li>
+<li>Diese Daten und Ihre Trockenfisch-Buchungen werden bei Supabase gespeichert.</li>
+<li>Rechtsgrundlagen: Vertragserfüllung (Art. 6 Abs. 1 lit. b DSGVO); die Aufbewahrung von Rechnungen und Buchungsbelegen ist eine rechtliche Verpflichtung (Art. 6 Abs. 1 lit. c DSGVO). Nach den steuerrechtlichen Vorschriften (u. a. § 147 AO, § 257 HGB) bewahren wir sie 10 Jahre auf und löschen sie danach. Bei Löschung Ihres Kontos werden gesetzlich aufzubewahrende Zahlungsunterlagen bis zum Ablauf dieser Frist weiter gespeichert.</li>
+<li>Nutzen Sie auf unserer Website „Verträge hier kündigen“ oder „Vertrag widerrufen“, speichern wir Ihre Angaben (E-Mail-Adresse, Name, Vertrag, Grund, Datum), den Zeitpunkt des Eingangs und einen Hashwert Ihrer IP-Adresse (zum Schutz vor Missbrauch) bei Supabase und senden Ihnen über Resend eine Bestätigung per E-Mail. Rechtsgrundlage: Art. 6 Abs. 1 lit. b und c DSGVO (§§ 312k, 356a BGB). Wir bewahren diese Unterlagen als Nachweis bis zum Ablauf der jeweiligen gesetzlichen Aufbewahrungsfristen auf.</li>
+</ul>
 <h2>7. Website</h2>
 <p>ordcat.de wird über <b>GitHub Pages</b> (GitHub Inc., USA) bereitgestellt; dabei werden technisch notwendige Daten wie die IP-Adresse verarbeitet. Wir verwenden keine Cookies, keine Analyse- und keine Werbe-Tracker.</p>
 <h2>8. Rechtsgrundlagen, Drittlandübermittlung</h2>
-<p>Kontodaten: Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung). Update-Prüfung und Website-Betrieb: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse am sicheren Betrieb). Übermittlungen in Drittländer (USA, Singapur) erfolgen auf Grundlage von Standardvertragsklauseln bzw. des EU-US Data Privacy Framework.</p>
+<p>Kontodaten und Käufe: Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung). Aufbewahrung von Zahlungsunterlagen: Art. 6 Abs. 1 lit. c DSGVO (siehe Ziffer 6). Update-Prüfung und Website-Betrieb: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse am sicheren Betrieb). Übermittlungen in Drittländer (USA, Singapur) erfolgen auf Grundlage von Standardvertragsklauseln bzw. des EU-US Data Privacy Framework.</p>
 <h2>9. Ihre Rechte</h2>
 <p>Sie haben das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit und Widerspruch (Art. 15–21 DSGVO). Kontakt: <a href="mailto:support@ordcat.de">support@ordcat.de</a>. Sie können sich zudem bei einer Aufsichtsbehörde beschweren, z. B. beim Landesbeauftragten für den Datenschutz und die Informationsfreiheit Baden-Württemberg.</p>
 <h2>10. Mindestalter</h2>
 <p>Für ein Konto müssen Sie mindestens 16 Jahre alt sein.</p>
 
-<footer><a href="./"><span class="zh">首页</span><span class="en">Home</span></a><a href="privacy.html"><span class="zh">隐私政策</span><span class="en">Privacy</span> · Datenschutz</a><a href="terms.html"><span class="zh">用户协议</span><span class="en">Terms</span> · Nutzungsbedingungen</a><a href="impressum.html">Impressum</a></footer>
+<footer><a href="./"><span class="zh">首页</span><span class="en">Home</span></a><a href="privacy.html"><span class="zh">隐私政策</span><span class="en">Privacy</span> · Datenschutz</a><a href="terms.html"><span class="zh">用户协议</span><span class="en">Terms</span> · Nutzungsbedingungen</a><a href="widerruf.html"><span class="zh">撤回说明</span><span class="en">Withdrawal</span> · Widerrufsbelehrung</a><a href="impressum.html">Impressum</a><br><a class="kb" href="kuendigen.html">Verträge hier kündigen</a><a class="kb" href="widerruf.html#widerrufen">Vertrag widerrufen</a></footer>
 </div></body></html>

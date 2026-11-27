@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verträge hier kündigen · OrdCat</title><meta name="robots" content="noindex"><link rel="icon" href="logo.svg" type="image/svg+xml"><link rel="icon" href="favicon.png" sizes="64x64"><link rel="stylesheet" href="legal.css"><script>window.OC_I18N={__title:"Verträge hier kündigen · Cancel contracts · OrdCat"}</script><script src="theme.js"></script></head>
+<body><div class="wrap">
+<nav><a class="brand" href="./"><img class="eyes" src="eyes.svg" alt="OrdCat"><span class="wm">OrdCat</span></a><span><a href="privacy.html"><span class="zh">隐私政策</span><span class="en">Privacy</span></a><a href="terms.html"><span class="zh">用户协议</span><span class="en">Terms</span></a><a href="impressum.html">Impressum</a><button class="tg" id="langBtn" onclick="ocToggleLang()">EN</button><button class="tg" id="themeBtn" onclick="ocCycleTheme()">◐</button></span></nav>
+
+<h1>Kündigung</h1>
+<p class="date"><span class="zh">在此取消合同</span><span class="en">Cancel your contract</span></p>
+
+<div id="formWrap">
+<p>Hier können Sie Ihre OrdCat-Mitgliedschaft oder Ihre Skill-Abonnements kündigen – ohne Anmeldung. Nach dem Absenden erhalten Sie sofort eine Eingangsbestätigung auf dieser Seite und per E-Mail.<br>
+<span class="zh">在这里不用登录就能取消 OrdCat 会员或技能订阅。提交后，本页面会马上显示确认，并同时发确认邮件给你。</span><span class="en">Cancel your OrdCat plan or skill subscriptions here, no sign-in needed. After you submit, you get a confirmation right away on this page and by email.</span></p>
+
+<form class="form" id="f" novalidate>
+<fieldset>
+<legend>Art der Kündigung *<span class="sub"><span class="zh">取消类型</span><span class="en">Type of cancellation</span></span></legend>
+<label class="opt"><input type="radio" name="kind" value="ordinary" checked> ordentliche Kündigung <span class="zh">· 正常取消（当前已付周期结束时生效）</span><span class="en">· ordinary cancellation (takes effect at the end of the paid period)</span></label>
+<label class="opt"><input type="radio" name="kind" value="extraordinary"> außerordentliche Kündigung (aus wichtigem Grund) <span class="zh">· 特别解约（有重大理由）</span><span class="en">· extraordinary termination (for good cause)</span></label>
+<div id="reasonBox" class="hidden" style="margin-top:8px">
+<label class="lb" for="reason">Kündigungsgrund *<span class="sub"><span class="zh">理由</span><span class="en">Reason</span></span></label>
+<textarea id="reason" name="reason" maxlength="2000"></textarea>
+</div>
+</fieldset>
+
+<fieldset>
+<label class="lb" for="email">E-Mail-Adresse *<span class="sub">zur Identifizierung: die E-Mail-Adresse Ihres OrdCat-Kontos bzw. die beim Bezahlen angegebene. An diese Adresse senden wir die Bestätigung.<br><span class="zh">用来识别你：OrdCat 账号邮箱或付款时填的邮箱。确认邮件会发到这个邮箱。</span><span class="en">To identify you: the email of your OrdCat account or the one used at checkout. We send the confirmation here.</span></span></label>
+<input type="email" id="email" name="email" autocomplete="email" maxlength="254" required>
+</fieldset>
+
+<fieldset>
+<label class="lb" for="contract">Vertrag *<span class="sub"><span class="zh">要取消的合同</span><span class="en">Contract to cancel</span></span></label>
+<select id="contract" name="contract" required>
+<option value="pro">Pro (Mitgliedschaft)</option>
+<option value="max">Max (Mitgliedschaft)</option>
+<option value="x">X Companion (Skill)</option>
+<option value="agent">Mac Agent (Skill)</option>
+<option value="miao">Live Subtitles (Skill)</option>
+<option value="all" selected>Alle Verträge</option>
+</select>
+</fieldset>
+
+<fieldset>
+<legend>Kündigungszeitpunkt *<span class="sub"><span class="zh">生效时间</span><span class="en">Effective date</span></span></legend>
+<label class="opt"><input type="radio" name="when" value="asap" checked> zum nächstmöglichen Zeitpunkt <span class="zh">· 最早可生效的时间</span><span class="en">· earliest possible date</span></label>
+<label class="opt"><input type="radio" name="when" value="date"> zum folgenden Datum <span class="zh">· 指定日期</span><span class="en">· on this date</span></label>
+<input type="date" id="date" name="date" class="hidden" style="margin-top:6px">
+</fieldset>
+
+<div class="hp" aria-hidden="true"><label>Website <input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
+<p class="err hidden" id="fe"></p>
+<button type="submit" class="btnx" id="go">jetzt kündigen</button>
+<p style="font-size:13px;margin-top:0">Mit Klick auf „jetzt kündigen“ wird Ihre Kündigung verbindlich übermittelt.<br><span class="zh">点「jetzt kündigen」（立即取消）即正式提交。</span><span class="en">Clicking “jetzt kündigen” (cancel now) submits your cancellation.</span></p>
+</form>
+<p style="font-size:13px">Kein Widerruf: Wenn Sie innerhalb von 14 Tagen nach Vertragsschluss widerrufen möchten, nutzen Sie bitte <a href="widerruf.html#widerrufen">Vertrag widerrufen</a>.<br><span class="zh">这是取消，不是撤回。购买后 14 天内想撤回合同，请用「Vertrag widerrufen」（撤回合同）。</span><span class="en">This is cancellation, not withdrawal. To withdraw within 14 days of purchase, use “Vertrag widerrufen” (withdraw contract).</span></p>
+</div>
+
+<div id="ok" class="okbox hidden">
+<h2 style="margin-top:0">Eingangsbestätigung Ihrer Kündigung<span class="sub" style="display:block;font-size:14px;color:var(--mute);font-weight:400"><span class="zh">取消申请已收到</span><span class="en">Your cancellation has been received</span></span></h2>
+<table id="okt"></table>
+<p id="okmail"></p>
+<p class="noprint"><button type="button" class="btnx ghost" onclick="window.print()">Drucken / als PDF speichern<span class="zh"> · 打印或存为 PDF</span><span class="en"> · Print or save as PDF</span></button><button type="button" class="btnx ghost" id="dl">Als Textdatei speichern<span class="zh"> · 保存为文本</span><span class="en"> · Save as text</span></button></p>
+</div>
+
+<div id="fail" class="okbox hidden">
+<h2 style="margin-top:0">Übermittlung fehlgeschlagen<span class="sub" style="display:block;font-size:14px;color:var(--mute);font-weight:400"><span class="zh">提交没有成功</span><span class="en">Submission failed</span></span></h2>
+<p>Ihre Kündigung konnte gerade nicht automatisch übermittelt werden. Bitte senden Sie sie per E-Mail – der Text ist schon ausgefüllt:<br><span class="zh">暂时没能自动提交。请改用邮件发送，内容已经替你填好：</span><span class="en">We couldn't submit your cancellation automatically. Please send it by email; the text is already filled in:</span></p>
+<p><a class="btnx" id="mailto" href="mailto:support@ordcat.de">E-Mail an support@ordcat.de</a> <button type="button" class="btnx ghost" onclick="retry()">Erneut versuchen<span class="zh"> · 再试一次</span><span class="en"> · Try again</span></button></p>
+<pre id="failtext" style="white-space:pre-wrap;color:var(--mute);font-size:13px"></pre>
+</div>
+
+<footer><a href="./"><span class="zh">首页</span><span class="en">Home</span></a><a href="privacy.html"><span class="zh">隐私政策</span><span class="en">Privacy</span> · Datenschutz</a><a href="terms.html"><span class="zh">用户协议</span><span class="en">Terms</span> · Nutzungsbedingungen</a><a href="widerruf.html"><span class="zh">撤回说明</span><span class="en">Withdrawal</span> · Widerrufsbelehrung</a><a href="impressum.html">Impressum</a><br><a class="kb" href="kuendigen.html">Verträge hier kündigen</a><a class="kb" href="widerruf.html#widerrufen">Vertrag widerrufen</a></footer>
+</div>
+<script>
+// Supabase URL from config/remote.json (account.supabaseURL) + /functions/v1/cancel-contract. No key needed (--no-verify-jwt).
+var FN = "https://edmfdczdadfaafwkhohj.supabase.co/functions/v1/cancel-contract";
+var NAMES = {pro:"Pro (Mitgliedschaft)",max:"Max (Mitgliedschaft)",x:"X Companion (Skill)",agent:"Mac Agent (Skill)",miao:"Live Subtitles (Skill)",all:"Alle Verträge"};
+var f = document.getElementById('f'), $ = function(id){return document.getElementById(id)};
+function val(n){var e=f.querySelector('[name='+n+']:checked');return e?e.value:''}
+function sync(){ $('reasonBox').classList.toggle('hidden', val('kind')!=='extraordinary'); $('date').classList.toggle('hidden', val('when')!=='date'); }
+f.addEventListener('change', sync);
+var t=new Date(); $('date').min = t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');
+function data(){ return { action:'cancel', kind:val('kind'), reason:val('kind')==='extraordinary'?$('reason').value.trim():'', email:$('email').value.trim(),
+  contract:$('contract').value, date: val('when')==='date' ? $('date').value : null, lang:(window.ocLang?ocLang():'zh'), website:f.website.value }; }
+function zh(){ return window.ocLang && ocLang()==='zh'; }
+function rows(d, r){
+  var L=[["Art der Kündigung", d.kind==='extraordinary'?'außerordentliche Kündigung':'ordentliche Kündigung']];
+  if(d.reason) L.push(["Kündigungsgrund", d.reason]);
+  L.push(["E-Mail-Adresse", d.email],["Vertrag", NAMES[d.contract]||d.contract],
+         ["Kündigungszeitpunkt", d.date ? new Date(d.date+'T12:00:00').toLocaleDateString('de-DE') : 'zum nächstmöglichen Zeitpunkt']);
+  if(r){ L.push(["Eingang (Datum und Uhrzeit)", r.received_berlin_de+' (Europe/Berlin) · '+r.received_utc_de]); L.push(["Vorgangsnummer", r.id]); }
+  return L;
+}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function fmt(d,tz){return new Intl.DateTimeFormat('de-DE',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZoneName:'short'}).format(d)}
+var last=null;
+f.addEventListener('submit', function(ev){ ev.preventDefault(); send(); });
+function retry(){ $('fail').classList.add('hidden'); $('formWrap').classList.remove('hidden'); send(); }
+function send(){
+  var d=data(), e=[];
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(d.email)) e.push(zh()?'请填写正确的邮箱。':'Bitte eine gültige E-Mail-Adresse angeben. / Please enter a valid email.');
+  if(d.kind==='extraordinary' && !d.reason) e.push(zh()?'特别解约请写明理由。':'Bitte den Kündigungsgrund angeben. / Please state the reason.');
+  if(val('when')==='date' && !d.date) e.push(zh()?'请选择日期。':'Bitte ein Datum wählen. / Please pick a date.');
+  if(e.length){ $('fe').textContent=e.join(' '); $('fe').classList.remove('hidden'); return; }
+  $('fe').classList.add('hidden'); $('go').disabled=true;
+  fetch(FN,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})
+  .then(function(r){ return r.json().then(function(j){ return {s:r.status,j:j}; }); })
+  .then(function(x){
+    $('go').disabled=false;
+    if(x.s===400 && x.j && x.j.error==='invalid'){ $('fe').textContent=(zh()?'请检查：':'Bitte prüfen / please check: ')+(x.j.fields||[]).join(', '); $('fe').classList.remove('hidden'); return; }
+    if(!x.j || !x.j.ok) throw new Error(x.j && x.j.error || 'error');
+    var at=new Date(x.j.received_at); x.j.received_berlin_de=fmt(at,'Europe/Berlin'); x.j.received_utc_de=fmt(at,'UTC');
+    done(d,x.j);
+  }).catch(function(){ $('go').disabled=false; failed(d); });
+}
+function done(d,r){
+  last={d:d,r:r};
+  $('okt').innerHTML=rows(d,r).map(function(x){return '<tr><th>'+esc(x[0])+'</th><td>'+esc(x[1])+'</td></tr>'}).join('');
+  $('okmail').innerHTML = r.email_sent
+    ? 'Eine Bestätigung haben wir an <b>'+esc(d.email)+'</b> gesendet; darin steht auch, zu welchem Datum Ihr Vertrag endet.<br><span class="zh">确认邮件已发到 '+esc(d.email)+'，里面写着合同结束的日期。</span><span class="en">We sent a confirmation to '+esc(d.email)+', including the date your contract ends.</span>'
+    : 'Ihre Kündigung ist eingegangen. Bitte speichern oder drucken Sie diese Bestätigung; das Vertragsende teilen wir Ihnen per E-Mail mit.<br><span class="zh">取消申请已收到。请保存或打印这页确认；合同结束日期我们会通过邮件告诉你。</span><span class="en">Your cancellation has been received. Please save or print this confirmation; we will email you the end date.</span>';
+  $('formWrap').classList.add('hidden'); $('ok').classList.remove('hidden'); window.scrollTo(0,0);
+}
+function failed(d){
+  var now=new Date(), txt='Kündigung\n\n'+rows(d).map(function(x){return x[0]+': '+x[1]}).join('\n')+'\nDatum: '+fmt(now,'Europe/Berlin')+'\n';
+  $('failtext').textContent=txt;
+  $('mailto').href='mailto:support@ordcat.de?subject='+encodeURIComponent('Kündigung · '+(NAMES[d.contract]||''))+'&body='+encodeURIComponent(txt);
+  $('formWrap').classList.add('hidden'); $('fail').classList.remove('hidden'); window.scrollTo(0,0);
+}
+$('dl').onclick=function(){ if(!last)return;
+  var txt='OrdCat – Eingangsbestätigung Ihrer Kündigung\n\n'+rows(last.d,last.r).map(function(x){return x[0]+': '+x[1]}).join('\n')+'\n\nAxun Conor · Hedemannstraße 74 · 78355 Hohenfels · support@ordcat.de\n';
+  var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([txt],{type:'text/plain;charset=utf-8'})); a.download='OrdCat-Kuendigung-'+last.r.id.slice(0,8)+'.txt'; a.click(); };
+</script>
+</body></html>

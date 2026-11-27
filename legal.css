@@ -21,3 +21,24 @@ table{border-collapse:collapse;width:100%;font-size:14px;margin:10px 0}td,th{bor
 footer{color:var(--mute);font-size:13px;margin-top:56px;border-top:1px solid var(--line);padding-top:20px}footer a{color:var(--mute);margin-right:14px}
 
 html:not([data-lang=en]) .en{display:none!important}[data-lang=en] .zh{display:none!important}
+
+/* Kündigungsbutton / Widerrufsfunktion (BGB §312k, §356a) */
+a.kb{display:inline-block;margin:10px 14px 0 0;padding:5px 12px;border:1px solid var(--amber);border-radius:9px;color:var(--amber);font-weight:600;text-decoration:none}
+a.kb:hover{background:var(--amber);color:var(--bg)}
+li a.kb,p a.kb{margin:0;padding:1px 8px}
+ol li,ul li{margin:4px 0}
+.form{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 22px 8px;margin:18px 0}
+.form fieldset{border:0;margin:0 0 18px;padding:0}
+.form legend,.form .lb{display:block;color:var(--fg);font-weight:600;margin:0 0 6px}
+.form .sub{display:block;color:var(--mute);font-weight:400;font-size:13px}
+.form label.opt{display:block;color:var(--mute);margin:4px 0;cursor:pointer}
+.form input[type=email],.form input[type=text],.form input[type=date],.form select,.form textarea{width:100%;max-width:520px;padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:15px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}
+.form textarea{min-height:90px}
+.form .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.btnx{display:inline-block;margin:6px 10px 14px 0;padding:11px 22px;border-radius:11px;border:0;background:var(--amber);color:#18181c;font:700 16px -apple-system,BlinkMacSystemFont,sans-serif;cursor:pointer}
+.btnx.ghost{background:transparent;border:1px solid var(--line);color:var(--fg);font-weight:600;font-size:14px}
+.btnx[disabled]{opacity:.6;cursor:wait}
+.err{color:#e5534b}
+.okbox{border:2px solid var(--amber);border-radius:14px;padding:18px 22px;margin:18px 0}
+.hidden{display:none!important}
+@media print{nav,footer,.noprint,.tg{display:none!important}body{background:#fff;color:#000}p,li,td,th{color:#000}.okbox{border-color:#000}}
