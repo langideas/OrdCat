@@ -3607,7 +3607,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "square.mine": { TaskSquare.shared.showWindow(tab: 1) },
             "raids": { Raids.shared.showWindow(tab: 1) },
             "update": { [weak self] in self?.installFromMenu() },
-            "agentlog": { AgentLogWindow.shared.show() }]
+            "agentlog": { AgentLogWindow.shared.show() },
+            "account": { [weak self] in self?.settings.show(page: .user) }]
         AgentLogWindow.shared.onRerun = { [weak self] goal in
             guard let self = self else { return }
             guard Prefs.agentOn else { self.bubble.notify(L10n.t("「喵手」现在是关着的，先在技能栏打开它。"), hold: 6); return }

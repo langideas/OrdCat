@@ -122,3 +122,60 @@
 select id, received_at, action, kind, email, contract, requested_date, status, matched, reason
   from cancel_requests where status in ('manual','no_match','error') and handled_at is null order by received_at;
 ```
+
+## 付款流程整理 · 结算单 · 确认邮件（v0.2.64，2026-11-27）
+
+参考 ChatGPT Plus / Claude Pro / Cursor：一个「当前方案」卡片、一个方案选择（免费版 / Pro / Max，月付 / 年付）、换方案只走 Stripe Customer Portal（不会出现第二份订阅），付完有结算单页面和确认邮件。
+
+**运行顺序**（SQL Editor，每个都可以重复运行）：`schema.sql` → `square.sql` → `signal.sql` → `account2.sql` → `membership.sql` → `fish.sql` → `raids.sql` → `cancel.sql` → **`receipts.sql`**。
+`receipts.sql`：`subscriptions` 加 4 列（`billing_interval`、`cancel_at_period_end`、`amount_cents`、`currency`，App 的会员卡片显示用）+ 新表 `receipt_emails`（邮件幂等标记，开 RLS、只给 service_role）。没运行它之前 webhook 照样能开会员，只是不发邮件、App 看不到月付 / 年付和「已取消」。
+
+### Lang 要做的（按顺序）
+1. SQL Editor 运行 `receipts.sql`。
+2. 部署 / 重新部署三个函数（Dashboard 编辑器里粘贴 `index.ts` 也行）：
+   ```
+   supabase functions deploy checkout-receipt --no-verify-jwt     # 新：结算单页面用，网页不登录，必须关 JWT
+   supabase functions deploy stripe-checkout
+   supabase functions deploy stripe-webhook --no-verify-jwt
+   ```
+   Secrets 不用新加（`RESEND_API_KEY`、`CANCEL_MAIL_BCC` 和 cancel-contract 共用；可选 `RECEIPT_ORIGINS`，默认 `https://ordcat.de,https://www.ordcat.de`）。
+3. Stripe → Developers → Webhooks → 你的 endpoint → 事件里**加上 `invoice.payment_failed`**（完整列表：`checkout.session.completed`、`checkout.session.async_payment_succeeded`、`customer.subscription.created`、`customer.subscription.updated`、`customer.subscription.deleted`、`invoice.paid`、`invoice.payment_failed`）。
+4. Stripe → Settings → Billing → **Customer portal**：
+   - 打开「Customers can switch plans」，把 Pro 和 Max 两个商品（月付 + 年付 4 个价格）都加进去；
+   - 升级：Prorate（立即按比例计费）；**降级：选「At the end of the billing period」**（等当期结束再降）；
+   - 打开取消订阅（cancel at end of billing period）和更新付款方式。
+   没打开「换方案」时，App 的「升级 / 降级 / 改为年付」会退回普通 Portal 页面（也能用，只是少一步直达）。
+5. Stripe → Settings → Billing → Subscriptions and emails → Manage failed payments：建议开 Smart Retries，全部重试失败后「Cancel the subscription」（→ `customer.subscription.deleted` → 回到免费版）。
+
+### 函数做的事
+- **stripe-checkout**
+  - `success_url = https://ordcat.de/thanks.html?session_id={CHECKOUT_SESSION_ID}`（结算单），`cancel_url = …/thanks.html?session_id={CHECKOUT_SESSION_ID}&cancelled=1`（「订单未完成，没有扣款」）。Stripe 官方只承诺在 success_url 里替换 `{CHECKOUT_SESSION_ID}`；如果 cancel_url 里没替换，页面照样显示「订单未完成」，只是不显示刚才选的商品。
+  - 返回 `{url, id}`，App 用 id 打开同一张结算单。
+  - 年付 Pro / Max：Stripe 付款按钮下面显示「原价 €118.80/年（€9.90 × 12），年付优惠 −€23.80，实付 €95/年」（zh / en / de，`custom_text[submit]`）。不用优惠券（优惠券会跟着订阅走，Portal 里换方案时也会带上）。价格表写在 `PLAN_CENTS`，改价时记得同步。
+  - **不会有第二份订阅**：这个 Stripe 客户已经有 Pro / Max（或同一个技能）时，不建新 Checkout，而是返回 Portal：换方案 / 换月付年付 → `subscription_update_confirm` 直达确认页；同一个方案 → 普通 Portal；扣款失败中 → 先更新付款方式。
+  - `{"portal":true,"flow":"payment"}` 直达「更新付款方式」，`{"portal":true,"flow":"cancel","item":"pro"}` 直达「取消订阅」。
+  - 只买过小鱼干的人也复用同一个 Stripe customer（按 metadata.user_id 搜索）。
+  - `metadata[lang]` / `subscription_data[metadata][lang]` = App 语言（邮件用）。
+- **checkout-receipt**（新，`--no-verify-jwt`）：`GET ?session_id=cs_…` → 只返回结算单字段（商品、周期 / 小鱼干数量、金额、增值税、时间、卡品牌 + 后四位、**打码邮箱** m***@langgo.de、下次续费、Stripe 收据 / 发票 PDF 链接）。未付款的 session（返回 / 过期）只返回 `state: open|expired` 和商品，不含付款信息。CORS 只给 ordcat.de；每 IP 10 分钟 30 次、每个 session 20 次。
+- **stripe-webhook**
+  - 方案按价格 ID 认（Portal 里 Pro ↔ Max 换了以后 metadata 还是旧的）；写 `billing_interval` / `cancel_at_period_end` / `amount_cents` / `currency`；`invoice.payment_failed` → 订阅存成 `past_due`（会员照常，App 显示「更新付款方式」）；订阅删除 → `canceled` → 免费版。
+  - 邮件（Resend，按 metadata.lang：zh / en / de，非德语时附德文版，以德文为准）：
+    1. 购买确认（BGB §312f Vertragsbestätigung）：卖家、商品、含税价格、日期、付款方式、订阅的续费周期和怎么取消、付款时给的同意（数字内容 → 失去撤回权 §356 Abs. 6；服务 → 按天付费 §357a Abs. 2）、用户协议 / 撤回说明 / 结算单 / Stripe 收据链接，并附完整德文 Widerrufsbelehrung + Muster-Widerrufsformular。
+    2. 续费收据（`invoice.paid`，`subscription_cycle`）。
+    3. 扣款失败（每张发票一次，附 Stripe 付款链接）。
+    4. 在 Portal 里取消的确认（kuendigen.html 取消的由 cancel-contract 自己发，不重复）。
+  - 幂等：先在 `receipt_emails` 占位（`cs_…` / `in_…` / `fail:in_…` / `cancel:sub_…:<结束时间>`）再发；Resend 失败只记 `status = failed`，webhook 照样回 200。补发：删掉那一行，在 Stripe → Webhooks 里对那个事件点「Resend」。
+
+### 本地测试（不连网，不用真 key）
+```
+cd app/OrdCat/supabase
+deno test --import-map tests/import_map.json --allow-env --allow-read tests/      # 26 个：checkout / webhook / receipt / cancel-contract
+python3 tests/site_check.py ../../../site /tmp/shots                               # 结算单 / 价格页 / 取消页，zh+en、深浅色
+```
+`tests/fake_stripe.ts` 假的 Stripe + Resend，`tests/fake_supabase.ts` 假的数据库（通过 import_map 换掉 npm:@supabase/supabase-js）。
+网页演示：`https://ordcat.de/thanks.html?demo=1&state=paid|yearly|fish|processing|cancelled|updated|invalid`（标着「示例」，不发请求）。
+
+查邮件状态：
+```
+select id, kind, item, lang, status, error, created_at from receipt_emails order by created_at desc limit 50;
+```

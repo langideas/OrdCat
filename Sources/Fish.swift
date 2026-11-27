@@ -177,7 +177,9 @@ enum Fish {
             let o = obj as? [String: Any]
             if let u = (o?["url"] as? String).flatMap(URL.init(string:)) {
                 NSWorkspace.shared.open(u)
-                status(L10n.t("在浏览器里付完款回来，点「刷新」就能看到小鱼干。"))
+                status(L10n.t("在浏览器里付完款回来就好，小鱼干会自动到账。"))
+                // Watch for the fish to land (≤ 3 min), then say so; a gentle note if the order wasn't finished.
+                PayWatch.start(.fish, link: CheckoutLink(url: u, id: o?["id"] as? String, portal: false, reason: nil, opened: Date()))
             } else {
                 status("⚠️ " + L10n.t((o?["error"] as? String) ?? err ?? "付款服务还没开通"))
             }

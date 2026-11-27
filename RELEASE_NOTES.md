@@ -1,3 +1,25 @@
+# OrdCat v0.2.64
+
+- 设置 → 用户 → 会员 重新整理：上面一张「当前方案」卡片（方案、月付 / 年付、有效 / 已取消 / 扣款失败、下次续费或结束日期、本月托管消息还剩多少、加油包余额），下面免费版 / Pro / Max 三张卡片并排，切换月付 / 年付
+- 年付直接显示原价和优惠：Pro €95/年（原价 €118.80，省 €23.80），Max €566/年（原价 €708，省 €142），折合每月价格；Stripe 付款页也会写明
+- 每张卡片只有一个按钮：开通 / 升级 / 降级 / 改为年付 / 当前方案 / 恢复订阅。已经是会员时换方案走 Stripe 的确认页面，升级马上生效、差价按剩余天数折算，降级在当期结束时生效，不会多出第二份订阅
+- 扣款失败时顶部提示「更新付款方式」；取消后提示结束日期和「恢复订阅」
+- 技能、小鱼干和加油包各自一栏，不再和会员按钮挤在一起；技能单独订阅，会员价 €2.4/月
+- 付完款浏览器里会看到结算单：商品、金额、增值税、付款方式、下次续费、Stripe 收据或发票 PDF，可以打印或存 PDF；回到 OrdCat 几秒后弹出「付款成功」（例如「+1050 条小鱼干」「Pro 已开通」），可以再打开结算单
+- 付款页点了返回会看到「订单未完成，没有扣款」；如果 3 分钟内没有付完，OrdCat 会轻轻问一次要不要继续付款
+- 每次购买、续费、扣款失败、取消都会收到 OrdCat 的确认邮件（中文 / 英文附德文版）
+
+**English**
+
+- Settings → User → Membership is reorganised: a "current plan" card on top (plan, monthly / yearly, active / cancelled / payment failed, next renewal or end date, hosted messages left this month, top-up balance), then Free / Pro / Max side by side with a monthly / yearly switch
+- Yearly shows the regular price and the saving: Pro €95/year (regular €118.80, save €23.80), Max €566/year (regular €708, save €142), plus the monthly equivalent; Stripe's checkout says so too
+- One button per plan: Get / Upgrade / Downgrade / Switch to yearly / Current plan / Resume. If you already have a plan, changes go through Stripe's confirmation page: upgrades apply right away with proration, downgrades at the end of the period, and you never end up with two subscriptions
+- A banner asks you to update your payment method if a renewal fails, and shows the end date with Resume subscription after you cancel
+- Skills, Dried Fish and top-ups have their own sections; skills are separate subscriptions, €2.4/mo for members
+- After paying, your browser shows a receipt (item, amount, VAT, payment method, next renewal, Stripe receipt or invoice PDF) you can print or save; back in OrdCat a "Payment successful" note pops up within seconds (e.g. "+1,050 Dried Fish", "Pro is on") with a link to the receipt
+- Going back from the payment page shows "Order not completed, you were not charged", and if a checkout isn't finished within 3 minutes OrdCat asks once whether you'd like to continue
+- Purchases, renewals, failed payments and cancellations each get a confirmation email from OrdCat (Chinese / English with the German text attached)
+
 # OrdCat v0.2.63
 
 - 猫帮圈改名「喵副本」：原来的单人悬赏还在，叫「单人副本」；新加两种组队副本

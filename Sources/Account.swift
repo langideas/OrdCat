@@ -28,6 +28,8 @@ final class Account {
     private(set) var profile = AccountProfile()
     private var session: AccountSession?
     private var observers: [() -> Void] = []
+    /// The account's subscription rows as the server has them (plan, skills; Stripe or Dried Fish), for 设置 → 用户 → 会员.
+    private(set) var subRows: [[String: Any]] = []
 
     let dir: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("OrdCat")
@@ -274,16 +276,25 @@ final class Account {
         request("POST", "/rest/v1/rpc/credits_status", json: [:]) { obj, err in done(obj as? [String: Any], err) }
     }
 
-    /// Stripe checkout page for Pro (pro) / Max (max) / 加油包 (topup) / a skill, or the
-    /// subscription management page (portal).
-    func stripeLink(item: String?, yearly: Bool = false, portal: Bool = false, done: @escaping (URL?, String?) -> Void) {
+    /// Stripe Checkout for Pro / Max / a skill, or the Customer Portal (portal = true; flow "payment" | "cancel").
+    /// When the account already has that plan or skill the server answers with a Portal link instead (link.portal = true):
+    /// switching plans / billing period happens there, so there is never a second subscription.
+    func stripeLink(item: String?, yearly: Bool = false, portal: Bool = false, flow: String? = nil,
+                    done: @escaping (CheckoutLink?, String?) -> Void) {
         guard signedIn else { done(nil, "先登录账号（设置 → 用户）"); return }
         var body: [String: Any] = portal ? ["portal": true] : ["item": item ?? "pro", "interval": yearly ? "year" : "month"]
-        if portal { body["item"] = "" }
+        if portal {
+            body["item"] = item ?? ""
+            if let f = flow { body["flow"] = f }
+        }
         body["locale"] = L10n.english ? "en" : "zh"
         request("POST", "/functions/v1/stripe-checkout", json: body) { obj, err in
             let o = obj as? [String: Any]
-            if let u = (o?["url"] as? String).flatMap(URL.init(string:)) { done(u, nil); return }
+            if let u = (o?["url"] as? String).flatMap(URL.init(string:)) {
+                done(CheckoutLink(url: u, id: o?["id"] as? String, portal: (o?["portal"] as? Bool) ?? portal,
+                                  reason: o?["reason"] as? String, opened: Date()), nil)
+                return
+            }
             done(nil, (o?["error"] as? String) ?? err ?? "付款服务还没开通")
         }
     }
@@ -310,10 +321,22 @@ final class Account {
         }
     }
 
+    /// Subscription rows only (no profile / avatar): used by the membership page and the post-checkout check.
+    func refreshSubscriptions(_ done: (() -> Void)? = nil) {
+        guard signedIn else { done?(); return }
+        pullSubscriptions(done)
+    }
+
     private func pullSubscriptions(_ done: (() -> Void)?) {
         guard let uid = profile.userID else { done?(); return }
-        request("GET", "/rest/v1/subscriptions?user_id=eq.\(uid)&select=skill,status,renews_at,ends_at,portal_url") { [weak self] obj, _ in
+        // select=* so newer columns (billing_interval, cancel_at_period_end, auto_renew…) come along when the server has them.
+        request("GET", "/rest/v1/subscriptions?user_id=eq.\(uid)&select=*") { [weak self] obj, _ in
             guard let self = self else { return }
+            var same = false
+            if let rows = obj as? [[String: Any]] {
+                same = (self.subRows as NSArray).isEqual(to: rows)
+                self.subRows = rows
+            }
             let iso = ISO8601DateFormatter()
             iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             let iso2 = ISO8601DateFormatter()
@@ -327,12 +350,14 @@ final class Account {
                 let dateStr = (row["ends_at"] as? String) ?? (row["renews_at"] as? String) ?? ""
                 var until = iso.date(from: dateStr) ?? iso2.date(from: dateStr) ?? Date().addingTimeInterval(32 * 86400)
                 if ["expired", "unpaid"].contains(status) { until = .distantPast }
+                if ["canceled", "incomplete_expired"].contains(status) && dateStr.isEmpty { until = .distantPast }
                 // Stripe and 小鱼干 can both open the same plan: keep the later end.
                 if let prev = self.d.object(forKey: "account.sub.\(skill)") as? Date, prev > until { until = prev }
                 self.d.set(until, forKey: "account.sub.\(skill)")
                 if let p = row["portal_url"] as? String, !p.isEmpty { self.d.set(p, forKey: "account.portal") }
             }
-            self.changed()
+            // Polled every few seconds after a checkout: only tell the UI when something actually changed.
+            if !same { self.changed() }
             done?()
         }
     }
@@ -375,6 +400,7 @@ final class Account {
         Keychain.set("", service: "app.ordcat.session")
         profile.userID = nil; profile.email = nil; profile.phone = nil; profile.avatarURL = nil
         for k in d.dictionaryRepresentation().keys where k.hasPrefix("account.sub.") || k == "account.portal" { d.removeObject(forKey: k) }
+        subRows = []
         changed()
     }
 
