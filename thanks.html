@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>付款结果 · OrdCat</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="logo.svg" type="image/svg+xml"><link rel="icon" href="favicon.png" sizes="64x64">
+<link rel="stylesheet" href="legal.css">
+<script>window.OC_I18N={__title:"Payment · OrdCat"}</script>
+<script src="theme.js"></script>
+<style>
+.wrap{max-width:620px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:28px 28px 22px;margin:26px 0 18px}
+.top{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+.badge{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none;background:rgba(245,181,61,.16);color:var(--amber);font:700 22px/1 -apple-system,sans-serif}
+.badge.no{background:rgba(160,166,185,.16);color:var(--mute)}
+.badge.wait{background:rgba(245,181,61,.10)}
+.card h1{font-size:24px;margin:0;line-height:1.3;color:var(--fg)}
+.card h1 .sub{display:block;font-size:13.5px;font-weight:400;color:var(--mute)}
+.amount{font-size:36px;font-weight:700;letter-spacing:-.5px;margin:18px 0 2px;color:var(--fg)}
+.amount small{font-size:14px;font-weight:500;color:var(--mute);margin-left:6px}
+.rows{margin:16px 0 4px;border-top:1px solid var(--line)}
+.r{display:flex;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid var(--line);font-size:14.5px}
+.r .k{color:var(--mute);flex:none}
+.r .v{color:var(--fg);text-align:right;word-break:break-word}
+.r .v small{display:block;color:var(--mute);font-size:12.5px}
+.save{margin:14px 0 0;padding:12px 14px;border-radius:12px;background:rgba(245,181,61,.08);border:1px dashed var(--amber);font-size:13.5px;color:var(--fg)}
+.save s{color:var(--mute)}
+.acts{display:flex;flex-wrap:wrap;gap:10px;margin:20px 0 4px}
+.acts .btnx{margin:0;line-height:1.25;display:inline-flex;align-items:center}
+.acts a.btnx{text-decoration:none}
+.note{font-size:13.5px;color:var(--mute);margin:14px 0 0}
+.backhint{display:none;margin:12px 0 0;padding:12px 14px;border-radius:12px;background:var(--bg);border:1px solid var(--line);font-size:14px;color:var(--fg)}
+.demo{display:inline-block;margin-left:10px;padding:2px 10px;border-radius:999px;background:#e5534b;color:#fff;font:700 12px/20px -apple-system,sans-serif;vertical-align:middle}
+.skel{height:14px;border-radius:7px;background:var(--line);margin:12px 0;animation:p 1.2s ease-in-out infinite}
+@keyframes p{50%{opacity:.45}}
+.legal{font-size:12.5px;color:var(--mute)}
+@media print{.card{border:1px solid #000}.badge{border:1px solid #000}.save{border-color:#000}.r .v,.amount,.card h1{color:#000}}
+</style>
+</head>
+<body><div class="wrap">
+<nav><a class="brand" href="./"><img class="eyes" src="eyes.svg" alt="OrdCat"><span class="wm">OrdCat</span></a><span><a href="pricing.html"><span class="zh">价格</span><span class="en">Pricing</span></a><a href="terms.html"><span class="zh">用户协议</span><span class="en">Terms</span></a><button class="tg" id="langBtn" onclick="ocToggleLang()">EN</button><button class="tg" id="themeBtn" onclick="ocCycleTheme()">◐</button></span></nav>
+
+<div class="card" id="card"><div class="skel" style="width:40%"></div><div class="skel" style="width:70%"></div><div class="skel" style="width:55%"></div></div>
+<p class="legal noprint" id="legal"></p>
+
+<footer><a href="./"><span class="zh">首页</span><span class="en">Home</span></a><a href="pricing.html"><span class="zh">价格</span><span class="en">Pricing</span></a><a href="terms.html"><span class="zh">用户协议</span><span class="en">Terms</span></a><a href="widerruf.html"><span class="zh">撤回说明</span><span class="en">Withdrawal</span> · Widerrufsbelehrung</a><a href="impressum.html">Impressum</a><br><a class="kb" href="kuendigen.html">Verträge hier kündigen</a><a class="kb" href="widerruf.html#widerrufen">Vertrag widerrufen</a></footer>
+</div>
+<script>
+// Receipt for a Stripe Checkout Session. success_url = thanks.html?session_id=cs_…, cancel_url = …&cancelled=1.
+// Data from the Edge Function checkout-receipt (Supabase URL + publishable key from config/remote.json; the function needs no login).
+// ?demo=1[&state=paid|yearly|fish|processing|cancelled|invalid|updated] shows sample data, clearly marked, without any request.
+var FN = "https://edmfdczdadfaafwkhohj.supabase.co/functions/v1/checkout-receipt";
+var KEY = "sb_publishable_V6LYQ4cVZ6_fxaFE31Psxg_y6lb3uub";
+var Q = new URLSearchParams(location.search);
+var SID = (Q.get('session_id') || '').trim();
+var DEMO = Q.get('demo') === '1';
+var CANCELLED = Q.get('cancelled') === '1' || Q.get('paid') === '0';
+var view = null;   // {state, receipt}
+
+var T = {
+  zh: {
+    ok:'付款成功', okSub:'谢谢你！', proc:'付款处理中', procSub:'银行还在确认这笔付款（比如 SEPA 转账），到账后会自动开通，我们也会发邮件告诉你。',
+    no:'订单未完成，没有扣款', noSub:'你在付款页面点了返回，或者付款页面已过期。这次没有扣任何钱。',
+    bad:'没有找到这笔付款', badSub:'链接可能不完整或已失效。如果你确实付过款，请回到 OrdCat 查看会员或小鱼干，或者写信给 support@ordcat.de。',
+    upd:'方案已更新', updSub:'Stripe 已经保存了你的更改。回到 OrdCat 几秒后就能看到新方案。',
+    portal:'订阅设置已保存', portalSub:'回到 OrdCat，几秒后就能看到最新状态。',
+    item:'商品', period:'计费周期', fish:'小鱼干', paid:'实付金额', vat:'增值税', vatIncl:'已含增值税（inkl. MwSt.）', date:'付款时间',
+    pm:'付款方式', email:'邮箱', renew:'下次续费', ends:'结束日期', order:'订单号', inv:'发票号',
+    month:'按月订阅 · 每月自动续费', year:'按年订阅 · 每年自动续费', once:'一次性付款', fishN:function(n){return n+' 条小鱼干（永久有效）'},
+    yearly:function(y){return '原价 <s>'+y.r+'/年</s>（'+y.m+' × 12 个月），年付优惠 −'+y.d+'（约 8 折），实付 '+y.p+'/年。'},
+    back:'回到 OrdCat', backHint:'切回 OrdCat 就好（⌘ + Tab，或点 Dock 里的小猫）。会员 / 小鱼干会在几秒内自动到账；没变的话在 设置 → 用户 点「刷新」。',
+    print:'打印 / 保存 PDF', rcpt:'Stripe 收据', invPdf:'发票 PDF', invPage:'查看发票',
+    again:'想继续付款？回到 OrdCat，在 设置 → 用户 → 会员 里重新点一次就行。付款页面只能从 App 里打开，这样付款才会绑定到你的账号。',
+    youPicked:'你刚才选的是', mailNote:'确认邮件（含合同内容和撤回说明）会发到你付款时填的邮箱。',
+    legal:'卖家：Axun Conor（OrdCat）· Hedemannstraße 74 · 78355 Hohenfels · 德国。取消订阅：设置 → 用户 → 管理订阅，或 <a href="kuendigen.html">Verträge hier kündigen</a>；撤回：<a href="widerruf.html">撤回说明</a>。',
+    demo:'示例', err:'暂时读不到付款详情，请稍后刷新这一页。付款本身不受影响。', retry:'刷新'
+  },
+  en: {
+    ok:'Payment successful', okSub:'Thank you!', proc:'Payment processing', procSub:'Your bank is still confirming this payment (for example a SEPA transfer). It switches on automatically once it arrives, and we\'ll email you.',
+    no:'Order not completed', noSub:'You were not charged. You went back from the payment page, or the page expired.',
+    bad:'We couldn\'t find this payment', badSub:'The link may be incomplete or expired. If you did pay, check your plan or Dried Fish in OrdCat, or email support@ordcat.de.',
+    upd:'Plan updated', updSub:'Stripe saved your change. Back in OrdCat, your new plan shows up within seconds.',
+    portal:'Subscription settings saved', portalSub:'Back in OrdCat, the latest status shows up within seconds.',
+    item:'Item', period:'Billing', fish:'Dried Fish', paid:'Amount paid', vat:'VAT', vatIncl:'VAT included (inkl. MwSt.)', date:'Paid on',
+    pm:'Payment method', email:'Email', renew:'Renews on', ends:'Ends on', order:'Order', inv:'Invoice',
+    month:'Monthly · renews every month', year:'Yearly · renews every year', once:'One-time payment', fishN:function(n){return n+' Dried Fish (never expire)'},
+    yearly:function(y){return 'Regular price <s>'+y.r+'/year</s> ('+y.m+' × 12 months), yearly discount −'+y.d+' (about 20% off), you pay '+y.p+'/year.'},
+    back:'Back to OrdCat', backHint:'Just switch back to OrdCat (⌘ + Tab, or click the cat in the Dock). Your plan or Dried Fish arrives within seconds; if not, click Refresh in Settings → User.',
+    print:'Print / save as PDF', rcpt:'Stripe receipt', invPdf:'Invoice PDF', invPage:'View invoice',
+    again:'Want to finish paying? Go back to OrdCat and click the button again in Settings → User → Membership. The payment page opens from the app so the payment is tied to your account.',
+    youPicked:'You picked', mailNote:'A confirmation email (with the contract details and withdrawal information) goes to the email you used at checkout.',
+    legal:'Seller: Axun Conor (OrdCat) · Hedemannstraße 74 · 78355 Hohenfels · Germany. Cancel: Settings → User → Manage subscription, or <a href="kuendigen.html">Verträge hier kündigen</a>. Withdrawal: <a href="widerruf.html">withdrawal information</a>.',
+    demo:'Sample', err:'We can\'t load the payment details right now. Please refresh this page in a moment. Your payment isn\'t affected.', retry:'Refresh'
+  }
+};
+var ZHN = {pro:'Pro 会员', max:'Max 会员', topup:'加油包', x:'喵推 X Companion', agent:'喵手 Mac Agent', miao:'喵传 Live Subtitles', fish:'小鱼干'};
+var PLAN = {pro:{m:990,y:9500}, max:{m:5900,y:56600}};
+
+function L(){ return (window.ocLang && ocLang()==='en') ? 'en' : 'zh'; }
+function t(){ return T[L()]; }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]}); }
+function money(c, cur){ try { return new Intl.NumberFormat(L()==='zh'?'zh-CN':'en-GB',{style:'currency',currency:(cur||'eur').toUpperCase()}).format(c/100); } catch(e){ return '€'+(c/100).toFixed(2); } }
+function dt(s, withTime){ if(!s) return ''; var d=new Date(s*1000);
+  return withTime ? d.toLocaleString(L()==='zh'?'zh-CN':'en-GB',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})
+                  : d.toLocaleDateString(L()==='zh'?'zh-CN':'en-GB',{year:'numeric',month:'long',day:'numeric'}); }
+function itemName(r){ var n=(r.items&&r.items[0]&&r.items[0].name)||'OrdCat'; return L()==='zh'&&ZHN[r.item] ? n+' <small>'+esc(ZHN[r.item])+'</small>' : esc(n); }
+function periodText(r){ var x=t(); if(r.fish) return x.fishN(r.fish); var iv=r.items&&r.items[0]&&r.items[0].interval; return iv==='year'?x.year:iv==='month'?x.month:x.once; }
+function yearlyFor(r){
+  if(r.yearly) return r.yearly;
+  var iv=r.items&&r.items[0]&&r.items[0].interval, p=PLAN[r.item];
+  if(!p||iv!=='year') return null; return {monthly:p.m, regular:p.m*12, discount:p.m*12-p.y, paid:p.y};
+}
+function row(k,v){ return '<div class="r"><span class="k">'+k+'</span><span class="v">'+v+'</span></div>'; }
+function head(icon, cls, title, sub){
+  return '<div class="top"><div class="badge '+cls+'">'+icon+'</div><h1>'+esc(title)+(DEMO?'<span class="demo">'+esc(t().demo)+'</span>':'')+'<span class="sub">'+esc(sub)+'</span></h1></div>';
+}
+function backBtn(){ return '<button type="button" class="btnx" onclick="goBack()">'+esc(t().back)+'</button>'; }
+function goBack(){ var h=document.getElementById('backhint'); if(h) h.style.display='block'; try{ window.close(); }catch(e){} }
+
+function render(){
+  var x=t(), c=document.getElementById('card'), v=view, h='';
+  document.getElementById('legal').innerHTML = x.legal;
+  if(!v){ return; }
+  var r=v.receipt||{};
+  if(v.state==='complete' || v.state==='processing'){
+    var proc = v.state==='processing' || r.processing;
+    h += proc ? head('…','wait',x.proc,x.procSub) : head('✓','',x.ok,x.okSub);
+    h += '<div class="amount">'+esc(money(r.amount_total,r.currency))+(r.items&&r.items[0]&&r.items[0].interval?'<small>/'+(r.items[0].interval==='year'?(L()==='zh'?'年':'year'):(L()==='zh'?'月':'month'))+'</small>':'')+'</div>';
+    h += '<div class="rows">';
+    h += row(x.item, itemName(r));
+    h += row(r.fish?x.fish:x.period, esc(periodText(r)));
+    h += row(x.paid, esc(money(r.amount_total,r.currency)) + '<small>'+esc(r.amount_tax!=null ? (L()==='zh'?'含增值税 ':'incl. VAT ')+money(r.amount_tax,r.currency) : x.vatIncl)+'</small>');
+    if(r.created) h += row(x.date, esc(dt(r.created,true)));
+    if(r.payment_method) h += row(x.pm, esc(pm(r.payment_method)));
+    if(r.email) h += row(x.email, esc(r.email));
+    if(r.renews_at) h += row(x.renew, esc(dt(r.renews_at)));
+    else if(r.ends_at) h += row(x.ends, esc(dt(r.ends_at)));
+    if(r.invoice_number) h += row(x.inv, esc(r.invoice_number));
+    h += row(x.order, '<small style="display:inline">'+esc(r.id||SID)+'</small>');
+    h += '</div>';
+    var y=yearlyFor(r);
+    if(y) h += '<div class="save">'+x.yearly({r:esc(money(y.regular,r.currency)),m:esc(money(y.monthly,r.currency)),d:esc(money(y.discount,r.currency)),p:esc(money(y.paid,r.currency))})+'</div>';
+    h += '<div class="acts noprint">'+backBtn()+'<button type="button" class="btnx ghost" onclick="window.print()">'+esc(x.print)+'</button>';
+    if(r.receipt_url) h += '<a class="btnx ghost" href="'+esc(r.receipt_url)+'" target="_blank" rel="noopener">'+esc(x.rcpt)+'</a>';
+    if(r.invoice_pdf) h += '<a class="btnx ghost" href="'+esc(r.invoice_pdf)+'" target="_blank" rel="noopener">'+esc(x.invPdf)+'</a>';
+    else if(r.invoice_url) h += '<a class="btnx ghost" href="'+esc(r.invoice_url)+'" target="_blank" rel="noopener">'+esc(x.invPage)+'</a>';
+    h += '</div><div class="backhint" id="backhint">'+esc(x.backHint)+'</div>';
+    h += '<p class="note">'+esc(x.mailNote)+'</p>';
+  } else if(v.state==='open' || v.state==='expired' || v.state==='cancelled'){
+    h += head('✕','no',x.no,x.noSub);
+    if(r.items && r.items.length){
+      var y2=yearlyFor(r);
+      h += '<div class="rows">'+row(x.youPicked, itemName(r))+row(r.fish?x.fish:x.period, esc(periodText(r)))
+         + (r.amount_total ? row(x.paid.replace(/实付金额|Amount paid/, L()==='zh'?'金额':'Price'), esc(money(r.amount_total,r.currency))) : '')+'</div>';
+      if(y2) h += '<div class="save">'+x.yearly({r:esc(money(y2.regular,r.currency)),m:esc(money(y2.monthly,r.currency)),d:esc(money(y2.discount,r.currency)),p:esc(money(y2.paid,r.currency))})+'</div>';
+    }
+    h += '<p class="note">'+esc(x.again)+'</p>';
+    h += '<div class="acts noprint">'+backBtn()+'<a class="btnx ghost" href="pricing.html">'+(L()==='zh'?'看看价格':'See pricing')+'</a></div><div class="backhint" id="backhint">'+esc(x.backHint)+'</div>';
+  } else if(v.state==='updated' || v.state==='portal'){
+    h += head('✓','',v.state==='updated'?x.upd:x.portal, v.state==='updated'?x.updSub:x.portalSub);
+    h += '<div class="acts noprint">'+backBtn()+'</div><div class="backhint" id="backhint">'+esc(x.backHint)+'</div>';
+  } else if(v.state==='error'){
+    h += head('!','no',x.bad,x.err);
+    h += '<div class="acts noprint"><button type="button" class="btnx" onclick="load()">'+esc(x.retry)+'</button>'+backBtn()+'</div><div class="backhint" id="backhint">'+esc(x.backHint)+'</div>';
+  } else {
+    h += head('?','no',x.bad,x.badSub);
+    h += '<div class="acts noprint">'+backBtn()+'<a class="btnx ghost" href="mailto:support@ordcat.de">support@ordcat.de</a></div><div class="backhint" id="backhint">'+esc(x.backHint)+'</div>';
+  }
+  c.innerHTML = h;
+}
+function pm(p){
+  var b=(p.brand||p.type||'').replace(/_/g,' '); b=b.charAt(0).toUpperCase()+b.slice(1);
+  if(p.type==='paypal') b='PayPal'; if(b==='Amex') b='American Express';
+  return (p.wallet ? (p.wallet==='apple_pay'?'Apple Pay':p.wallet==='google_pay'?'Google Pay':p.wallet)+' · ' : '') + b + (p.last4 ? ' •••• '+p.last4 : '');
+}
+
+// Sample data for ?demo=1 (never fetched, always marked 示例 / Sample).
+function demo(){
+  var now=Math.floor(Date.now()/1000), s=Q.get('state')||'yearly';
+  var base={id:'cs_test_DEMO_示例', currency:'eur', created:now, email:'m***@langgo.de', payment_method:{type:'card',brand:'visa',last4:'4242'},
+    receipt_url:'#', invoice_pdf:'#', invoice_number:'ORD-DEMO-0001', amount_tax:null};
+  if(s==='paid') return {state:'complete',receipt:Object.assign({},base,{item:'pro',amount_total:990,amount_tax:158,items:[{name:'OrdCat Pro',interval:'month'}],renews_at:now+30*86400})};
+  if(s==='yearly') return {state:'complete',receipt:Object.assign({},base,{item:'max',amount_total:56600,amount_tax:9037,items:[{name:'OrdCat Max',interval:'year'}],renews_at:now+365*86400,yearly:{monthly:5900,regular:70800,discount:14200,paid:56600}})};
+  if(s==='fish') return {state:'complete',receipt:Object.assign({},base,{item:'fish',fish:1050,amount_total:1000,items:[{name:'OrdCat Dried Fish',interval:null}],invoice_pdf:null,invoice_number:null})};
+  if(s==='processing') return {state:'processing',receipt:Object.assign({},base,{item:'fish',fish:500,amount_total:500,items:[{name:'OrdCat Dried Fish',interval:null}],payment_method:{type:'sepa_debit',brand:'SEPA',last4:'3000'},processing:true,invoice_pdf:null})};
+  if(s==='cancelled') return {state:'open',receipt:{item:'max',currency:'eur',amount_total:56600,items:[{name:'OrdCat Max',interval:'year'}]}};
+  if(s==='updated') return {state:'updated'};
+  return {state:'invalid'};
+}
+
+function load(){
+  if(DEMO){ view=demo(); render(); return; }
+  if(Q.get('updated')==='1'){ view={state:'updated'}; render(); return; }
+  if(Q.get('portal')==='1'){ view={state:'portal'}; render(); return; }
+  var valid=/^cs_(test_|live_)?[A-Za-z0-9]{10,200}$/.test(SID);
+  if(!valid){ view={state: CANCELLED ? 'cancelled' : 'invalid'}; render(); return; }
+  fetch(FN+'?session_id='+encodeURIComponent(SID),{headers:{apikey:KEY}})
+    .then(function(r){ return r.json().then(function(j){ return {s:r.status,j:j}; }); })
+    .then(function(x){
+      if(x.s===200 && x.j && x.j.ok){
+        var st=x.j.state; if(st==='complete' && x.j.receipt && x.j.receipt.processing) st='processing';
+        view={state:st, receipt:x.j.receipt}; render();
+        if(st==='processing') setTimeout(load, 15000);      // SEPA: check again until it arrives
+      } else if(x.s===404 || x.s===400){ view={state: CANCELLED ? 'cancelled' : 'invalid'}; render(); }
+      else { view={state: CANCELLED ? 'cancelled' : 'error'}; render(); }
+    }).catch(function(){ view={state: CANCELLED ? 'cancelled' : 'error'}; render(); });
+}
+document.addEventListener('oc-lang', render);
+document.addEventListener('DOMContentLoaded', load);
+</script>
+</body></html>

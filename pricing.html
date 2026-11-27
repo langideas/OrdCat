@@ -59,7 +59,7 @@ h1{font-size:44px;line-height:1.2;margin:0 0 12px;letter-spacing:-.4px}
 section{padding:30px 0}
 h2{font-size:28px;margin:0 0 8px}
 .sub{color:var(--mute);margin:0 0 24px}
-.extras{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+.extras{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
 .box{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px 24px}
 .box b{display:block;font-size:17px;margin-bottom:4px}
 .box p{margin:0;color:var(--mute);font-size:14.5px}
@@ -96,8 +96,7 @@ html:not([data-lang=en]) .en{display:none!important}[data-lang=en] .zh{display:n
     <button class="tg" id="langBtn" onclick="ocToggleLang()">EN</button><button class="tg" id="themeBtn" onclick="ocCycleTheme()">◐</button></div>
 </nav>
 
-<div class="banner" id="paidOk"><span class="zh">🎉 付款成功，谢谢你！回到 OrdCat，在 设置 → 用户 里稍等几秒，会员就会生效。</span><span class="en">🎉 Payment complete, thank you! Back in OrdCat, open Settings → User and your membership switches on within a few seconds.</span></div>
-<div class="banner" id="paidNo"><span class="zh">这次没有付款，也没有扣钱。想好了随时回来开通。</span><span class="en">No payment was made and nothing was charged. Come back whenever you're ready.</span></div>
+<div class="banner" id="paidOk"><span class="zh">🎉 付款成功，谢谢你！回到 OrdCat，几秒后会员就会生效；确认邮件和结算单链接会发到你的邮箱。</span><span class="en">🎉 Payment complete, thank you! Back in OrdCat your plan switches on within seconds; the confirmation email includes your receipt.</span></div>
 
 <header>
   <h1><span class="zh">选一只适合你的小猫</span><span class="en">Pick the plan that fits</span></h1>
@@ -120,7 +119,7 @@ html:not([data-lang=en]) .en{display:none!important}[data-lang=en] .zh{display:n
       <li><span class="zh"><b>用自己的模型</b>不限条数（OpenAI、Claude、Gemini、通义、Ollama 等）</span><span class="en"><b>Your own model</b> with no message limit (OpenAI, Claude, Gemini, Qwen, Ollama…)</span></li>
       <li><span class="zh">新用户送 100 条托管模型试用</span><span class="en">100 hosted-model messages to try</span></li>
       <li><span class="zh">屏幕理解和重点圈出</span><span class="en">Screen understanding and highlights</span></li>
-      <li><span class="zh">记忆和猫帮圈</span><span class="en">Memory and Cat Circle</span></li>
+      <li><span class="zh">记忆和喵副本</span><span class="en">Memory and Cat Raids</span></li>
       <li><span class="zh">信号站每天看 3 条</span><span class="en">3 Signal Station posts a day</span></li>
       <li><span class="zh">看图需要用自己的 Key</span><span class="en">Image viewing with your own key</span></li>
     </ul>
@@ -132,7 +131,7 @@ html:not([data-lang=en]) .en{display:none!important}[data-lang=en] .zh{display:n
     <div class="name">Pro<span class="tag pro">PRO</span></div>
     <div class="sub"><span class="zh">最适合每天都在用 OrdCat 的你</span><span class="en">Best if you use OrdCat every day</span></div>
     <div class="price"><span class="pm">€9.9</span><span class="py">€95</span><small class="pm"><span class="zh">/每月</span><span class="en">/month</span></small><small class="py"><span class="zh">/每年</span><span class="en">/year</span></small></div>
-    <div class="per"><span class="py"><span class="zh">折合 €7.9/月，省 €23.8</span><span class="en">€7.9/mo, save €23.8</span></span><span class="pm"><span class="zh">按月付，随时取消</span><span class="en">Billed monthly, cancel anytime</span></span></div>
+    <div class="per"><span class="py"><span class="zh">原价 <s>€118.80</s>，年付省 €23.80（约 8 折）· 折合 €7.92/月</span><span class="en">Regular <s>€118.80</s>, save €23.80 (20% off) · €7.92/mo</span></span><span class="pm"><span class="zh">按月付，随时取消</span><span class="en">Billed monthly, cancel anytime</span></span></div>
     <a class="btn" href="#how"><span class="zh">取得 Pro</span><span class="en">Get Pro</span> <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
     <div class="inc"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 1.5l1.6 4.9 4.9 1.6-4.9 1.6L8 14.5l-1.6-4.9L1.5 8l4.9-1.6z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span class="zh">免费版的所有功能，再加上：</span><span class="en">Everything in Free, plus:</span></div>
     <ul>
@@ -151,7 +150,7 @@ html:not([data-lang=en]) .en{display:none!important}[data-lang=en] .zh{display:n
     <div class="name">Max<span class="tag max">MAX</span></div>
     <div class="sub"><span class="zh">最适合重度使用和高级模型</span><span class="en">Best for heavy use and premium models</span></div>
     <div class="price"><span class="pm">€59</span><span class="py">€566</span><small class="pm"><span class="zh">/每月</span><span class="en">/month</span></small><small class="py"><span class="zh">/每年</span><span class="en">/year</span></small></div>
-    <div class="per"><span class="py"><span class="zh">折合 €47.2/月，省 €142</span><span class="en">€47.2/mo, save €142</span></span><span class="pm"><span class="zh">按月付，随时取消</span><span class="en">Billed monthly, cancel anytime</span></span></div>
+    <div class="per"><span class="py"><span class="zh">原价 <s>€708</s>，年付省 €142（约 8 折）· 折合 €47.17/月</span><span class="en">Regular <s>€708</s>, save €142 (20% off) · €47.17/mo</span></span><span class="pm"><span class="zh">按月付，随时取消</span><span class="en">Billed monthly, cancel anytime</span></span></div>
     <a class="btn" href="#how"><span class="zh">订阅 Max</span><span class="en">Get Max</span> <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
     <div class="inc"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M4 2.5h8l2.5 3.5L8 14 1.5 6z M1.5 6h13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span class="zh">Pro 的所有功能，再加上：</span><span class="en">Everything in Pro, plus:</span></div>
     <ul>
@@ -166,14 +165,15 @@ html:not([data-lang=en]) .en{display:none!important}[data-lang=en] .zh{display:n
     <div class="foot"><span class="zh">每天最多 1500 条，高级模型按倍数计</span><span class="en">Up to 1,500 a day; premium models count extra</span></div>
   </div>
 </div>
-<p class="note"><span class="zh">价格以欧元计，已含增值税。通过 Stripe 安全付款，随时可以在 App 里或通过 <a href="kuendigen.html">Verträge hier kündigen</a> 取消，当期结束前照常使用。详见<a href="terms.html#paid">用户协议第 7 条</a>和<a href="widerruf.html">撤回说明</a>。</span><span class="en">Prices in euros, VAT included. Paid securely with Stripe. Cancel anytime in the app or via <a href="kuendigen.html">Verträge hier kündigen</a>; you keep access until the end of the paid period. See section 7 of the <a href="terms.html#paid-en">Terms</a> and the <a href="widerruf.html">withdrawal information</a>.</span></p>
+<p class="note"><span class="zh">价格以欧元计，已含增值税。通过 Stripe 安全付款，年付按月价 × 12 计原价，约 8 折。随时可以在 App 里或通过 <a href="kuendigen.html">Verträge hier kündigen</a> 取消，当期结束前照常使用；升级立即生效、差价折算，降级在当期结束生效。详见<a href="terms.html#paid">用户协议第 7 条</a>和<a href="widerruf.html">撤回说明</a>。</span><span class="en">Prices in euros, VAT included. Paid securely with Stripe. Yearly is 20% off 12 × the monthly price. Cancel anytime in the app or via <a href="kuendigen.html">Verträge hier kündigen</a>; you keep access until the end of the paid period. Upgrades apply right away with proration; downgrades at the end of the period. See section 7 of the <a href="terms.html#paid-en">Terms</a> and the <a href="widerruf.html">withdrawal information</a>.</span></p>
 
 <section>
   <h2><span class="zh">加油包和技能</span><span class="en">Top-ups and skills</span></h2>
   <p class="sub"><span class="zh">额度不够或者只想要某个技能，可以单买。</span><span class="en">Need more messages or just one skill? Buy them on their own.</span></p>
   <div class="extras">
-    <div class="box"><b><span class="zh">⛽ 加油包</span><span class="en">⛽ Top-up</span></b><div class="big">€2.99 <span style="font-size:15px;font-weight:500;color:var(--mute)"><span class="zh">= 1500 条</span><span class="en">= 1,500 messages</span></span></div><p><span class="zh">一次性付款，永不过期。月额度用完后自动接着用。</span><span class="en">One-time payment, never expires. Used automatically after your monthly messages run out.</span></p></div>
-    <div class="box"><b><span class="zh">✨ 技能</span><span class="en">✨ Skills</span></b><div class="big">€3<span style="font-size:15px;font-weight:500;color:var(--mute)"><span class="zh">/月/个</span><span class="en">/mo each</span></span></div><p><span class="zh">喵推（陪你刷推）、喵手（帮你操作电脑）、喵传（会议同传字幕）。先免费试用 7 天；Pro 和 Max 会员 8 折，任何会员都不包含技能。</span><span class="en">X Companion (scroll X with you), Mac Agent (operates your Mac), Live Subtitles (live meeting subtitles). 7-day free trial; 20% off with Pro or Max; no plan includes skills.</span></p></div>
+    <div class="box"><b><span class="zh">🐟 小鱼干</span><span class="en">🐟 Dried Fish</span></b><div class="big">€5 <span style="font-size:15px;font-weight:500;color:var(--mute)"><span class="zh">= 500 条起</span><span class="en">= 500 and up</span></span></div><p><span class="zh">一次性充值，永久有效：€5 = 500、€10 = 1050、€30 = 3300、€100 = 11500。可以开会员、技能、加油包，也能在喵副本发任务。</span><span class="en">One-time, never expires: €5 = 500, €10 = 1,050, €30 = 3,300, €100 = 11,500. Use it for plans, skills, top-ups and Cat Raids.</span></p></div>
+    <div class="box"><b><span class="zh">⛽ 加油包</span><span class="en">⛽ Top-up</span></b><div class="big">300 <span style="font-size:15px;font-weight:500;color:var(--mute)"><span class="zh">条小鱼干 = 1500 条消息</span><span class="en">Dried Fish = 1,500 messages</span></span></div><p><span class="zh">用小鱼干买，永不过期。月额度用完后自动接着用。</span><span class="en">Bought with Dried Fish, never expires. Used automatically after your monthly messages run out.</span></p></div>
+    <div class="box"><b><span class="zh">✨ 技能</span><span class="en">✨ Skills</span></b><div class="big">€3<span style="font-size:15px;font-weight:500;color:var(--mute)"><span class="zh">/月/个</span><span class="en">/mo each</span></span></div><p><span class="zh">喵推 X Companion（陪你刷推）、喵手 Mac Agent（帮你操作电脑）、喵传 Live Subtitles（会议同传字幕）。先免费试用 7 天；Pro 和 Max 会员 €2.4/月（8 折）。技能单独订阅，任何会员都不包含。</span><span class="en">X Companion (scroll X with you), Mac Agent (operates your Mac), Live Subtitles (live meeting subtitles). 7-day free trial; €2.4/mo with Pro or Max (20% off). Skills are separate; no plan includes them.</span></p></div>
   </div>
 </section>
 
@@ -191,9 +191,12 @@ html:not([data-lang=en]) .en{display:none!important}[data-lang=en] .zh{display:n
 
 <section id="how">
   <h2><span class="zh">怎么开通</span><span class="en">How to subscribe</span></h2>
-  <details open><summary><span class="zh">在哪里开通会员？</span><span class="en">Where do I subscribe?</span></summary><p><span class="zh">打开 OrdCat → 设置 → 用户，登录后在「会员」里选月付或年付，点「开通 Pro」或「开通 Max」。会打开 Stripe 的付款页，付完回到 App 几秒后就生效。</span><span class="en">Open OrdCat → Settings → User, sign in, choose monthly or yearly under Membership and click Get Pro or Get Max. Stripe's checkout page opens in your browser; back in the app it switches on within seconds.</span></p></details>
-  <details><summary><span class="zh">怎么取消或者换卡？</span><span class="en">How do I cancel or change my card?</span></summary><p><span class="zh">设置 → 用户 → 管理会员，会打开 Stripe 的管理页面，可以取消、换付款方式、下载发票。取消后当期结束前照常使用。</span><span class="en">Settings → User → Manage membership opens Stripe's billing page, where you can cancel, change your payment method and download invoices. You keep access until the end of the paid period.</span></p></details>
-  <details><summary><span class="zh">支持哪些付款方式？</span><span class="en">Which payment methods work?</span></summary><p><span class="zh">银行卡（Visa、Mastercard、American Express），以及 Stripe 在你所在地区提供的其他方式。</span><span class="en">Cards (Visa, Mastercard, American Express) and other methods Stripe offers in your region.</span></p></details>
+  <details open><summary><span class="zh">在哪里开通会员？</span><span class="en">Where do I subscribe?</span></summary><p><span class="zh">打开 OrdCat → 设置 → 用户，登录后在「会员」里选月付或年付，点 Pro 或 Max 卡片上的「开通」。浏览器会打开 Stripe 的付款页，付完会看到结算单，回到 App 几秒后自动生效，同时你会收到确认邮件。</span><span class="en">Open OrdCat → Settings → User, sign in, choose monthly or yearly under Membership and click Get Pro or Get Max on the card. Stripe's checkout opens in your browser; after paying you see a receipt, the plan switches on in the app within seconds, and a confirmation email arrives.</span></p></details>
+  <details><summary><span class="zh">怎么升级或降级？</span><span class="en">How do I upgrade or downgrade?</span></summary><p><span class="zh">在同一个地方点 Max 卡片上的「升级」（或 Pro 卡片上的「降级」、「改为年付」）。会打开 Stripe 的确认页，不会重复订阅：升级马上生效，差价按当期剩余天数折算；降级在当期结束时生效，之前照常使用。</span><span class="en">In the same place, click Upgrade on the Max card (or Downgrade / Switch to yearly on Pro). Stripe's confirmation page opens; you never end up with two subscriptions. Upgrades apply right away and the difference is prorated for the rest of the period; downgrades apply at the end of the period.</span></p></details>
+  <details><summary><span class="zh">怎么取消？取消后会怎样？</span><span class="en">How do I cancel, and what happens then?</span></summary><p><span class="zh">设置 → 用户 → 管理订阅，或者不用登录直接用 <a href="kuendigen.html">Verträge hier kündigen</a>。取消后不再续费，当期结束前照常使用，到期自动回到免费版；结束前随时可以恢复订阅。我们会发邮件确认。</span><span class="en">Settings → User → Manage subscription, or without signing in via <a href="kuendigen.html">Verträge hier kündigen</a>. It won't renew, you keep everything until the end of the paid period and then go back to Free. You can resume any time before it ends. We confirm by email.</span></p></details>
+  <details><summary><span class="zh">能退款吗？</span><span class="en">Can I get a refund?</span></summary><p><span class="zh">会员和技能订阅：购买后 14 天内可以撤回，按已使用的天数付费，其余退回原付款方式。小鱼干和加油包是数字内容，到账后就不能撤回（付款时你会勾选同意）。详见 <a href="widerruf.html">撤回说明</a>，在线撤回点 <a href="widerruf.html#widerrufen">Vertrag widerrufen</a>。之后的期间不按天退款，取消后用到当期结束。</span><span class="en">Plans and skills: you can withdraw within 14 days of buying and pay only for the days used; the rest goes back to your payment method. Dried Fish and top-ups are digital content and can't be withdrawn once credited (you agree to this at checkout). See the <a href="widerruf.html">withdrawal information</a>, or withdraw online via <a href="widerruf.html#widerrufen">Vertrag widerrufen</a>. Later periods aren't refunded by the day; after cancelling you keep access until the period ends.</span></p></details>
+  <details><summary><span class="zh">扣款失败怎么办？</span><span class="en">What if a payment fails?</span></summary><p><span class="zh">Stripe 会在几天内自动重试，这期间会员照常可用，App 里会提示「更新付款方式」，我们也会发邮件。一直失败的话订阅结束，回到免费版。</span><span class="en">Stripe retries automatically over a few days and your plan keeps working. The app shows Update payment method and we email you. If every retry fails, the subscription ends and you go back to Free.</span></p></details>
+  <details><summary><span class="zh">支持哪些付款方式？发票在哪里？</span><span class="en">Which payment methods work? Where are invoices?</span></summary><p><span class="zh">银行卡（Visa、Mastercard、American Express），以及 Stripe 在你所在地区提供的其他方式。付完的结算单页面可以打印或存 PDF；订阅的发票在 设置 → 用户 → 管理订阅 里下载。</span><span class="en">Cards (Visa, Mastercard, American Express) and other methods Stripe offers in your region. You can print or save the receipt page after paying; subscription invoices are in Settings → User → Manage subscription.</span></p></details>
   <details><summary><span class="zh">我的对话会被保存吗？</span><span class="en">Are my conversations stored?</span></summary><p><span class="zh">不会。托管模型只转发这一次的请求，只记录用了多少条额度。聊天记录和记忆都只存在你的 Mac 上，详见 <a href="privacy.html">隐私政策</a>。</span><span class="en">No. Hosted models only relay each request and we only record how many messages you used. Chats and memory stay on your Mac. See the <a href="privacy.html">Privacy Policy</a>.</span></p></details>
   <details><summary><span class="zh">还有问题？</span><span class="en">Still have questions?</span></summary><p><span class="zh">写信给 <a href="mailto:support@ordcat.de">support@ordcat.de</a>，或者在 App 里联系客服。</span><span class="en">Email <a href="mailto:support@ordcat.de">support@ordcat.de</a> or contact support in the app.</span></p></details>
 </section>
@@ -211,9 +214,11 @@ function setCycle(c){
   document.querySelectorAll('.py').forEach(function(e){e.style.display=c==='y'?'':'none'});
 }
 setCycle('y');
-(function(){var p=new URLSearchParams(location.search).get('paid');
-  if(p==='1')document.getElementById('paidOk').style.display='block';
-  if(p==='0')document.getElementById('paidNo').style.display='block';})();
+(function(){var q=new URLSearchParams(location.search), p=q.get('paid'), sid=q.get('session_id');
+  // Old checkout links (before thanks.html): send them to the receipt / "order not completed" page.
+  if(p==='1'&&sid){location.replace('thanks.html?session_id='+encodeURIComponent(sid));return;}
+  if(p==='0'){location.replace('thanks.html?cancelled=1'+(sid?'&session_id='+encodeURIComponent(sid):''));return;}
+  if(p==='1')document.getElementById('paidOk').style.display='block';})();
 </script>
 </body>
 </html>
