@@ -2,8 +2,9 @@
 // 小鱼干充值：fish_topup(session id) 只加一次（重复的 webhook 不会多加），只有这里用 service_role 能调。
 // Stripe 后台 → Developers → Webhooks → Add endpoint：
 //   URL = https://<project>.supabase.co/functions/v1/stripe-webhook
-//   事件：checkout.session.completed, checkout.session.async_payment_succeeded, customer.subscription.created, customer.subscription.updated,
-//         customer.subscription.deleted, invoice.paid, invoice.payment_failed
+//   事件：checkout.session.completed, checkout.session.async_payment_succeeded, checkout.session.expired（未付款提醒）, customer.subscription.created, customer.subscription.updated,
+//         customer.subscription.deleted, invoice.paid, invoice.payment_failed,
+//         subscription_schedule.created / updated / released / canceled / completed / aborted（App 里预约的降级，v0.2.64）
 // 部署：supabase functions deploy stripe-webhook --no-verify-jwt
 // Secrets：STRIPE_WEBHOOK_SECRET=whsec_…（同上 STRIPE_SECRET_KEY、STRIPE_PRICES）
 //
@@ -12,15 +13,23 @@
 //   方案按价格 ID 认（STRIPE_PRICES），所以在 Portal 里 Pro ↔ Max、月付 ↔ 年付 换了以后也对；订阅删除（到期 / 扣款失败到底）→ canceled → 免费版。
 //   新列在 receipts.sql 里；还没运行 receipts.sql 时自动只写旧列（会员照样生效）。
 //
-// 邮件（Resend，v0.2.64 起；语言按 metadata.lang：zh / en / de，非德语附德文）：
+// 邮件（Resend，v0.2.64 起；全部只发英文，不看 metadata.lang；模板 ../_shared/mail.ts，深色卡片 + 琥珀色，和 thanks.html 一致）：
 //   · 购买确认（BGB §312f Vertragsbestätigung）：checkout.session.completed / async_payment_succeeded，已付款时
 //   · 续费收据：invoice.paid，billing_reason = subscription_cycle（首张发票 subscription_create 已由购买确认覆盖）
+//   · 升级确认：invoice.paid，billing_reason = subscription_update（App 里升级 / 改年付，stripe-checkout 立即开新周期并收款）：
+//     「Plan upgraded」；其它 subscription_update 发票（比如预约的降级生效）叫「Plan changed」。key = upgrade:in_…（需要 plan_change.sql）
+//   · 降级预约确认（Plan change scheduled）由 stripe-checkout 建好 Subscription Schedule 后自己发，key = sched:sub_sched_…
 //   · 扣款失败：invoice.payment_failed（每张发票只发一次，Stripe 重试不再发）
+//   · 未付款提醒（v0.2.64+）：checkout.session.expired，没付款、有邮箱和 OrdCat 账号、之后也没买成同一样东西时，
+//     发一封「Your OrdCat order isn't complete」+「Complete payment」（Stripe after_expiration 恢复链接，没有就 pricing.html）。
+//     key = unpaid:cs_…，kind = unpaid（需要 unpaid_mail.sql）。Stripe webhook 要加事件 checkout.session.expired。
 //   · 取消确认：customer.subscription.updated 里 cancel_at_period_end / cancel_at 刚被设上（Portal 里取消）；
 //     cancel-contract（ordcat.de/kuendigen.html）取消的已经由它自己发确认，这里不重复。
 //   幂等：先在 receipt_emails（receipts.sql）占位再发；邮件出错只记日志，webhook 照样回 200。
 //   Secrets：RESEND_API_KEY（没设就不发）、可选 CANCEL_MAIL_BCC / CANCEL_MAIL_FROM（和 cancel-contract 共用）、SITE_URL。
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { customEur, fishForEur } from "../_shared/fish.ts";
+import { type Button, C, dayEn, escH, type MailSpec, money, render, type Row, type Section, SELLER_NAME, sendOnce, SUPPORT, whenEn } from "../_shared/mail.ts";
 
 async function hmacHex(secret: string, msg: string) {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -205,197 +214,158 @@ async function receiptFromSession(sessionId: string): Promise<{ r: Receipt; stat
 
 type Lang = "de" | "zh" | "en";
 const SITE = () => Deno.env.get("SITE_URL") ?? "https://ordcat.de";
-const SELLER = "Axun Conor (OrdCat) · Hedemannstraße 74 · 78355 Hohenfels · Deutschland · support@ordcat.de";
 
 const ITEM_NAME: Record<string, string> = {
   pro: "OrdCat Pro", max: "OrdCat Max", topup: "OrdCat Top-up", x: "OrdCat X Companion",
   agent: "OrdCat Mac Agent", miao: "OrdCat Live Subtitles", fish: "OrdCat Dried Fish",
 };
-const ZH_NAME: Record<string, string> = {
-  pro: "Pro 会员", max: "Max 会员", topup: "加油包", x: "喵推（X Companion）技能", agent: "喵手（Mac Agent）技能",
-  miao: "喵传（Live Subtitles）技能", fish: "小鱼干",
-};
 const isDigital = (item: string | null) => item === "fish" || item === "topup";
-
-const escH = (s: string) =>
-  s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-const locOf = (l: Lang) => (l === "zh" ? "zh-CN" : l === "en" ? "en-GB" : "de-DE");
-const money = (c: number, cur: string, l: Lang) =>
-  new Intl.NumberFormat(locOf(l), { style: "currency", currency: cur.toUpperCase() }).format(c / 100);
-const when = (t: number, l: Lang) => {
-  if (l === "zh") {
-    const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin", year: "numeric", month: "2-digit",
-      day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(t * 1000)).map((x) => [x.type, x.value]));
-    return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}（德国时间）`;
-  }
-  return new Intl.DateTimeFormat(locOf(l), {
-    timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
-    hour12: false, timeZoneName: "short",
-  }).format(new Date(t * 1000));
-};
-const day = (t: number, l: Lang) =>
-  new Intl.DateTimeFormat(l === "zh" ? "en-CA" : locOf(l), { timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit" })
-    .format(new Date(t * 1000));                       // zh: 2026-12-27
-
-function productLine(r: Receipt, l: Lang): string {
-  const it = r.items[0];
-  const base = l === "zh" && r.item && ZH_NAME[r.item] ? `${ZH_NAME[r.item]}（${it?.name ?? ITEM_NAME[r.item]}）`
-    : (it?.name ?? (r.item ? ITEM_NAME[r.item] : "OrdCat"));
-  if (r.fish) return l === "zh" ? `${base} · ${r.fish} 条小鱼干` : l === "en" ? `${base} · ${r.fish} Dried Fish` : `${base} · ${r.fish} Trockenfisch`;
-  const iv = it?.interval;
-  if (!iv) return base;
-  const per = {
-    de: { month: "monatliches Abonnement", year: "jährliches Abonnement" },
-    zh: { month: "按月订阅", year: "按年订阅" },
-    en: { month: "monthly subscription", year: "yearly subscription" },
-  }[l][iv as "month" | "year"] ?? iv;
-  return `${base} · ${per}`;
-}
 
 function payLine(r: Receipt): string | null {
   const p = r.payment_method;
   if (!p) return null;
-  const b = p.brand.charAt(0).toUpperCase() + p.brand.slice(1);
-  return (p.wallet ? `${p.wallet.replace(/_/g, " ")} · ` : "") + b + (p.last4 ? ` •••• ${p.last4}` : "");
+  let b = (p.type === "paypal" ? "PayPal" : p.brand.replace(/_/g, " "));
+  b = b.charAt(0).toUpperCase() + b.slice(1);
+  if (b === "Amex") b = "American Express";
+  const w = p.wallet === "apple_pay" ? "Apple Pay" : p.wallet === "google_pay" ? "Google Pay" : p.wallet?.replace(/_/g, " ");
+  return (w ? `${w} · ` : "") + b + (p.last4 ? ` •••• ${p.last4}` : "");
 }
 
-function mailBlock(l: Lang, r: Receipt): string[] {
-  const renewal = r.kind === "renewal";
-  const sub = r.mode === "subscription";
-  const iv = r.items[0]?.interval;
-  const price = money(r.amount_total, r.currency, l);
-  const taxTxt = r.amount_tax != null
-    ? { de: `inkl. ${money(r.amount_tax, r.currency, l)} MwSt.`, zh: `含增值税 ${money(r.amount_tax, r.currency, l)}`, en: `incl. ${money(r.amount_tax, r.currency, l)} VAT` }[l]
-    : { de: "inkl. MwSt.", zh: "已含增值税", en: "VAT included (inkl. MwSt.)" }[l];
-  const T = {
-    de: {
-      head: renewal ? "Ihr Abonnement wurde verlängert" : "Vertragsbestätigung Ihrer Bestellung",
-      intro: renewal ? "Ihr OrdCat-Abonnement wurde planmäßig verlängert; die Zahlung ist eingegangen:"
-        : "vielen Dank für Ihre Bestellung. Hiermit bestätigen wir den Vertragsschluss mit folgendem Inhalt:",
-      seller: "Verkäufer", ref: renewal ? "Rechnung" : "Bestellnummer", date: "Datum", item: "Leistung", price: "Preis",
-      pay: "Zahlungsart", acct: "E-Mail",
-      yearly: (y: NonNullable<Receipt["yearly"]>) => `Regulär ${money(y.regular, r.currency, l)}/Jahr (${money(y.monthly, r.currency, l)} × 12 Monate), Rabatt bei jährlicher Zahlung −${money(y.discount, r.currency, l)}, Sie zahlen ${money(y.paid, r.currency, l)}/Jahr.`,
-      renew: (d: string) => `Das Abonnement verlängert sich automatisch um jeweils ${iv === "year" ? "ein Jahr" : "einen Monat"} zum Preis von ${price} (${taxTxt}), bis Sie es kündigen. Nächste Verlängerung: ${d}.`,
-      ends: (d: string) => `Das Abonnement ist gekündigt und endet am ${d}.`,
-      cancel: "Kündigen können Sie jederzeit zum Ende des laufenden Zeitraums: in der OrdCat-App unter Einstellungen → Benutzer (User) → Mitgliedschaft verwalten (Manage membership) oder ohne Anmeldung unter " + SITE() + "/kuendigen.html („Verträge hier kündigen“).",
-      consentDigital: "Ihre Zustimmung beim Bezahlen: Sie haben den Nutzungsbedingungen zugestimmt, ausdrücklich verlangt, dass wir vor Ablauf der Widerrufsfrist mit der Vertragserfüllung beginnen, und bestätigt, dass Sie wissen, dass Sie Ihr Widerrufsrecht mit Beginn der Vertragserfüllung (Gutschrift in Ihrem Konto) verlieren (§ 356 Abs. 6 BGB). Die Gutschrift ist erfolgt.",
-      consentService: "Ihre Zustimmung beim Bezahlen: Sie haben den Nutzungsbedingungen zugestimmt und ausdrücklich verlangt, dass wir vor Ablauf der Widerrufsfrist mit der Leistung beginnen. Widerrufen Sie innerhalb von 14 Tagen, zahlen Sie den anteiligen Betrag für die bis dahin genutzten Tage (§ 357a Abs. 2 BGB); Ihr Widerrufsrecht erlischt mit vollständiger Erbringung der Leistung (§ 356 Abs. 5 BGB).",
-      links: "Nutzungsbedingungen", wd: "Widerrufsbelehrung", online: "Online-Beleg", rcpt: "Zahlungsbeleg (Stripe)", inv: "Rechnung",
-      wdNow: "Vertrag widerrufen",
-    },
-    zh: {
-      head: renewal ? "订阅已续费" : "订单确认",
-      intro: renewal ? "你的 OrdCat 订阅已按期续费，款项已收到：" : "谢谢你的购买！合同已成立，内容如下：",
-      seller: "卖家", ref: renewal ? "发票" : "订单号", date: "时间", item: "商品", price: "金额",
-      pay: "付款方式", acct: "邮箱",
-      yearly: (y: NonNullable<Receipt["yearly"]>) => `原价 ${money(y.regular, r.currency, l)}/年（${money(y.monthly, r.currency, l)} × 12 个月），年付优惠 −${money(y.discount, r.currency, l)}，实付 ${money(y.paid, r.currency, l)}/年。`,
-      renew: (d: string) => `订阅会每${iv === "year" ? "年" : "月"}按 ${price}（${taxTxt}）自动续费，直到你取消。下次续费：${d}。`,
-      ends: (d: string) => `订阅已取消，将于 ${d} 结束。`,
-      cancel: "随时可以取消，当期结束前照常使用：在 OrdCat 里打开 设置 → 用户 → 管理会员，或者不用登录直接打开 " + SITE() + "/kuendigen.html（Verträge hier kündigen）。",
-      consentDigital: "你付款时的同意：你同意了用户协议，明确要求我们在撤回期结束前开始履行合同，并确认知道一旦开始履行（加到你的账户）就失去撤回权（德国民法典 §356 第 6 款）。现在已经加到你的账户。",
-      consentService: "你付款时的同意：你同意了用户协议，并明确要求我们在撤回期结束前就开始提供服务。14 天内撤回的话，需要按已使用的天数付费（德国民法典 §357a 第 2 款）；服务全部履行完毕后撤回权失效（§356 第 5 款）。",
-      links: "用户协议", wd: "撤回说明", online: "在线结算单", rcpt: "Stripe 收据", inv: "发票",
-      wdNow: "撤回合同",
-    },
-    en: {
-      head: renewal ? "Your subscription has renewed" : "Your order confirmation",
-      intro: renewal ? "Your OrdCat subscription renewed as scheduled and we received your payment:"
-        : "thank you for your order. This confirms your contract with the following content:",
-      seller: "Seller", ref: renewal ? "Invoice" : "Order number", date: "Date", item: "Item", price: "Price",
-      pay: "Payment method", acct: "Email",
-      yearly: (y: NonNullable<Receipt["yearly"]>) => `Regular price ${money(y.regular, r.currency, l)}/year (${money(y.monthly, r.currency, l)} × 12 months), yearly discount −${money(y.discount, r.currency, l)}, you pay ${money(y.paid, r.currency, l)}/year.`,
-      renew: (d: string) => `Your subscription renews automatically every ${iv === "year" ? "year" : "month"} at ${price} (${taxTxt}) until you cancel. Next renewal: ${d}.`,
-      ends: (d: string) => `Your subscription is cancelled and ends on ${d}.`,
-      cancel: "You can cancel anytime, effective at the end of the current period: in OrdCat under Settings → User → Manage membership, or without signing in at " + SITE() + "/kuendigen.html (“Verträge hier kündigen”).",
-      consentDigital: "What you agreed to at checkout: you accepted the Terms, expressly asked us to start before the withdrawal period ends, and acknowledged that you lose your right of withdrawal once performance begins (the credit to your account) (section 356(6) German Civil Code). The credit has been made.",
-      consentService: "What you agreed to at checkout: you accepted the Terms and expressly asked us to start the service before the withdrawal period ends. If you withdraw within 14 days, you pay pro rata for the days used (section 357a(2) German Civil Code); your right of withdrawal ends once the service has been fully provided (section 356(5)).",
-      links: "Terms", wd: "Withdrawal information", online: "Online receipt", rcpt: "Stripe receipt", inv: "Invoice",
-      wdNow: "Withdraw from the contract",
-    },
-  }[l];
-  const out: string[] = [T.head, "", T.intro];
-  const c = l === "zh" ? "：" : ": ";
-  out.push(`${T.seller}${c}${SELLER}`);
-  out.push(`${T.ref}${c}${renewal ? (r.invoice_number ?? r.id) : r.id}`);
-  out.push(`${T.date}${c}${when(r.created, l)}`);
-  out.push(`${T.item}${c}${productLine(r, l)}`);
-  out.push(`${T.price}${c}${price}${l === "zh" ? `（${taxTxt}）` : ` (${taxTxt})`}`);
-  const pl = payLine(r);
-  if (pl) out.push(`${T.pay}${c}${pl}`);
-  if (r.email) out.push(`${T.acct}${c}${r.email}`);
-  if (r.yearly) out.push("", T.yearly(r.yearly));
-  if (sub) {
-    out.push("");
-    if (r.renews_at) out.push(T.renew(day(r.renews_at, l)));
-    else if (r.ends_at) out.push(T.ends(day(r.ends_at, l)));
-    out.push(T.cancel);
-  }
-  if (!renewal) out.push("", isDigital(r.item) ? T.consentDigital : T.consentService);
-  out.push("");
-  out.push(`${T.links}${c}${SITE()}/terms.html`);
-  out.push(`${T.wd}${c}${SITE()}/widerruf.html`);
-  if (!renewal) out.push(`${T.wdNow}${c}${SITE()}/widerruf.html#widerrufen`);
-  if (!renewal) out.push(`${T.online}${c}${SITE()}/thanks.html?session_id=${r.id}`);
-  if (r.receipt_url) out.push(`${T.rcpt}${c}${r.receipt_url}`);
-  if (r.invoice_url) out.push(`${T.inv}${c}${r.invoice_url}`);
-  return out;
-}
+const billingLine = (iv: string | null | undefined) =>
+  iv === "year" ? "Yearly · renews automatically every year" : iv === "month" ? "Monthly · renews automatically every month" : "One-time payment";
 
-// Widerrufsbelehrung as on ordcat.de/widerruf.html (Stand 27.11.2026), on a durable medium with the first confirmation.
-const WIDERRUF_DE = [
-  "Widerrufsbelehrung",
-  "",
-  "Widerrufsrecht",
-  "Sie haben das Recht, binnen vierzehn Tagen ohne Angabe von Gründen diesen Vertrag zu widerrufen. Die Widerrufsfrist beträgt vierzehn Tage ab dem Tag des Vertragsabschlusses.",
-  "Um Ihr Widerrufsrecht auszuüben, müssen Sie uns (Axun Conor, Hedemannstraße 74, 78355 Hohenfels, Deutschland, E-Mail: support@ordcat.de) mittels einer eindeutigen Erklärung (z. B. ein mit der Post versandter Brief oder eine E-Mail) über Ihren Entschluss, diesen Vertrag zu widerrufen, informieren. Sie können dafür das beigefügte Muster-Widerrufsformular verwenden, das jedoch nicht vorgeschrieben ist.",
-  "Sie können Ihr Widerrufsrecht auch online unter https://ordcat.de/widerruf.html#widerrufen („Vertrag widerrufen“) ausüben. Wenn Sie diese Online-Funktion nutzen, übermitteln wir Ihnen auf einem dauerhaften Datenträger (z. B. durch eine E-Mail) unverzüglich eine Eingangsbestätigung mit Informationen zum Inhalt der Widerrufserklärung sowie dem Datum und der Uhrzeit ihres Eingangs.",
-  "Zur Wahrung der Widerrufsfrist reicht es aus, dass Sie die Mitteilung über die Ausübung des Widerrufsrechts vor Ablauf der Widerrufsfrist absenden.",
-  "",
-  "Folgen des Widerrufs",
-  "Wenn Sie diesen Vertrag widerrufen, haben wir Ihnen alle Zahlungen, die wir von Ihnen erhalten haben, unverzüglich und spätestens binnen vierzehn Tagen ab dem Tag zurückzuzahlen, an dem die Mitteilung über Ihren Widerruf dieses Vertrags bei uns eingegangen ist. Für diese Rückzahlung verwenden wir dasselbe Zahlungsmittel, das Sie bei der ursprünglichen Transaktion eingesetzt haben, es sei denn, mit Ihnen wurde ausdrücklich etwas anderes vereinbart; in keinem Fall werden Ihnen wegen dieser Rückzahlung Entgelte berechnet.",
-  "Haben Sie verlangt, dass die Dienstleistungen während der Widerrufsfrist beginnen sollen, so haben Sie uns einen angemessenen Betrag zu zahlen, der dem Anteil der bis zu dem Zeitpunkt, zu dem Sie uns von der Ausübung des Widerrufsrechts hinsichtlich dieses Vertrags unterrichten, bereits erbrachten Dienstleistungen im Vergleich zum Gesamtumfang der im Vertrag vorgesehenen Dienstleistungen entspricht.",
-  "",
-  "Besondere Hinweise zum vorzeitigen Erlöschen des Widerrufsrechts",
-  "Digitale Inhalte (Trockenfisch-Pakete, Aufladungen „Top-up“): Ihr Widerrufsrecht erlischt, wenn wir mit der Vertragserfüllung begonnen haben (Gutschrift in Ihrem Konto), nachdem Sie 1. ausdrücklich zugestimmt haben, dass wir mit der Vertragserfüllung vor Ablauf der Widerrufsfrist beginnen, 2. Ihre Kenntnis davon bestätigt haben, dass Sie durch Ihre Zustimmung mit Beginn der Vertragserfüllung Ihr Widerrufsrecht verlieren, und 3. wir Ihnen eine Bestätigung gemäß § 312f BGB zur Verfügung gestellt haben (§ 356 Abs. 6 BGB).",
-  "Dienstleistungen (Mitgliedschaften Pro und Max, Skill-Abonnements X Companion, Mac Agent und Live Subtitles): Haben Sie verlangt, dass wir sofort mit der Leistung beginnen, und widerrufen Sie innerhalb von 14 Tagen, zahlen Sie den anteiligen Betrag für die bis zum Widerruf genutzten Tage; den übrigen Betrag erstatten wir (§ 357a Abs. 2 BGB). Ihr Widerrufsrecht erlischt mit der vollständigen Erbringung der Dienstleistung, wenn Sie vor Beginn ausdrücklich zugestimmt haben, dass wir vor Ablauf der Widerrufsfrist beginnen, und Ihre Kenntnis davon bestätigt haben, dass Ihr Widerrufsrecht mit vollständiger Vertragserfüllung erlischt (§ 356 Abs. 5 BGB).",
-  "Widerruf und Kündigung sind verschiedene Erklärungen. Um die Verlängerung eines Abonnements zu beenden, nutzen Sie „Verträge hier kündigen“ (https://ordcat.de/kuendigen.html).",
-  "Ende der Widerrufsbelehrung",
-  "",
-  "Muster-Widerrufsformular",
-  "(Wenn Sie den Vertrag widerrufen wollen, dann füllen Sie bitte dieses Formular aus und senden Sie es zurück.)",
-  "– An Axun Conor, Hedemannstraße 74, 78355 Hohenfels, Deutschland, E-Mail: support@ordcat.de:",
-  "– Hiermit widerrufe(n) ich/wir (*) den von mir/uns (*) abgeschlossenen Vertrag über den Kauf der folgenden Waren (*)/die Erbringung der folgenden Dienstleistung (*)",
-  "– Bestellt am (*)/erhalten am (*)",
-  "– Name des/der Verbraucher(s)",
-  "– Anschrift des/der Verbraucher(s)",
-  "– Unterschrift des/der Verbraucher(s) (nur bei Mitteilung auf Papier)",
-  "– Datum",
-  "(*) Unzutreffendes streichen.",
+// Withdrawal information as on ordcat.de/widerruf.html (as of 27 Nov 2026), in English, on a durable medium with the first confirmation.
+const WITHDRAWAL_EN: Section[] = [
+  {
+    title: "Withdrawal information · Right of withdrawal",
+    paras: [
+      "You have the right to withdraw from this contract within fourteen days without giving any reason. The withdrawal period is fourteen days from the day the contract was concluded.",
+      "To exercise your right of withdrawal, you must inform us (Axun Conor, Hedemannstraße 74, 78355 Hohenfels, Germany, email: support@ordcat.de) of your decision to withdraw from this contract by an unequivocal statement (e.g. a letter sent by post or an email). You may use the model withdrawal form below, but it is not obligatory.",
+      "You can also withdraw online at https://ordcat.de/widerruf.html#widerrufen (“Withdraw from the contract”). If you use this online function, we will promptly send you a confirmation of receipt on a durable medium (e.g. by email) with the content of your withdrawal and the date and time it was received.",
+      "To meet the withdrawal deadline, it is sufficient for you to send your communication concerning your exercise of the right of withdrawal before the withdrawal period has expired.",
+    ],
+  },
+  {
+    title: "Effects of withdrawal",
+    paras: [
+      "If you withdraw from this contract, we shall reimburse all payments received from you without undue delay and in any event not later than fourteen days from the day on which we are informed about your decision to withdraw from this contract. We will use the same means of payment as you used for the initial transaction, unless you have expressly agreed otherwise; in any event, you will not incur any fees as a result of such reimbursement.",
+      "If you requested to begin the performance of services during the withdrawal period, you shall pay us an amount which is in proportion to what has been provided until you have communicated to us your withdrawal from this contract, in comparison with the full coverage of the contract.",
+    ],
+  },
+  {
+    title: "Early expiry of the right of withdrawal",
+    paras: [
+      "Digital content (Dried Fish packs, message top-ups): your right of withdrawal expires once we have begun performing the contract (the credit to your account), after you 1. expressly agreed that we begin performance before the withdrawal period ends, 2. confirmed your knowledge that by giving this consent you lose your right of withdrawal once performance begins, and 3. we provided you with a confirmation under § 312f BGB (§ 356(6) BGB).",
+      "Services (Pro and Max memberships; X Companion, Mac Agent and Live Subtitles skill subscriptions): if you asked us to start the service immediately and you withdraw within 14 days, you pay the pro-rata amount for the days used until your withdrawal; we refund the rest (§ 357a(2) BGB). Your right of withdrawal expires once the service has been provided in full, if before it started you expressly agreed that we begin before the withdrawal period ends and confirmed your knowledge that your right of withdrawal expires once the contract has been fully performed (§ 356(5) BGB).",
+      "Withdrawal and cancellation are different declarations. To stop a subscription from renewing, cancel it at https://ordcat.de/kuendigen.html.",
+      "End of withdrawal information",
+    ],
+  },
+  {
+    title: "Model withdrawal form",
+    paras: [
+      "(Complete and return this form only if you wish to withdraw from the contract.)",
+      "– To Axun Conor, Hedemannstraße 74, 78355 Hohenfels, Germany, email: support@ordcat.de:",
+      "– I/We (*) hereby give notice that I/We (*) withdraw from my/our (*) contract of sale of the following goods (*)/for the provision of the following service (*)",
+      "– Ordered on (*)/received on (*)",
+      "– Name of consumer(s)",
+      "– Address of consumer(s)",
+      "– Signature of consumer(s) (only if this form is notified on paper)",
+      "– Date",
+      "(*) Delete as appropriate.",
+    ],
+  },
 ];
 
-const GREET: Record<Lang, string> = { de: "Guten Tag,", zh: "你好，", en: "Hello," };
+/** Order confirmation (BGB §312f) and renewal receipt: same card, English only. */
+function buildMail(r: Receipt) {
+  const renewal = r.kind === "renewal";
+  const sub = r.mode === "subscription";
+  const iv = r.items[0]?.interval ?? null;
+  // Fish: always the English name (a Stripe product / custom-amount line can be named in Chinese; mails are English only).
+  const name = r.item === "fish" ? ITEM_NAME.fish : (r.items[0]?.name ?? (r.item ? ITEM_NAME[r.item] : "OrdCat"));
+  const price = money(r.amount_total, r.currency);
+  const taxTxt = r.amount_tax != null ? `incl. ${money(r.amount_tax, r.currency)} VAT` : "VAT included";
+  const site = SITE();
 
-function buildMail(lang: Lang, r: Receipt) {
-  const de = mailBlock("de", r);
-  const other = lang === "de" ? [] : mailBlock(lang, r);
-  const withGreet = (b: string[], l: Lang) => [GREET[l], ...b.slice(2)];
-  const wd = r.kind === "checkout" ? WIDERRUF_DE : [];
-  const deTitle = `${de[0]}${lang === "de" ? "" : " (Deutsche Fassung, maßgeblich)"}`;
-  const textParts = lang === "de"
-    ? [withGreet(de, "de").join("\n")]
-    : [withGreet(other, lang).join("\n"), `— ${deTitle} —\n` + withGreet(de, "de").join("\n")];
-  if (wd.length) textParts.push(wd.join("\n"));
-  const text = textParts.join("\n\n") + "\n\n" + SELLER;
-  const linkify = (s: string) => escH(s).replace(/https:\/\/[^\s<]+[^\s<.,;)）]/g, (u) => `<a href="${u}" style="color:#c98400">${u}</a>`);
-  const para = (lines: string[]) =>
-    `<p style="margin:0 0 14px">${lines.map(linkify).join("<br>").replace(/(<br>){2,}/g, "</p><p style=\"margin:0 0 14px\">")}</p>`;
-  const html = `<!doctype html><html><body style="font:15px/1.6 -apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;color:#18181c;max-width:620px;margin:0 auto;padding:24px">
-<h2 style="margin:0 0 16px;color:#c98400">${escH(lang === "de" ? de[0] : other[0])}</h2>
-${lang === "de" ? para(withGreet(de, "de")) : para(withGreet(other, lang)) + `<hr style="border:0;border-top:1px solid #e6e3dc;margin:24px 0"><h3 style="margin:0 0 12px">${escH(deTitle)}</h3>` + para(withGreet(de, "de"))}
-${wd.length ? `<hr style="border:0;border-top:1px solid #e6e3dc;margin:24px 0"><div style="font-size:13px;color:#3d3f48">${para(wd)}</div>` : ""}
-<p style="color:#5f6270;font-size:12px;margin-top:28px">${escH(SELLER)}</p></body></html>`;
-  const subject = lang === "de" ? `${de[0]} · OrdCat` : `${other[0]} · ${de[0]} · OrdCat`;
-  return { subject, html, text };
+  const rows: Row[] = [{ k: "Product", v: name }];
+  rows.push(r.fish ? { k: "Quantity", v: `${r.fish} Dried Fish`, sub: "One-time payment" } : { k: "Billing", v: billingLine(iv) });
+  rows.push({ k: "Amount paid", v: price, sub: taxTxt });
+  rows.push({ k: "Date", v: whenEn(r.created) });
+  const pl = payLine(r);
+  if (pl) rows.push({ k: "Payment method", v: pl });
+  if (r.email) rows.push({ k: "Email", v: r.email });
+  if (sub && r.renews_at) rows.push({ k: "Next renewal", v: dayEn(r.renews_at) });
+  else if (sub && r.ends_at) rows.push({ k: "Ends on", v: dayEn(r.ends_at) });
+  if (r.invoice_number) rows.push({ k: "Invoice no.", v: r.invoice_number });
+  rows.push({ k: renewal ? "Invoice ID" : "Order no.", v: r.id, mono: true });
+
+  const y = r.yearly;
+  const save = y
+    ? {
+      html: `Regular price <s style="color:${C.mute}">${escH(money(y.regular, r.currency))}/year</s> (${escH(money(y.monthly, r.currency))} × 12 months) · ` +
+        `yearly discount <b style="color:${C.amber}">−${escH(money(y.discount, r.currency))}</b> (${Math.round(y.discount / y.regular * 100)}% off) · ` +
+        `you pay <b>${escH(money(y.paid, r.currency))}/year</b>.`,
+      text: `Regular price ${money(y.regular, r.currency)}/year (${money(y.monthly, r.currency)} × 12 months), yearly discount −${money(y.discount, r.currency)} (${Math.round(y.discount / y.regular * 100)}% off), you pay ${money(y.paid, r.currency)}/year.`,
+    }
+    : undefined;
+
+  const body: Section[] = [];
+  if (sub) {
+    const paras: string[] = [];
+    if (r.renews_at) {
+      paras.push(`Your subscription renews automatically every ${iv === "year" ? "year" : "month"} at ${price} (${taxTxt}) until you cancel. Next renewal: ${dayEn(r.renews_at)}.`);
+    } else if (r.ends_at) paras.push(`Your subscription is cancelled and ends on ${dayEn(r.ends_at)}.`);
+    paras.push(`You can cancel anytime, effective at the end of the current period: in OrdCat under Settings → User → Manage membership, or without signing in at ${site}/kuendigen.html.`);
+    body.push({ title: "Renewal and cancellation", paras });
+  }
+
+  const buttons: Button[] = [];
+  if (!renewal) buttons.push({ label: "View receipt", href: `${site}/thanks.html?session_id=${r.id}`, primary: true });
+  if (r.receipt_url) buttons.push({ label: "Stripe receipt", href: r.receipt_url, primary: renewal && !buttons.length });
+  if (r.invoice_pdf) buttons.push({ label: "Invoice PDF", href: r.invoice_pdf });
+  else if (r.invoice_url) buttons.push({ label: "View invoice", href: r.invoice_url });
+  if (sub) buttons.push({ label: "Cancel subscription", href: `${site}/kuendigen.html` });
+
+  const legal: Section[] = [];
+  if (!renewal) {
+    legal.push({
+      title: "Your consent at checkout",
+      paras: [isDigital(r.item)
+        ? "At checkout you accepted our Terms, expressly asked us to start performing the contract before the withdrawal period ends, and confirmed that you know you lose your right of withdrawal once performance begins (the credit to your account) (§ 356(6) BGB). The credit has been made."
+        : "At checkout you accepted our Terms and expressly asked us to start the service before the withdrawal period ends. If you withdraw within 14 days, you pay pro rata for the days used (§ 357a(2) BGB); your right of withdrawal expires once the service has been provided in full (§ 356(5) BGB)."],
+      links: [
+        { label: "Terms", href: `${site}/terms.html` },
+        { label: "Withdrawal information", href: `${site}/widerruf.html` },
+        { label: "Withdraw from the contract", href: `${site}/widerruf.html#widerrufen` },
+      ],
+    });
+    legal.push({
+      title: "Seller",
+      paras: [`${SELLER_NAME}, Hedemannstraße 74, 78355 Hohenfels, Germany · ${SUPPORT}. This email confirms the contract concluded on ${whenEn(r.created)} and is your copy on a durable medium.`],
+    });
+    legal.push(...WITHDRAWAL_EN);
+  } else {
+    legal.push({
+      title: "Seller",
+      paras: [`${SELLER_NAME}, Hedemannstraße 74, 78355 Hohenfels, Germany · ${SUPPORT}.`],
+      links: [{ label: "Terms", href: `${site}/terms.html` }, { label: "Withdrawal information", href: `${site}/widerruf.html` }],
+    });
+  }
+
+  const short = name.replace(/^OrdCat /, "");
+  const spec: MailSpec = {
+    subject: renewal ? `Your ${name.startsWith("OrdCat") ? name : "OrdCat " + name} renewal receipt` : "Order confirmation · OrdCat",
+    preheader: renewal
+      ? `${short} renewed · ${price}${r.renews_at ? ` · next renewal ${dayEn(r.renews_at)}` : ""}`
+      : `Thank you! ${name} · ${price} · your contract confirmation and receipt`,
+    badge: "ok", icon: "✓",
+    title: renewal ? "Subscription renewed" : "Order confirmed",
+    subtitle: renewal ? "Your subscription renewed as scheduled and we received your payment." : "Thank you! This email confirms your contract with OrdCat.",
+    amount: { main: price, per: iv === "year" ? "year" : iv === "month" ? "month" : undefined },
+    rows, save, body, buttons, legal,
+  };
+  return render(spec, site);
 }
 
 async function receiptFromInvoice(inv: any, sub: any, itemNow: string | null): Promise<Receipt> {
@@ -443,143 +413,298 @@ async function receiptFromInvoice(inv: any, sub: any, itemNow: string | null): P
   };
 }
 
-const EUROPE_DE = ["DE", "AT", "CH", "LI", "LU"];
-const langOf = (meta: unknown, country?: string | null): Lang =>
-  meta === "zh" || meta === "de" || meta === "en" ? meta : (country && EUROPE_DE.includes(country.toUpperCase()) ? "de" : "en");
-
 type Mail = { to: string | null; lang: Lang; subject: string; html: string; text: string; item: string | null; user_id: string | null; skip?: string };
 
-// Short notice (payment failed / cancellation): localized text, plus the German text when the mail isn't German.
-function shortMail(lang: Lang, block: (l: Lang) => { head: string; lines: string[] }, to: string | null, item: string | null, user_id: string | null): Mail {
-  const de = block("de");
-  const loc = lang === "de" ? null : block(lang);
-  const linkify = (s: string) => escH(s).replace(/https:\/\/[^\s<]+[^\s<.,;)）]/g, (u) => `<a href="${u}" style="color:#c98400">${u}</a>`);
-  const para = (lines: string[]) =>
-    `<p style="margin:0 0 14px">${lines.map(linkify).join("<br>").replace(/(<br>){2,}/g, "</p><p style=\"margin:0 0 14px\">")}</p>`;
-  const main = loc ?? de;
-  const text = [[GREET[lang], ...main.lines].join("\n"),
-    ...(loc ? [`— ${de.head} (Deutsche Fassung) —\n` + ["Guten Tag,", ...de.lines].join("\n")] : []), SELLER].join("\n\n");
-  const html = `<!doctype html><html><body style="font:15px/1.6 -apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;color:#18181c;max-width:620px;margin:0 auto;padding:24px">
-<h2 style="margin:0 0 16px;color:#c98400">${escH(main.head)}</h2>${para([GREET[lang], ...main.lines])}
-${loc ? `<hr style="border:0;border-top:1px solid #e6e3dc;margin:24px 0"><h3 style="margin:0 0 12px">${escH(de.head)} (Deutsche Fassung)</h3>` + para(["Guten Tag,", ...de.lines]) : ""}
-<p style="color:#5f6270;font-size:12px;margin-top:28px">${escH(SELLER)}</p></body></html>`;
-  return { to, lang, subject: loc ? `${loc.head} · ${de.head} · OrdCat` : `${de.head} · OrdCat`, html, text, item, user_id };
-}
-
-const nameFor = (item: string | null, l: Lang) =>
-  l === "zh" && item && ZH_NAME[item] ? ZH_NAME[item] : (item && ITEM_NAME[item] ? ITEM_NAME[item] : "OrdCat");
+const nameFor = (item: string | null) => (item && ITEM_NAME[item] ? ITEM_NAME[item] : "OrdCat");
 
 function failedMail(inv: any, sub: any, item: string | null): Mail {
-  const lang = langOf(sub?.metadata?.lang, inv.customer_address?.country);
   const amount = Number(inv.amount_due ?? inv.total ?? 0), cur = String(inv.currency ?? "eur");
   const payUrl = inv.hosted_invoice_url as string | undefined;
-  const block = (l: Lang) => ({
-    de: {
-      head: "Zahlung fehlgeschlagen",
-      lines: [`die Verlängerung von ${nameFor(item, l)} (${money(amount, cur, l)}) konnte nicht abgebucht werden.`,
-        "Wir versuchen es in den nächsten Tagen automatisch erneut; bis dahin bleibt Ihr Abonnement aktiv.",
-        "Bitte aktualisieren Sie Ihre Zahlungsart: in der OrdCat-App unter Einstellungen → Benutzer (User) → „Update payment method“" + (payUrl ? `, oder bezahlen Sie die Rechnung direkt: ${payUrl}` : "."),
-        "Gelingt keine Zahlung, endet das Abonnement und Ihr Konto wechselt zur kostenlosen Version."],
-    },
-    zh: {
-      head: "续费扣款没有成功",
-      lines: [`${nameFor(item, l)} 这次续费（${money(amount, cur, l)}）没有扣款成功。`,
-        "接下来几天我们会自动重试，期间会员照常可用。",
-        "请更新付款方式：在 OrdCat 里打开 设置 → 用户 →「更新付款方式」" + (payUrl ? `，或者直接在这里付款：${payUrl}` : "。"),
-        "如果一直扣款失败，订阅会结束，账号回到免费版。"],
-    },
-    en: {
-      head: "Your payment didn't go through",
-      lines: [`We couldn't charge the renewal of ${nameFor(item, l)} (${money(amount, cur, l)}).`,
+  const site = SITE();
+  const rows: Row[] = [{ k: "Product", v: nameFor(item) }, { k: "Amount due", v: money(amount, cur), sub: "VAT included" }];
+  if (inv.number) rows.push({ k: "Invoice no.", v: String(inv.number) });
+  if (inv.customer_email) rows.push({ k: "Email", v: String(inv.customer_email) });
+  const buttons: Button[] = [];
+  if (payUrl) buttons.push({ label: "Pay invoice", href: payUrl, primary: true });
+  buttons.push({ label: "Cancel subscription", href: `${site}/kuendigen.html` });
+  const m = render({
+    subject: "Payment failed · OrdCat",
+    preheader: `We couldn't charge the renewal of ${nameFor(item)} (${money(amount, cur)}). Your plan stays active while we retry.`,
+    badge: "wait", icon: "!",
+    title: "Your payment didn't go through",
+    subtitle: "Your plan stays active while we retry.",
+    greeting: "Hello,",
+    intro: [`We couldn't charge the renewal of ${nameFor(item)} (${money(amount, cur)}).`],
+    amount: { main: money(amount, cur) },
+    rows,
+    body: [{
+      title: "What happens next",
+      paras: [
         "We'll retry automatically over the next few days, and your plan stays active in the meantime.",
         "Please update your payment method: in OrdCat, open Settings → User → Update payment method" + (payUrl ? `, or pay the invoice here: ${payUrl}` : "."),
-        "If no payment succeeds, the subscription ends and your account goes back to Free."],
-    },
-  })[l];
-  return shortMail(lang, block, inv.customer_email ?? null, item, sub?.metadata?.user_id ?? null);
+        "If no payment succeeds, the subscription ends and your account goes back to Free.",
+      ],
+    }],
+    buttons,
+  }, site);
+  return { to: inv.customer_email ?? null, lang: "en", ...m, item, user_id: sub?.metadata?.user_id ?? null };
 }
 
 function cancelMail(sub: any, item: string | null, email: string | null, at: number): Mail {
-  const lang = langOf(sub?.metadata?.lang, null);
   const end = Number(sub.cancel_at ?? subEnd(sub) ?? 0);
   const recv = Number(sub.canceled_at ?? at);
-  const block = (l: Lang) => ({
-    de: {
-      head: "Bestätigung Ihrer Kündigung",
-      lines: [`Ihre Kündigung von ${nameFor(item, l)} ist am ${when(recv, l)} eingegangen.`,
-        end ? `Das Abonnement endet am ${day(end, l)}. Bis dahin können Sie es weiter nutzen; es wird nicht mehr verlängert.` : "Das Abonnement wird nicht mehr verlängert.",
-        "Es sich anders überlegt? Bis zum Ende können Sie es in der OrdCat-App unter Einstellungen → Benutzer (User) → „Resume subscription“ wieder aufnehmen.",
-        `Referenz: ${sub.id}`],
-    },
-    zh: {
-      head: "已取消订阅",
-      lines: [`我们在 ${when(recv, l)} 收到了你取消 ${nameFor(item, l)} 的操作。`,
-        end ? `订阅将于 ${day(end, l)} 结束，在此之前照常使用，不会再续费。` : "订阅不会再续费。",
-        "改主意了？结束前在 OrdCat 里打开 设置 → 用户 →「恢复订阅」就行。",
-        `编号：${sub.id}`],
-    },
-    en: {
-      head: "Your cancellation is confirmed",
-      lines: [`We received your cancellation of ${nameFor(item, l)} on ${when(recv, l)}.`,
-        end ? `Your subscription ends on ${day(end, l)}. You can keep using it until then; it won't renew.` : "Your subscription won't renew.",
+  const site = SITE();
+  const rows: Row[] = [{ k: "Product", v: nameFor(item) }, { k: "Received", v: whenEn(recv) }];
+  if (end) rows.push({ k: "Ends on", v: dayEn(end) });
+  if (email) rows.push({ k: "Email", v: email });
+  rows.push({ k: "Reference", v: String(sub.id), mono: true });
+  const m = render({
+    subject: "Subscription cancelled · OrdCat",
+    preheader: end ? `${nameFor(item)} ends on ${dayEn(end)} and won't renew.` : `${nameFor(item)} won't renew.`,
+    badge: "no", icon: "✓",
+    title: "Your cancellation is confirmed",
+    subtitle: end ? `You can keep using ${nameFor(item)} until ${dayEn(end)}.` : "Your subscription won't renew.",
+    greeting: "Hello,",
+    intro: [`We received your cancellation of ${nameFor(item)} on ${whenEn(recv)}.`],
+    rows,
+    body: [{
+      paras: [
+        end ? `Your subscription ends on ${dayEn(end)}. You can keep using it until then; it won't renew.` : "Your subscription won't renew.",
         "Changed your mind? Before it ends, open OrdCat → Settings → User → Resume subscription.",
-        `Reference: ${sub.id}`],
-    },
-  })[l];
-  return shortMail(lang, block, email, item, sub?.metadata?.user_id ?? null);
+        "Didn't cancel this yourself? Just reply to this email.",
+      ],
+    }],
+    legal: [{
+      paras: [`Seller: ${SELLER_NAME}, Hedemannstraße 74, 78355 Hohenfels, Germany · ${SUPPORT}.`],
+      links: [{ label: "Terms", href: `${site}/terms.html` }, { label: "Withdrawal information", href: `${site}/widerruf.html` }],
+    }],
+  }, site);
+  return { to: email, lang: "en", ...m, item, user_id: sub?.metadata?.user_id ?? null };
 }
 
-async function receiptMail(load: () => Promise<Receipt>, country?: string | null): Promise<Mail> {
-  const r = await load();
-  const lang = langOf(r.lang, country);
-  const m = buildMail(lang, r);
-  return { to: r.email, lang, ...m, item: r.item, user_id: r.user_id, skip: r.paid ? undefined : "not paid" };
-}
+// Plan upgrade made in the app (stripe-checkout "change"): Pro → Max, or monthly → yearly. The new billing cycle starts
+// today (billing_cycle_anchor = now, proration_behavior = always_invoice), so Stripe charges the new price minus a credit
+// for the unused part of the old plan right away: invoice.paid, billing_reason = subscription_update.
+// Same layout titled "Plan changed" for any other subscription_update invoice (e.g. a scheduled downgrade taking effect).
+const TIER: Record<string, number> = { pro: 1, max: 2 };
+type PlanAt = { item: string | null; interval: string | null; unit: number | null };
 
-/** Claim (receipt_emails) → build → send → mark. One mail per id, ever. Never throws. */
-async function sendOnce(admin: any, id: string, kind: "checkout" | "renewal" | "failed" | "cancel", build: () => Promise<Mail>) {
-  const key = Deno.env.get("RESEND_API_KEY");
-  if (!key) return "no_key";                         // nothing claimed, so a later redelivery can still send it
-  let claimed = false;
-  try {
-    const { data, error } = await admin.from("receipt_emails")
-      .upsert({ id, kind, status: "sending" }, { onConflict: "id", ignoreDuplicates: true }).select("id");
-    if (error) { console.error("receipt_emails claim", error.message); return "no_table"; }   // don't risk duplicates
-    if (!data?.length) return "duplicate";
-    claimed = true;
-    const m = await build();
-    let uid: string | null = m.user_id && /^[0-9a-f-]{36}$/i.test(m.user_id) ? m.user_id : null;
-    if (!m.to || m.skip) {
-      await admin.from("receipt_emails").update({ status: "skipped", item: m.item, lang: m.lang, error: m.skip ?? "no email" }).eq("id", id);
-      return "skipped";
-    }
-    const bcc = Deno.env.get("CANCEL_MAIL_BCC");
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Idempotency-Key": `ordcat-${id}`.slice(0, 256) },
-      body: JSON.stringify({
-        from: Deno.env.get("CANCEL_MAIL_FROM") ?? "OrdCat <noreply@ordcat.de>",
-        to: [m.to], ...(bcc ? { bcc: [bcc] } : {}), reply_to: "support@ordcat.de",
-        subject: m.subject, html: m.html, text: m.text,
-      }),
-    });
-    const err = res.ok ? null : (await res.text()).slice(0, 400);
-    const upd = { status: res.ok ? "sent" : "failed", item: m.item, lang: m.lang, error: err, sent_at: res.ok ? new Date().toISOString() : null, user_id: uid };
-    let { error: e2 } = await admin.from("receipt_emails").update(upd).eq("id", id);
-    if (e2 && uid) { uid = null; ({ error: e2 } = await admin.from("receipt_emails").update({ ...upd, user_id: null }).eq("id", id)); }
-    if (e2) console.error("receipt_emails update", e2.message);
-    return res.ok ? "sent" : "failed";
-  } catch (e) {
-    console.error("mail", (e as Error).message);
-    if (claimed) {
-      try { await admin.from("receipt_emails").update({ status: "failed", error: String((e as Error).message).slice(0, 400) }).eq("id", id); } catch (_) { /* ignore */ }
-    }
-    return "error";
+/** Old plan = price on the credit line ("Unused time on …"), new plan = price on the charge line. */
+function planLines(inv: any, itemOfPrice: (id: string) => string | undefined): { old: PlanAt; now: PlanAt } {
+  const out = { old: { item: null, interval: null, unit: null } as PlanAt, now: { item: null, interval: null, unit: null } as PlanAt };
+  for (const l of inv?.lines?.data ?? []) {
+    const pid = idOf(l.price) ?? idOf(l.pricing?.price_details?.price) ?? null;
+    const it = pid ? itemOfPrice(pid) : undefined;
+    if (!it) continue;
+    const pr = typeof l.price === "object" ? l.price : null;
+    const at = { item: it, interval: pr?.recurring?.interval ?? null, unit: pr?.unit_amount != null ? Number(pr.unit_amount) : null };
+    if (Number(l.amount ?? 0) < 0) { if (!out.old.item) out.old = at; } else if (!out.now.item) out.now = at;
   }
+  return out;
 }
+
+function upgradeMail(r: Receipt, sub: any, old: PlanAt, now: PlanAt): Mail {
+  const site = SITE();
+  const item = now.item ?? r.item;
+  const iv = now.interval ?? r.items[0]?.interval ?? null;
+  const name = item && ITEM_NAME[item] ? ITEM_NAME[item] : (r.items[0]?.name ?? "OrdCat");
+  const oldName = old.item && ITEM_NAME[old.item] ? ITEM_NAME[old.item] : null;
+  const tierUp = !!(item && old.item && (TIER[item] ?? 0) > (TIER[old.item] ?? 0));
+  const toYearly = !!(item && old.item && item === old.item && old.interval === "month" && iv === "year");
+  const up = tierUp || toYearly;
+  const per = iv === "year" ? "year" : "month";
+  const subPrice = sub?.items?.data?.[0]?.price;
+  const unit = Number(now.unit ?? (subPrice?.id && itemOfPriceId(subPrice.id) === item ? subPrice.unit_amount : null) ??
+    (item && PLAN_CENTS[item] ? PLAN_CENTS[item][per] : 0));
+  const charged = money(r.amount_total, r.currency);
+  const taxTxt = r.amount_tax != null ? `incl. ${money(r.amount_tax, r.currency)} VAT` : "VAT included";
+  const was = oldName ? `${oldName}${old.interval ? ` (${old.interval === "year" ? "yearly" : "monthly"})` : ""}` : null;
+
+  const rows: Row[] = [{ k: "New plan", v: name, sub: was ? `was ${was}` : undefined }];
+  rows.push({ k: "Billing", v: billingLine(iv) });
+  rows.push({ k: "Charged now", v: charged, sub: `${taxTxt} · unused part of your previous plan credited` });
+  rows.push({ k: "Date", v: whenEn(r.created) });
+  const pl = payLine(r);
+  if (pl) rows.push({ k: "Payment method", v: pl });
+  if (r.email) rows.push({ k: "Email", v: r.email });
+  if (r.renews_at) rows.push({ k: "Next renewal", v: dayEn(r.renews_at), sub: unit ? `${money(unit, r.currency)} incl. VAT` : undefined });
+  else if (r.ends_at) rows.push({ k: "Ends on", v: dayEn(r.ends_at) });
+  if (r.invoice_number) rows.push({ k: "Invoice no.", v: r.invoice_number });
+  rows.push({ k: "Invoice ID", v: r.id, mono: true });
+
+  const y = unit ? yearlyOf(item, iv, unit) : null;
+  const save = y
+    ? {
+      html: `Regular price <s style="color:${C.mute}">${escH(money(y.regular, r.currency))}/year</s> (${escH(money(y.monthly, r.currency))} × 12 months) · ` +
+        `yearly discount <b style="color:${C.amber}">−${escH(money(y.discount, r.currency))}</b> (${Math.round(y.discount / y.regular * 100)}% off) · ` +
+        `you pay <b>${escH(money(y.paid, r.currency))}/year</b>.`,
+      text: `Regular price ${money(y.regular, r.currency)}/year (${money(y.monthly, r.currency)} × 12 months), yearly discount −${money(y.discount, r.currency)} (${Math.round(y.discount / y.regular * 100)}% off), you pay ${money(y.paid, r.currency)}/year.`,
+    }
+    : undefined;
+
+  const paras: string[] = [];
+  paras.push(`${name}${iv ? ` (${per === "year" ? "yearly" : "monthly"})` : ""} is active right away and your new billing cycle starts today. ` +
+    `Today's charge is the price of the new plan minus a credit for the unused part of your previous plan: ${charged} (${taxTxt}).`);
+  if (r.renews_at && unit) paras.push(`From ${dayEn(r.renews_at)}, your subscription renews automatically every ${per} at ${money(unit, r.currency)} (VAT included) until you cancel.`);
+  else if (r.ends_at) paras.push(`Your subscription is cancelled and ends on ${dayEn(r.ends_at)}.`);
+  paras.push(`Manage it in OrdCat under Settings → User → Membership. You can cancel anytime, effective at the end of the current period, also without signing in at ${site}/kuendigen.html.`);
+
+  const buttons: Button[] = [];
+  if (r.invoice_pdf) buttons.push({ label: "Invoice PDF", href: r.invoice_pdf, primary: true });
+  else if (r.invoice_url) buttons.push({ label: "View invoice", href: r.invoice_url, primary: true });
+  if (r.receipt_url) buttons.push({ label: "Stripe receipt", href: r.receipt_url, primary: !buttons.length });
+  if (r.invoice_pdf && r.invoice_url) buttons.push({ label: "View invoice", href: r.invoice_url });
+  buttons.push({ label: "Cancel subscription", href: `${site}/kuendigen.html` });
+
+  const title = tierUp ? `You're on ${name} now` : toYearly ? "You're on yearly billing now" : "Plan changed";
+  const m = render({
+    subject: up ? "Plan upgraded · OrdCat" : "Plan changed · OrdCat",
+    preheader: `${name} (${per === "year" ? "yearly" : "monthly"}) is active · ${charged} charged today`,
+    badge: "ok", icon: up ? "↑" : "✓",
+    title,
+    subtitle: up ? "Plan upgraded. Your new billing cycle starts today." : `Your plan is now ${name}, billed ${per === "year" ? "yearly" : "monthly"}.`,
+    amount: { main: charged },
+    rows, save,
+    body: [{ title: "What changes", paras }],
+    buttons,
+    legal: [{
+      title: "Seller",
+      paras: [`${SELLER_NAME}, Hedemannstraße 74, 78355 Hohenfels, Germany · ${SUPPORT}. This email confirms the change to your contract.`],
+      links: [
+        { label: "Terms", href: `${site}/terms.html` },
+        { label: "Withdrawal information", href: `${site}/widerruf.html` },
+        { label: "Cancel contracts", href: `${site}/kuendigen.html` },
+      ],
+    }],
+  }, site);
+  return { to: r.email, lang: "en", ...m, item, user_id: r.user_id, skip: r.paid ? undefined : "not paid" };
+}
+const itemOfPriceId = (id: string) =>
+  Object.entries(JSON.parse(Deno.env.get("STRIPE_PRICES") ?? "{}") as Record<string, string>).find(([, v]) => v === id)?.[0]?.split(".")[0];
+
+async function receiptMail(load: () => Promise<Receipt>, _country?: string | null): Promise<Mail> {
+  const r = await load();
+  const m = buildMail(r);
+  return { to: r.email, lang: "en", ...m, item: r.item, user_id: r.user_id, skip: r.paid ? undefined : "not paid" };
+}
+
 
 function withTimeout(p: Promise<unknown>, ms: number) {
   return Promise.race([p, new Promise((res) => setTimeout(res, ms))]);
+}
+
+/** Fish to credit for a paid fish session. Packs: metadata as before. Custom amount: recomputed here from the euros
+ *  actually paid (metadata.amount_eur must match amount_total and metadata.cents); metadata.fish is only cross-checked. */
+function fishCredit(obj: any): { fish: number; cents: number; pack: string } {
+  if (obj.metadata?.pack === "custom") {
+    const eur = customEur(obj.metadata?.amount_eur);
+    if (eur === null) throw new Error("custom fish top-up: bad amount_eur");
+    const cents = eur * 100;
+    if (Number(obj.amount_total) !== cents || Number(obj.metadata?.cents ?? cents) !== cents) {
+      throw new Error(`custom fish top-up: paid ${obj.amount_total} ≠ ${cents}`);
+    }
+    const fish = fishForEur(eur);
+    if (Number(obj.metadata?.fish) !== fish) console.error("custom fish: metadata.fish", obj.metadata?.fish, "≠", fish, "→ using", fish);
+    return { fish, cents, pack: `custom:${eur}` };
+  }
+  const fish = Number(obj.metadata?.fish ?? 0);
+  if (!(fish > 0)) throw new Error("fish top-up without amount");
+  return { fish, cents: Number(obj.metadata?.cents ?? obj.amount_subtotal ?? 0), pack: String(obj.metadata?.pack ?? "") };
+}
+
+// ---------- unpaid-order reminder (checkout.session.expired) ----------
+const LIVE_SUB = ["active", "trialing", "past_due", "unpaid", "incomplete"];
+
+/** Has the user bought the same thing since this session was opened? (plan: any Pro / Max; skill: that skill; fish: any top-up) */
+async function boughtSince(admin: any, s: any, item: string, userId: string): Promise<boolean> {
+  const since = Number(s.created ?? 0);
+  const isPlan = item === "pro" || item === "max";
+  try {
+    if (item === "fish") {
+      const { data } = await admin.from("fish_topups").select("id,at").eq("user_id", userId);
+      if ((data ?? []).some((r: any) => r.id !== s.id && (!r.at || Date.parse(r.at) / 1000 >= since))) return true;
+    } else {
+      const { data } = await admin.from("subscriptions").select("skill,status,ends_at").eq("user_id", userId);
+      const now = Date.now();
+      if ((data ?? []).some((r: any) => (isPlan ? r.skill === "pro" || r.skill === "max" : r.skill === item) &&
+          LIVE_SUB.includes(r.status) && !(r.ends_at && Date.parse(r.ends_at) < now))) return true;
+    }
+  } catch (_) { /* fall through to Stripe */ }
+  // A later completed checkout for the same customer + item (covers a payment the webhook hasn't stored yet).
+  const cus = idOf(s.customer);
+  if (cus) {
+    try {
+      const l = await stripeGetOk(`checkout/sessions?customer=${encodeURIComponent(cus)}&status=complete&created[gte]=${since}&limit=20`);
+      if ((l.data ?? []).some((x: any) => {
+        if (x.id === s.id || !["paid", "no_payment_required"].includes(x.payment_status)) return false;
+        const it = x.metadata?.item;
+        return isPlan ? it === "pro" || it === "max" : it === item;
+      })) return true;
+    } catch (_) { /* ignore */ }
+  }
+  return false;
+}
+
+async function unpaidMail(admin: any, s: any): Promise<Mail> {
+  const item: string | null = s.metadata?.item ?? null;
+  const userId: string | null = s.metadata?.user_id ?? s.client_reference_id ?? null;
+  const base = { lang: "en" as Lang, item, user_id: userId };
+  const skip = (why: string): Mail => ({ to: null, subject: "", html: "", text: "", ...base, skip: why });
+  if (s.payment_status === "paid" || s.payment_status === "no_payment_required") return skip("paid");
+  if (!userId) return skip("no user");
+  if (!item) return skip("no item");
+  let full = s;
+  try { full = await stripeGetOk(`checkout/sessions/${encodeURIComponent(s.id)}?expand[]=line_items`); } catch (_) { /* event copy */ }
+  let email: string | null = full.customer_details?.email ?? full.customer_email ?? null;
+  if (!email && idOf(full.customer)) {
+    try { email = (await stripeGetOk(`customers/${idOf(full.customer)}`)).email ?? null; } catch (_) { /* none */ }
+  }
+  if (!email) return skip("no email");
+  if (await boughtSince(admin, full, item, userId)) return skip("bought since");
+
+  const site = SITE();
+  const cur = String(full.currency ?? "eur");
+  const li = full.line_items?.data?.[0];
+  const iv: string | null = li?.price?.recurring?.interval ?? null;
+  const fish = item === "fish" ? Number(full.metadata?.fish ?? 0) : 0;
+  const amount = Number(full.amount_total ?? li?.amount_total ?? full.metadata?.cents ?? 0);
+  const name = item === "fish" ? ITEM_NAME.fish : nameFor(item);
+  const rec = full.after_expiration?.recovery;
+  const url: string = rec?.url || `${site}/pricing.html`;
+  const recExp = Number(rec?.expires_at ?? 0);
+
+  const rows: Row[] = [{ k: "Product", v: name }];
+  rows.push(fish > 0 ? { k: "Quantity", v: `${fish} Dried Fish`, sub: "One-time payment" } : { k: "Billing", v: billingLine(iv) });
+  if (amount > 0) rows.push({ k: "Amount", v: money(amount, cur), sub: "VAT included · not charged" });
+  rows.push({ k: "Started", v: whenEn(Number(full.created ?? Date.now() / 1000)) });
+  rows.push({ k: "Email", v: email });
+  rows.push({ k: "Reference", v: String(full.id), mono: true });
+
+  const paras: string[] = [];
+  paras.push(rec?.url
+    ? `To finish your order, click Complete payment.${recExp ? ` The link works until ${dayEn(recExp)}.` : ""}`
+    : `To finish your order, open ${site}/pricing.html or OrdCat → Settings → User → Membership.`);
+  paras.push("No payment was taken. Ignore this email if you changed your mind.");
+
+  const m = render({
+    subject: "Your OrdCat order isn't complete",
+    preheader: `${name}${amount > 0 ? ` · ${money(amount, cur)}` : ""} · no payment was taken`,
+    badge: "wait", icon: "!",
+    title: "Your order isn't complete",
+    subtitle: "The checkout ended before the payment went through.",
+    greeting: "Hello,",
+    intro: [`You started an order for ${name} on ${dayEn(Number(full.created ?? Date.now() / 1000))}, but the payment wasn't completed.`],
+    amount: amount > 0 ? { main: money(amount, cur), per: iv === "year" ? "year" : iv === "month" ? "month" : undefined } : undefined,
+    rows,
+    body: [{ paras }],
+    buttons: [{ label: "Complete payment", href: url, primary: true }],
+    legal: [{
+      title: "Seller",
+      paras: [`${SELLER_NAME}, Hedemannstraße 74, 78355 Hohenfels, Germany · ${SUPPORT}.`],
+      links: [{ label: "Terms", href: `${site}/terms.html` }, { label: "Withdrawal information", href: `${site}/widerruf.html` }],
+    }],
+  }, site);
+  return { to: email, ...m, ...base };
 }
 
 Deno.serve(async (req) => {
@@ -598,6 +723,23 @@ Deno.serve(async (req) => {
     return itemOfPrice(priceId) ?? sub?.metadata?.item ?? "pro";
   };
 
+  // The phase after the current one of a subscription's schedule = the change the user booked in the app.
+  const pendingOf = async (sub: any) => {
+    const none = { pending_plan: null, pending_interval: null, pending_at: null };
+    const sid = idOf(sub?.schedule);
+    if (!sid || sub.status === "canceled") return none;
+    try {
+      const sc = typeof sub.schedule === "object" && sub.schedule?.phases ? sub.schedule : await stripeGetOk(`subscription_schedules/${sid}`);
+      if (!["not_started", "active"].includes(sc.status)) return none;
+      const t = Date.now() / 1000;
+      const next = (sc.phases ?? []).find((p: any) => Number(p.start_date) > t);
+      const pid = idOf(next?.items?.[0]?.price);
+      const item = pid ? itemOfPrice(pid) : undefined;
+      if (!next || !item) return none;
+      const key = Object.entries(prices).find(([, v]) => v === pid)?.[0] ?? "";
+      return { pending_plan: item, pending_interval: key.split(".")[1] ?? null, pending_at: iso(Number(next.start_date)) };
+    } catch (_) { return none; }
+  };
   const saveSub = async (sub: any) => {
     const userId = sub.metadata?.user_id ?? null;
     const it = sub.items?.data?.[0];
@@ -623,7 +765,10 @@ Deno.serve(async (req) => {
       amount_cents: it?.price?.unit_amount ?? null,
       currency: it?.price?.currency ?? null,
     };
-    let { error } = await admin.from("subscriptions").upsert({ ...base, ...extra });
+    // plan_change.sql columns: a downgrade / switch to monthly booked for the end of the period (Subscription Schedule).
+    const pend = await pendingOf(sub);
+    let { error } = await admin.from("subscriptions").upsert({ ...base, ...extra, ...pend });
+    if (error && /column|schema cache/i.test(error.message)) ({ error } = await admin.from("subscriptions").upsert({ ...base, ...extra }));
     if (error && /column|schema cache/i.test(error.message)) ({ error } = await admin.from("subscriptions").upsert(base));
     if (error) throw new Error(error.message);
     if (userId && (item === "pro" || item === "max")) await admin.rpc("ord_wallet_sync", { p_user: userId });
@@ -639,11 +784,9 @@ Deno.serve(async (req) => {
         if (obj.mode === "payment" && obj.metadata?.item === "fish") {
           // Paid now (card) or later (SEPA etc. → async_payment_succeeded). Same session id never adds twice.
           if (obj.payment_status === "paid" && userId) {
-            const fish = Number(obj.metadata?.fish ?? 0);
-            if (!(fish > 0)) throw new Error("fish top-up without amount");
+            const c = fishCredit(obj);
             const { error } = await admin.rpc("fish_topup", {
-              p_session: obj.id, p_user: userId, p_fish: fish,
-              p_cents: Number(obj.metadata?.cents ?? obj.amount_subtotal ?? 0), p_pack: String(obj.metadata?.pack ?? ""),
+              p_session: obj.id, p_user: userId, p_fish: c.fish, p_cents: c.cents, p_pack: c.pack,
             });
             if (error) throw new Error(error.message);
           }
@@ -661,6 +804,17 @@ Deno.serve(async (req) => {
       case "customer.subscription.deleted":
         await saveSub(obj);
         break;
+      case "subscription_schedule.created":
+      case "subscription_schedule.updated":
+      case "subscription_schedule.released":
+      case "subscription_schedule.canceled":
+      case "subscription_schedule.completed":
+      case "subscription_schedule.aborted": {
+        // A booked plan change appeared / went away: refresh the row's pending_* columns from the subscription.
+        const subId = idOf(obj.subscription) ?? idOf(obj.released_subscription);
+        if (subId) await saveSub(await stripeGet(`subscriptions/${subId}`));
+        break;
+      }
       case "invoice.paid": {
         // A renewal: fresh month of credits.
         const subId = idOf(obj.subscription) ?? idOf(obj.parent?.subscription_details?.subscription);
@@ -699,10 +853,25 @@ Deno.serve(async (req) => {
           return receiptFromInvoice(obj, sub, itemOfSub(sub));
         }, obj.customer_address?.country));
       }
+    } else if (ev.type === "invoice.paid" && obj.billing_reason === "subscription_update" && typeof obj.id === "string") {
+      // Plan switched (in the app via stripe-checkout) and charged now: "Plan upgraded" / "Plan changed" confirmation.
+      const subId = idOf(obj.subscription) ?? idOf(obj.parent?.subscription_details?.subscription);
+      if (subId) {
+        job = sendOnce(admin, `upgrade:${obj.id}`, "upgrade", async () => {
+          const sub = await stripeGetOk(`subscriptions/${subId}?expand[]=default_payment_method`);
+          const r = await receiptFromInvoice(obj, sub, itemOfSub(sub));
+          const pl = planLines(obj, itemOfPrice);
+          return upgradeMail(r, sub, pl.old, pl.now);
+        });
+      }
     } else if (ev.type === "invoice.payment_failed" && typeof obj.id === "string" && obj.billing_reason !== "subscription_create") {
       // The first invoice failing is the customer still on Stripe's page; only renewals get a mail. One per invoice.
       const sub = failedSub;
       if (sub?.id) job = sendOnce(admin, `fail:${obj.id}`, "failed", async () => failedMail(obj, sub, itemOfSub(sub)));
+    } else if (ev.type === "checkout.session.expired" && typeof obj.id === "string" &&
+               obj.payment_status !== "paid" && obj.payment_status !== "no_payment_required") {
+      // Unpaid order: one reminder per session (skipped when there's no user / email, or the same thing was bought since).
+      job = sendOnce(admin, `unpaid:${obj.id}`, "unpaid", () => unpaidMail(admin, obj));
     } else if (ev.type === "customer.subscription.updated") {
       const prev = ev.data?.previous_attributes ?? {};
       const nowCancelling = !!(obj.cancel_at_period_end || obj.cancel_at);

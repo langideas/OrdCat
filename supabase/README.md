@@ -127,7 +127,7 @@ select id, received_at, action, kind, email, contract, requested_date, status, m
 
 参考 ChatGPT Plus / Claude Pro / Cursor：一个「当前方案」卡片、一个方案选择（免费版 / Pro / Max，月付 / 年付）、换方案只走 Stripe Customer Portal（不会出现第二份订阅），付完有结算单页面和确认邮件。
 
-**运行顺序**（SQL Editor，每个都可以重复运行）：`schema.sql` → `square.sql` → `signal.sql` → `account2.sql` → `membership.sql` → `fish.sql` → `raids.sql` → `cancel.sql` → **`receipts.sql`**。
+**运行顺序**（SQL Editor，每个都可以重复运行）：`schema.sql` → `square.sql` → `signal.sql` → `account2.sql` → `membership.sql` → `fish.sql` → `raids.sql` → `cancel.sql` → **`receipts.sql`** → `plan_change.sql`（App 里换方案：预约降级的 pending_* 列 + 升级 / 预约邮件；已经跑过 receipts.sql 的只要跑这一个）。
 `receipts.sql`：`subscriptions` 加 4 列（`billing_interval`、`cancel_at_period_end`、`amount_cents`、`currency`，App 的会员卡片显示用）+ 新表 `receipt_emails`（邮件幂等标记，开 RLS、只给 service_role）。没运行它之前 webhook 照样能开会员，只是不发邮件、App 看不到月付 / 年付和「已取消」。
 
 ### Lang 要做的（按顺序）

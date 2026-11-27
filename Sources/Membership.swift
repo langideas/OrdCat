@@ -3,8 +3,11 @@
 // Modelled on ChatGPT / Claude / Cursor plan pages: one "current plan" card, one plan picker (Free / Pro / Max side
 // by side, monthly / yearly toggle with the yearly saving), one clear button per plan (开通 / 升级 / 降级 / 当前方案),
 // banners for a failed renewal (past_due) and a cancelled plan, skills and add-ons in their own sections.
-// Switching plans never opens a second checkout: stripe-checkout answers with the Stripe Portal for anyone who already
-// has a plan, where upgrades are prorated right away and downgrades happen at the end of the period.
+// Switching plans never opens a second checkout and no longer uses the Stripe Portal (ChatGPT-style, v0.2.64): the app
+// asks stripe-checkout for a preview, shows "pay €X today, then €Y per period from <date>", and on OK the server changes
+// the subscription. Upgrades (higher plan, monthly → yearly) apply now with a new billing period from today and the unused
+// part credited; downgrades (lower plan, yearly → monthly) are booked for the end of the period (no refund) and can be
+// undone from the current-plan card. The portal stays for the card, invoices and cancelling.
 // All text goes through L10n.t (Look.swift has the English).
 
 import Cocoa
@@ -37,6 +40,9 @@ struct PlanState: Equatable {
     var endsAt: Date?
     var cancelling = false
     var amountCents: Int?
+    var pendingPlan: String?     // a downgrade / switch to monthly booked for pendingAt (plan_change.sql)
+    var pendingInterval: String?
+    var pendingAt: Date?
     var pastDue: Bool { status == "past_due" || status == "unpaid" }
     var isStripe: Bool { provider == "stripe" }
     var isFree: Bool { plan == "free" }
@@ -60,6 +66,11 @@ struct PlanState: Equatable {
             else { s.cancelling = (r["cancel_at_period_end"] as? Bool) ?? (renews == nil && ends != nil) }
             let cents = CatStats.int(r["amount_cents"])
             s.amountCents = cents > 0 ? cents : nil
+            if let pp = r["pending_plan"] as? String, pp == "pro" || pp == "max", let at = Fish.parseDate(r["pending_at"]), at > Date() {
+                s.pendingPlan = pp
+                s.pendingInterval = r["pending_interval"] as? String
+                s.pendingAt = at
+            }
             if let b = best {
                 let better = (s.plan == "max" && b.plan != "max") || (s.plan == b.plan && s.isStripe && !b.isStripe)
                 if !better { continue }
@@ -270,6 +281,9 @@ final class MembershipSection: NSObject {
     private let planTitle = SK.WrapLabel("", size: 15, secondary: false, weight: .bold)
     private let planLines = SK.WrapLabel("", size: 12)
     private let manageBtn = OCButton(title: "管理订阅", target: nil, action: nil)
+    private let pendingText = SK.WrapLabel("", size: 12, secondary: false)
+    private let undoBtn = OCButton(title: "撤销", target: nil, action: nil)
+    private let pendingBox = SK.Group()
     private let cycle = NSSegmentedControl(labels: ["月付", "年付 · 省 20%"], trackingMode: .selectOne, target: nil, action: nil)
     private let cycleNote = SK.WrapLabel("", size: 11.5)
     private let cards = ["free", "pro", "max"].map { PlanCard(id: $0) }
@@ -310,6 +324,12 @@ final class MembershipSection: NSObject {
         planLines.widthAnchor.constraint(equalTo: head.widthAnchor).isActive = true
         gm.add(SK.info(head, manageBtn))
         p.add(gm)
+        // A booked downgrade / switch to monthly: "{date} 起改为 Pro · 月付" with 撤销.
+        undoBtn.target = self; undoBtn.action = #selector(undoChange)
+        pendingText.textColor = .labelColor
+        pendingBox.add(SK.info(pendingText, undoBtn))
+        pendingBox.isHidden = true
+        p.add(pendingBox)
 
         cycle.selectedSegment = 1            // 主推年付（Lang 2026-11-24）
         cycle.target = self; cycle.action = #selector(cycleChanged)
@@ -331,7 +351,7 @@ final class MembershipSection: NSObject {
             c.heightAnchor.constraint(equalTo: row.heightAnchor).isActive = true
         }
         p.add(row)
-        p.hint("价格含增值税，通过 Stripe 安全付款。升级马上生效，差价按当期剩余天数折算；降级和取消在当期结束时生效，之前照常使用。")
+        p.hint("价格含增值税，通过 Stripe 安全付款。升级立即生效，新的计费周期从今天开始，未用完的部分自动抵扣；降级和改月付在当期结束时生效，不退差价。")
         p.add(status)
 
         // ---------- 技能 ----------
@@ -348,8 +368,9 @@ final class MembershipSection: NSObject {
         let gf = SK.Group()
         gf.add(SK.info(fishLine))
         p.add(gf)
-        p.hint("1 € = 100 条小鱼干，买得多送得多，永久有效。充值鱼干什么都能买；奖励鱼干（新号、邀请、喵副本奖励）在喵副本里随便用，开会员、技能和加油包时最多抵 30%。加油包 = 300 条小鱼干换 1500 条托管消息，不过期。")
-        p.add(SK.buttons([btn("充值小鱼干", #selector(fishTopUp)), btn("买加油包", #selector(buyTopup)),
+        p.hint("1 € = 100 条小鱼干，买得多送得多，永久有效。充值鱼干什么都能买；奖励鱼干（新号、邀请、喵副本奖励）在喵副本里随便用，开会员和技能时最多抵 30%。")
+        // 「买加油包」暂时不卖（Lang 2026-11-27；服务器 fish_topup_on() = false），buyTopup 留着方便以后打开。
+        p.add(SK.buttons([btn("充值小鱼干", #selector(fishTopUp)),
                           btn("用小鱼干开会员", #selector(fishPlan)), btn("流水", #selector(fishLedger)),
                           btn("刷新", #selector(refreshAll))]))
         fishAuto.target = self; fishAuto.action = #selector(fishAutoChanged)
@@ -428,6 +449,14 @@ final class MembershipSection: NSObject {
             }
         }
         planLines.stringValue = lines.joined(separator: "\n")
+        if s.isStripe, let pp = s.pendingPlan, let at = s.pendingAt {
+            let pname = (MemberTier(pp) ?? .pro).name
+            let piv = s.pendingInterval == "year" ? L10n.t("年付") : L10n.t("月付")
+            pendingText.stringValue = L10n.t("\(ocDay(at)) 起改为 \(pname)") + " · " + piv
+            pendingBox.isHidden = false
+        } else {
+            pendingBox.isHidden = true
+        }
         manageBtn.isHidden = !(acc.signedIn && PlanState.hasStripe)
 
         // plan picker
@@ -473,14 +502,23 @@ final class MembershipSection: NSObject {
             return ("到期回到免费版", false)
         }
         let name = id == "pro" ? "Pro" : "Max"
+        // Already booked for the end of the period: nothing more to do on this card.
+        if s.isStripe, s.pendingPlan == id, (s.pendingInterval ?? "") == wantInterval, let at = s.pendingAt {
+            return (L10n.t("\(ocDay(at)) 起生效"), false)
+        }
         if id == s.plan {
             if s.provider == "fish" { return ("当前方案（小鱼干）", false) }
             if s.cancelling { return ("恢复订阅", true) }
             if let iv = s.interval, iv != wantInterval { return (wantInterval == "year" ? "改为年付" : "改为月付", true) }
             return ("当前方案", false)
         }
+        // A plan not on Stripe (Dried Fish / old rows) can't be downgraded in the portal: no buying a lower plan on top of it.
+        if !s.isFree && !s.isStripe && rank(id) < rank(s.plan) {
+            if let e = s.endsAt ?? s.renewsAt { return (L10n.t("\(ocDay(e)) 到期后可换"), false) }
+            return ("已有更高方案", false)
+        }
         if s.isFree || !s.isStripe { return (L10n.t("开通 \(name)"), true) }
-        return (rank(id) > rank(s.plan) ? L10n.t("升级到 \(name)") : L10n.t("降级到 \(name)"), true)
+        return (rank(id) > rank(s.plan) ? L10n.t("升级到 \(name)") : L10n.t("改为 \(name)"), true)
     }
 
     // MARK: actions
@@ -503,6 +541,11 @@ final class MembershipSection: NSObject {
         if id == s.plan && s.cancelling {
             guard OCConfirm.ask("恢复订阅？", "会打开 Stripe 的订阅管理页面，点「续订」就能恢复，之后照常自动续费。", ok: "继续") else { return }
             portal(flow: nil)
+            return
+        }
+        if !s.isFree && !s.isStripe && rank(id) < rank(s.plan) { return }   // button is disabled anyway; never a 2nd plan
+        if s.isStripe && !s.isFree && !s.pastDue {
+            changePlan(id, s)
             return
         }
         let m = PlanPrice.month[id]!, yr = PlanPrice.year[id]!
@@ -532,6 +575,78 @@ final class MembershipSection: NSObject {
             self.status.stringValue = L10n.t(l.portal ? "在 Stripe 页面确认就好，回来后这里会自动更新。"
                                                       : "在浏览器里付完款回来就好，会员会自动生效。")
             PayWatch.start(l.portal ? .portal : .plan(id), link: l)
+        }
+    }
+
+    /// Existing Stripe plan → preview, confirm, change (no portal). Upgrade now; downgrade / monthly at the period end.
+    private func changePlan(_ id: String, _ s: PlanState) {
+        let name = id == "pro" ? "Pro" : "Max"
+        let wantYear = yearly
+        let up = rank(id) > rank(s.plan) || (id == s.plan && wantYear && s.interval != "year")
+        let curName = (MemberTier(s.plan) ?? .pro).name + " · " + (s.interval == "year" ? L10n.t("年付") : L10n.t("月付"))
+        status.stringValue = L10n.t("正在计算价格…")
+        acc.planChange(item: id, yearly: wantYear, preview: true) { [weak self] o, err in
+            guard let self = self else { return }
+            guard let o = o else { self.status.stringValue = "⚠️ " + L10n.t(err ?? ""); return }
+            self.status.stringValue = ""
+            if (o["kind"] as? String) == "none" { self.status.stringValue = L10n.t("已经有这个方案了"); return }
+            let today = CatStats.int(o["today_cents"]), next = CatStats.int(o["next_cents"])
+            let nextAt = Fish.parseDate(o["next_at"])
+            let title: String, info: String, ok: String
+            if up {
+                title = id == s.plan ? L10n.t("改为年付？") : L10n.t("升级到 \(name)？")
+                var then = L10n.t("今天支付 \(PlanPrice.eur(today))。")
+                if let n = nextAt {
+                    then = wantYear ? L10n.t("今天支付 \(PlanPrice.eur(today))，之后从 \(ocDay(n)) 起每年 \(PlanPrice.eur(next))。")
+                                    : L10n.t("今天支付 \(PlanPrice.eur(today))，之后从 \(ocDay(n)) 起每月 \(PlanPrice.eur(next))。")
+                }
+                info = then + "\n\n" + L10n.t("立即生效，新的计费周期从今天开始，当前方案未用完的部分自动抵扣。用已保存的付款方式扣款。")
+                ok = L10n.t("确认升级")
+            } else {
+                title = id == s.plan ? L10n.t("改为月付？") : L10n.t("改为 \(name)？")
+                let at = Fish.parseDate(o["effective_at"]) ?? s.renewsAt ?? Date()
+                info = L10n.t("将在 \(ocDay(at)) 生效，之前照常使用 \(curName)，不退差价。") + "\n\n"
+                    + (wantYear ? L10n.t("之后每年 \(PlanPrice.eur(next))。") : L10n.t("之后每月 \(PlanPrice.eur(next))。"))
+                ok = L10n.t("确认更改")
+            }
+            guard OCConfirm.ask(title, info, ok: ok) else { return }
+            self.status.stringValue = L10n.t(up ? "正在升级…" : "正在预约…")
+            self.acc.planChange(item: id, yearly: wantYear) { [weak self] r, err in
+                guard let self = self else { return }
+                guard let r = r else { self.status.stringValue = "⚠️ " + L10n.t(err ?? ""); return }
+                let placeholder = URL(string: "https://ordcat.de/pricing.html")!
+                switch r["changed"] as? String ?? "" {
+                case "upgraded":
+                    self.status.stringValue = L10n.t("已升级，几秒后自动更新。")
+                    PayWatch.start(.portal, link: CheckoutLink(url: placeholder, id: nil, portal: true, reason: "upgraded", opened: Date()))
+                case "pending_payment":
+                    // 3-D Secure or a declined card: pay the invoice in the browser; the plan changes once it's paid.
+                    if let u = (r["url"] as? String).flatMap(URL.init(string:)) {
+                        NSWorkspace.shared.open(u)
+                        PayWatch.start(.portal, link: CheckoutLink(url: u, id: nil, portal: true, reason: "pay_invoice", opened: Date()))
+                    }
+                    self.status.stringValue = L10n.t("需要在浏览器里确认付款（比如银行验证），付完后自动升级。")
+                case "scheduled":
+                    let at = Fish.parseDate(r["effective_at"]) ?? s.renewsAt ?? Date()
+                    self.status.stringValue = L10n.t("已预约：\(ocDay(at)) 起改为 \(name)") + " · " + (wantYear ? L10n.t("年付") : L10n.t("月付"))
+                    self.acc.refreshSubscriptions { [weak self] in self?.refreshPlan() }
+                default:
+                    self.status.stringValue = L10n.t("已经有这个方案了")
+                }
+            }
+        }
+    }
+
+    @objc private func undoChange() {
+        let s = PlanState.current()
+        let cur = (MemberTier(s.plan) ?? .pro).name
+        guard OCConfirm.ask(L10n.t("撤销预约的更改？"), L10n.t("继续使用 \(cur)，照常续费。"), ok: L10n.t("撤销更改")) else { return }
+        status.stringValue = L10n.t("正在撤销…")
+        acc.planChange(item: nil, yearly: false, cancelChange: true) { [weak self] r, err in
+            guard let self = self else { return }
+            guard r != nil else { self.status.stringValue = "⚠️ " + L10n.t(err ?? ""); return }
+            self.status.stringValue = L10n.t("已撤销预约的更改。")
+            self.acc.refreshSubscriptions { [weak self] in self?.refreshPlan() }
         }
     }
 

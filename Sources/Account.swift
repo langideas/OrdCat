@@ -277,8 +277,8 @@ final class Account {
     }
 
     /// Stripe Checkout for Pro / Max / a skill, or the Customer Portal (portal = true; flow "payment" | "cancel").
-    /// When the account already has that plan or skill the server answers with a Portal link instead (link.portal = true):
-    /// switching plans / billing period happens there, so there is never a second subscription.
+    /// Someone who already has a Stripe plan changes it with planChange (in the app, no portal); for a skill they already
+    /// have, or a plan with a failed payment, the server answers with a Portal link (link.portal = true).
     func stripeLink(item: String?, yearly: Bool = false, portal: Bool = false, flow: String? = nil,
                     done: @escaping (CheckoutLink?, String?) -> Void) {
         guard signedIn else { done(nil, "先登录账号（设置 → 用户）"); return }
@@ -295,6 +295,23 @@ final class Account {
                                   reason: o?["reason"] as? String, opened: Date()), nil)
                 return
             }
+            done(nil, (o?["error"] as? String) ?? err ?? "付款服务还没开通")
+        }
+    }
+
+    /// Change an existing Stripe plan in the app (no portal): upgrade now (new billing period from today, unused part
+    /// credited) or book a downgrade / switch to monthly for the end of the period. preview = only the amounts for the
+    /// confirm dialog; cancelChange = undo a booked change. Answers stripe-checkout's JSON (changed, kind, today_cents,
+    /// next_cents, next_at, effective_at, url…) or an error text (e.g. 409 has_plan).
+    func planChange(item: String?, yearly: Bool, preview: Bool = false, cancelChange: Bool = false,
+                    done: @escaping ([String: Any]?, String?) -> Void) {
+        guard signedIn else { done(nil, "先登录账号（设置 → 用户）"); return }
+        var body: [String: Any] = cancelChange ? ["cancel_change": true] : ["item": item ?? "pro", "interval": yearly ? "year" : "month"]
+        if preview { body["preview"] = true }
+        body["locale"] = L10n.english ? "en" : "zh"
+        request("POST", "/functions/v1/stripe-checkout", json: body) { obj, err in
+            let o = obj as? [String: Any]
+            if err == nil, (o?["ok"] as? Bool) == true { done(o, nil); return }
             done(nil, (o?["error"] as? String) ?? err ?? "付款服务还没开通")
         }
     }

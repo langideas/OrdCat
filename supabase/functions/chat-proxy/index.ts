@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
   if (admitErr) return err(500, "server", admitErr.message);
   if (!admit?.ok) {
     const msg = admit?.reason === "too_fast" ? "发得太快啦，歇一分钟再聊～"
-      : "今天的额度用完了：可以在 设置 → 用户 → 会员 买加油包，或者填自己的模型 Key。";
+      : "今天的额度用完了：可以在 设置 → 用户 → 会员 升级方案，或者填自己的模型 Key。";
     return err(429, admit?.reason ?? "quota", msg);
   }
 

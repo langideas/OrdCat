@@ -15,7 +15,7 @@ alter table public.subscriptions add column if not exists amount_cents integer; 
 alter table public.subscriptions add column if not exists currency text;
 
 create table if not exists public.receipt_emails (
-  id text primary key,                     -- cs_… | in_… | fail:in_… | cancel:sub_…:<unix>
+  id text primary key,                     -- cs_… | in_… | fail:in_… | cancel:sub_…:<unix> | upgrade:in_… | sched:sub_sched_… | unpaid:cs_…
   kind text not null default 'checkout',
   user_id uuid references auth.users(id) on delete set null,
   item text check (item is null or char_length(item) <= 20),           -- pro | max | x | agent | miao | fish | topup
@@ -30,7 +30,7 @@ create table if not exists public.receipt_emails (
 alter table public.receipt_emails drop constraint if exists receipt_emails_id_check;
 alter table public.receipt_emails add constraint receipt_emails_id_check check (id ~ '^[A-Za-z0-9_:.-]+$' and char_length(id) between 6 and 300);
 alter table public.receipt_emails drop constraint if exists receipt_emails_kind_check;
-alter table public.receipt_emails add constraint receipt_emails_kind_check check (kind in ('checkout', 'renewal', 'failed', 'cancel'));
+alter table public.receipt_emails add constraint receipt_emails_kind_check check (kind in ('checkout', 'renewal', 'failed', 'cancel', 'upgrade', 'scheduled', 'unpaid'));
 
 create index if not exists receipt_emails_user on public.receipt_emails (user_id, created_at desc);
 create index if not exists receipt_emails_open on public.receipt_emails (status, created_at) where status in ('sending', 'failed');

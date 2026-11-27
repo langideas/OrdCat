@@ -249,6 +249,11 @@ language sql stable security definer set search_path = public as $$
   limit least(greatest(coalesce(p_limit, 100), 1), 300);
 $$;
 
+-- 加油包开关（v0.2.64+，Lang 2026-11-27：先暂停卖加油包）。唯一的开关：改成 select true 再运行就重新开卖
+-- （topup_off.sql 里是同一个函数）。已经买到的加油包额度（credit_wallets.bonus）照常能用。
+create or replace function public.fish_topup_on() returns boolean
+language sql stable as $$ select false $$;
+
 -- Open (or extend) a plan / skill for 30 days (365 for yearly), or buy a 加油包 (item 'credits').
 create or replace function public.fish_buy(p_item text, p_interval text default 'month', p_auto boolean default false)
 returns json language plpgsql security definer set search_path = public as $$
@@ -260,6 +265,7 @@ begin
   if uid is null then raise exception '还没登录'; end if;
   if p_item not in ('pro', 'max', 'x', 'agent', 'miao', 'credits') then raise exception '没有这个商品'; end if;
   if p_item in ('x', 'agent', 'miao', 'credits') then iv := 'month'; end if;
+  if p_item = 'credits' and not fish_topup_on() then raise exception '加油包暂停销售 / Top-ups are paused'; end if;
   plan := ord_plan(uid);
   if p_item = 'pro' and plan = 'max' then raise exception '你现在是 Max，已经包含 Pro 的全部内容'; end if;
   price := fish_price(p_item, iv, uid);

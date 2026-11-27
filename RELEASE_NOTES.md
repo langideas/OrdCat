@@ -2,23 +2,36 @@
 
 - 设置 → 用户 → 会员 重新整理：上面一张「当前方案」卡片（方案、月付 / 年付、有效 / 已取消 / 扣款失败、下次续费或结束日期、本月托管消息还剩多少、加油包余额），下面免费版 / Pro / Max 三张卡片并排，切换月付 / 年付
 - 年付直接显示原价和优惠：Pro €95/年（原价 €118.80，省 €23.80），Max €566/年（原价 €708，省 €142），折合每月价格；Stripe 付款页也会写明
-- 每张卡片只有一个按钮：开通 / 升级 / 降级 / 改为年付 / 当前方案 / 恢复订阅。已经是会员时换方案走 Stripe 的确认页面，升级马上生效、差价按剩余天数折算，降级在当期结束时生效，不会多出第二份订阅
+- 每张卡片只有一个按钮：开通 / 升级 / 改为 Pro / 改为年付 / 改为月付 / 当前方案 / 恢复订阅，不会多出第二份订阅
+- 换方案直接在 OrdCat 里确认，不再跳到 Stripe 页面：升级到 Max 或改为年付会先显示「今天支付 €X，之后从某天起每年 / 每月 €Y」，确认后马上生效，新的计费周期从今天开始，原方案没用完的部分自动抵扣；改为 Pro 或改为月付在当期结束时生效，之前照常使用，不退差价，生效前可以在会员卡片上「撤销」
+- 升级和预约的更改都会收到确认邮件
 - 扣款失败时顶部提示「更新付款方式」；取消后提示结束日期和「恢复订阅」
 - 技能、小鱼干和加油包各自一栏，不再和会员按钮挤在一起；技能单独订阅，会员价 €2.4/月
 - 付完款浏览器里会看到结算单：商品、金额、增值税、付款方式、下次续费、Stripe 收据或发票 PDF，可以打印或存 PDF；回到 OrdCat 几秒后弹出「付款成功」（例如「+1050 条小鱼干」「Pro 已开通」），可以再打开结算单
 - 付款页点了返回会看到「订单未完成，没有扣款」；如果 3 分钟内没有付完，OrdCat 会轻轻问一次要不要继续付款
-- 每次购买、续费、扣款失败、取消都会收到 OrdCat 的确认邮件（中文 / 英文附德文版）
+- 每次购买、续费、扣款失败、取消都会收到 OrdCat 的确认邮件（统一英文）
+- 确认邮件换成和结算单一样的深色卡片 + 琥珀色：大号金额、明细表格、年付优惠框、「查看结算单 / Stripe 收据 / 发票 PDF / 取消订阅」按钮，法律说明放在下面小字；kuendigen / 撤回确认邮件也用同一个样式
+- 已经有更高方案（小鱼干开通的或旧记录）时，不能再买同级或低一级的方案，按钮显示「到期后可换」，服务器也会拒绝，不会一人两份订阅
+- 充值小鱼干可以选「自定义金额」：€5 – €500 任意整数，马上显示能得到多少条（1 € = 100 条，满 €10 多送 5%，满 €30 多送 10%，满 €100 多送 15%）
+- 加油包暂停销售；已经买的加油包余额照常能用
+- 结账没付完、付款页过期时，会收到一封提醒邮件（只发一次），点「Complete payment」可以接着付；之后已经买了就不会发
 
 **English**
 
 - Settings → User → Membership is reorganised: a "current plan" card on top (plan, monthly / yearly, active / cancelled / payment failed, next renewal or end date, hosted messages left this month, top-up balance), then Free / Pro / Max side by side with a monthly / yearly switch
 - Yearly shows the regular price and the saving: Pro €95/year (regular €118.80, save €23.80), Max €566/year (regular €708, save €142), plus the monthly equivalent; Stripe's checkout says so too
-- One button per plan: Get / Upgrade / Downgrade / Switch to yearly / Current plan / Resume. If you already have a plan, changes go through Stripe's confirmation page: upgrades apply right away with proration, downgrades at the end of the period, and you never end up with two subscriptions
+- One button per plan: Get / Upgrade / Switch to Pro / Switch to yearly / Switch to monthly / Current plan / Resume, and you never end up with two subscriptions
+- Plan changes are confirmed right in OrdCat instead of a Stripe page: upgrading to Max or switching to yearly first shows "Pay €X today, then €Y per year / month from <date>" and applies immediately with a new billing period from today, the unused part of your old plan credited; switching to Pro or to monthly applies at the end of the current period with no refund, and you can Undo it on the plan card until then
+- Upgrades and scheduled changes each get a confirmation email
 - A banner asks you to update your payment method if a renewal fails, and shows the end date with Resume subscription after you cancel
 - Skills, Dried Fish and top-ups have their own sections; skills are separate subscriptions, €2.4/mo for members
 - After paying, your browser shows a receipt (item, amount, VAT, payment method, next renewal, Stripe receipt or invoice PDF) you can print or save; back in OrdCat a "Payment successful" note pops up within seconds (e.g. "+1,050 Dried Fish", "Pro is on") with a link to the receipt
 - Going back from the payment page shows "Order not completed, you were not charged", and if a checkout isn't finished within 3 minutes OrdCat asks once whether you'd like to continue
-- Purchases, renewals, failed payments and cancellations each get a confirmation email from OrdCat (Chinese / English with the German text attached)
+- Purchases, renewals, failed payments and cancellations each get a confirmation email from OrdCat (in English)
+- Confirmation emails now use the same dark card with amber accents as the receipt page: big amount, details table, yearly saving box, buttons for View receipt / Stripe receipt / Invoice PDF / Cancel subscription, and the legal text in small print below; cancellation and withdrawal receipts use the same design
+- Top up Dried Fish with a custom amount: any whole amount from €5 to €500, with a live preview of what you get (€1 = 100 Dried Fish, +5% from €10, +10% from €30, +15% from €100)
+- Top-ups are paused for now; any top-up balance you already have keeps working
+- If a checkout expires before you pay, you get one reminder email with a Complete payment button; no reminder if you've bought it since
 
 # OrdCat v0.2.63
 

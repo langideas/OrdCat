@@ -148,31 +148,60 @@ enum Fish {
         return rows.map { L10n.t($0) }.joined(separator: " · ")
     }
 
+    // MARK: 自定义金额 (same tiers as supabase/functions/_shared/fish.ts; the server recomputes, this is only the preview)
+
+    static let customMin = 5
+    static let customMax = 500
+
+    /// 1 € = 100 fish; ≥ €10 +5 %, ≥ €30 +10 %, ≥ €100 +15 % (floor): €5 = 500, €10 = 1050, €29 = 3045, €100 = 11500.
+    static func fishFor(eur: Int) -> Int {
+        let pct = eur >= 100 ? 15 : eur >= 30 ? 10 : eur >= 10 ? 5 : 0
+        return eur * 100 * (100 + pct) / 100
+    }
+
+    /// Whole euros €5 – €500, else nil ("7.5", "4", "501", "" are nil).
+    static func customEur(_ s: String) -> Int? {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty, t.allSatisfy({ $0.isASCII && $0.isNumber }), t.count <= 4,
+              let n = Int(t), n >= customMin, n <= customMax else { return nil }
+        return n
+    }
+
+    /// "€25 → 2625 条小鱼干（多送 125 条）"
+    static func customPreview(_ s: String) -> String {
+        guard let e = customEur(s) else { return L10n.t("请输入 €5 – €500 的整数金额") }
+        let f = fishFor(eur: e), bonus = f - e * 100
+        return L10n.t(bonus > 0 ? "€\(e) → \(f) 条小鱼干（多送 \(bonus) 条）" : "€\(e) → \(f) 条小鱼干")
+    }
+
     // MARK: 充值 (Stripe)
 
-    /// Pack chooser → Stripe Checkout in the browser. `status` gets progress lines.
+    /// Pack chooser (four packs + 自定义金额) → Stripe Checkout in the browser. `status` gets progress lines.
     static func topUp(status: @escaping (String) -> Void) {
         guard Account.shared.signedIn else { status(L10n.t("先登录账号（设置 → 用户）")); return }
+        let list = packs
         let a = NSAlert()
         a.messageText = "充值小鱼干"
-        a.informativeText = "1 € = 100 条小鱼干，买得多送得多。充值鱼干永久有效，可以开会员、技能、加油包，也能在喵副本发任务。通过 Stripe 安全付款。"
-        let pop = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 260, height: 26), pullsDown: false)
-        for p in packs {
-            let bonus = p.fish - p.eur * 100
-            let t = bonus > 0 ? "€\(p.eur) · \(p.fish) 条（多送 \(bonus) 条）" : "€\(p.eur) · \(p.fish) 条"
-            pop.addItem(withTitle: L10n.t(t))
-        }
-        pop.selectItem(at: min(1, max(0, packs.count - 1)))
-        a.accessoryView = pop
+        a.informativeText = "1 € = 100 条小鱼干，买得多送得多。充值鱼干永久有效，可以开会员和技能，也能在喵副本发任务。通过 Stripe 安全付款。"
+        let box = FishTopUpBox(packs: list)
+        a.accessoryView = box.view
         a.addButton(withTitle: "去付款")
         a.addButton(withTitle: "取消").keyEquivalent = "\u{1b}"
         NSApp.activate(ignoringOtherApps: true)
         guard a.runModal() == .alertFirstButtonReturn else { return }
-        let i = pop.indexOfSelectedItem
-        guard i >= 0, i < packs.count else { return }
-        let pack = packs[i]
+        var body: [String: Any] = ["item": "fish", "locale": L10n.english ? "en" : "zh"]
+        if box.isCustom {
+            guard let eur = customEur(box.field.stringValue) else {
+                status("⚠️ " + L10n.t("自定义金额要是 €5 – €500 之间的整数欧元"))
+                return
+            }
+            body["amount_eur"] = eur
+        } else {
+            let i = box.pop.indexOfSelectedItem
+            guard i >= 0, i < list.count else { return }
+            body["pack"] = list[i].id
+        }
         status(L10n.t("正在打开付款页面…"))
-        let body: [String: Any] = ["item": "fish", "pack": pack.id, "locale": L10n.english ? "en" : "zh"]
         Account.shared.request("POST", "/functions/v1/stripe-checkout", json: body) { obj, err in
             let o = obj as? [String: Any]
             if let u = (o?["url"] as? String).flatMap(URL.init(string:)) {
@@ -279,6 +308,62 @@ enum Fish {
         case "raid_appeal_fee": return "副本申诉费"
         case "raid_bonus": return "副本完成奖励"
         default: return r
+        }
+    }
+}
+
+/// 充值 window body: the four packs, then 「自定义金额」 (whole euros €5 – €500) with a live "€X → Y 条小鱼干" preview.
+/// Typing an amount selects 自定义金额 by itself.
+private final class FishTopUpBox: NSObject, NSTextFieldDelegate {
+    let view = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 92))
+    let pop = NSPopUpButton(frame: NSRect(x: 0, y: 64, width: 300, height: 26), pullsDown: false)
+    let field = NSTextField(frame: NSRect(x: 132, y: 34, width: 80, height: 22))
+    private let preview = NSTextField(labelWithString: "")
+    private let customIndex: Int
+
+    init(packs: [FishPack]) {
+        customIndex = packs.count
+        super.init()
+        for p in packs {
+            let bonus = p.fish - p.eur * 100
+            pop.addItem(withTitle: L10n.t(bonus > 0 ? "€\(p.eur) · \(p.fish) 条（多送 \(bonus) 条）" : "€\(p.eur) · \(p.fish) 条"))
+        }
+        pop.addItem(withTitle: L10n.t("自定义金额"))
+        pop.selectItem(at: min(1, max(0, packs.count - 1)))
+        pop.target = self
+        pop.action = #selector(popChanged)
+
+        let label = NSTextField(labelWithString: L10n.t("自定义金额（€）"))
+        label.frame = NSRect(x: 0, y: 36, width: 128, height: 18)
+        field.placeholderString = "5 – 500"
+        field.delegate = self
+        preview.frame = NSRect(x: 0, y: 6, width: 320, height: 18)
+        preview.font = .systemFont(ofSize: 12)
+        preview.lineBreakMode = .byTruncatingTail
+        for v in [pop, label, field, preview] as [NSView] { view.addSubview(v) }
+        update()
+    }
+
+    var isCustom: Bool { pop.indexOfSelectedItem == customIndex }
+
+    @objc private func popChanged() {
+        update()
+        if isCustom { field.window?.makeFirstResponder(field) }
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        if !isCustom { pop.selectItem(at: customIndex) }
+        update()
+    }
+
+    private func update() {
+        let text = field.stringValue
+        if isCustom {
+            preview.stringValue = Fish.customPreview(text)
+            preview.textColor = !text.isEmpty && Fish.customEur(text) == nil ? .systemRed : .labelColor
+        } else {
+            preview.stringValue = L10n.t("自定义金额：€5 – €500 整数；满 €10 多送 5%，满 €30 多送 10%，满 €100 多送 15%")
+            preview.textColor = .secondaryLabelColor
         }
     }
 }

@@ -12,15 +12,26 @@ export const stripe = {
   portalFlowsDisabled: false,
   searchDisabled: false,
   mails: [] as Obj[],
+  schedules: new Map<string, Obj>(),        // subscription_schedules (plan changes booked for the period end)
+  previews: [] as Obj[],                     // invoices/create_preview params
+  previewAmount: 4410,                       // amount_due of the next create_preview
+  upgradeInvoiceStatus: "paid",              // status of the invoice a plan upgrade creates ("open" = needs 3-D Secure / declined)
   resendStatus: 200,
   resendThrow: false,
   calls: 0,
   reset() {
     this.customers.clear(); this.subs.clear(); this.sessions.clear(); this.charges.clear();
     this.created = []; this.portals = []; this.posts = []; this.mails = [];
+    this.schedules.clear(); this.previews = []; this.previewAmount = 4410; this.upgradeInvoiceStatus = "paid";
     this.portalFlowsDisabled = false; this.searchDisabled = false; this.resendStatus = 200; this.resendThrow = false; this.calls = 0;
   },
 };
+
+// Prices the tests use (unit_amount = VAT included).
+const PRICE_BOOK: Record<string, Obj> = Object.fromEntries(
+  [["price_pro_m", 990, "month"], ["price_pro_y", 9500, "year"], ["price_max_m", 5900, "month"], ["price_max_y", 56600, "year"]]
+    .map(([id, c, iv]) => [id, { id, object: "price", unit_amount: c, currency: "eur", recurring: { interval: iv, interval_count: 1 } }]),
+);
 
 const ok = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json" } });
 const err = (status: number, message: string, code?: string) => ok({ error: { message, code } }, status);
@@ -68,9 +79,74 @@ export function installFetch() {
       const cus = q.get("customer");
       return ok({ data: [...stripe.subs.values()].filter((s) => s.customer === cus) });
     }
+    if (path.startsWith("prices/")) {
+      const p = PRICE_BOOK[path.split("/")[1]];
+      return p ? ok(p) : err(404, "No such price", "resource_missing");
+    }
+    if (path === "invoices/create_preview" && method === "POST") {
+      stripe.previews.push(params);
+      const end = Math.floor(Date.now() / 1000) + 365 * 86400;
+      return ok({ object: "invoice", amount_due: stripe.previewAmount, total: stripe.previewAmount, currency: "eur",
+        lines: { data: [{ amount: -1000, period: { end } }, { amount: stripe.previewAmount + 1000, period: { start: end - 365 * 86400, end } }] } });
+    }
+    if (path === "subscription_schedules" && method === "POST") {
+      const sub = stripe.subs.get(params.from_subscription);
+      if (!sub) return err(404, "No such subscription", "resource_missing");
+      if (sub.schedule) return err(400, "already has a schedule");
+      const it = sub.items?.data?.[0];
+      const sc = { id: "sub_sched_" + (++n), object: "subscription_schedule", status: "active", subscription: sub.id, end_behavior: "release",
+        phases: [{ start_date: 1790000000, end_date: it?.current_period_end ?? sub.current_period_end, items: [{ price: it?.price?.id, quantity: 1 }] }],
+        params: [] as Obj[] };
+      stripe.schedules.set(sc.id, sc);
+      sub.schedule = sc.id;
+      return ok(sc);
+    }
+    if (path.startsWith("subscription_schedules/")) {
+      const [, id, action] = path.split("/");
+      const sc = stripe.schedules.get(id);
+      if (!sc) return err(404, "No such subscription_schedule", "resource_missing");
+      if (method === "POST" && action === "release") {
+        sc.status = "released"; sc.released_subscription = sc.subscription;
+        const sub = stripe.subs.get(sc.subscription); if (sub) sub.schedule = null;
+        sc.subscription = null;
+        return ok(sc);
+      }
+      if (method === "POST") {
+        sc.params.push(params);
+        const ph: Obj[] = [];
+        for (const [k, v] of Object.entries(params)) {
+          const m = /^phases\[(\d+)\]\[(.+)\]$/.exec(k);
+          if (!m) continue;
+          const i = Number(m[1]); ph[i] = ph[i] ?? { items: [{}] };
+          if (m[2] === "items][0][price") ph[i].items[0].price = v;
+          else if (m[2] === "items][0][quantity") ph[i].items[0].quantity = Number(v);
+          else ph[i][m[2]] = /^\d+$/.test(v) ? Number(v) : v;
+        }
+        if (ph.length) {
+          if (ph[1] && !ph[1].start_date) ph[1].start_date = ph[0]?.end_date;
+          sc.phases = ph;
+        }
+        if (params.end_behavior) sc.end_behavior = params.end_behavior;
+      }
+      return ok(sc);
+    }
     if (path.startsWith("subscriptions/")) {
       const s = stripe.subs.get(path.split("/")[1]);
       if (!s) return err(404, "No such subscription", "resource_missing");
+      if (method === "POST" && params["items[0][price]"]) {
+        // Plan change via the API: with payment_behavior=pending_if_incomplete nothing changes until the invoice is paid.
+        const inv = { id: "in_up_" + (++n), object: "invoice", status: stripe.upgradeInvoiceStatus, billing_reason: "subscription_update",
+          hosted_invoice_url: "https://invoice.stripe.com/i/up" + n };
+        if (inv.status === "paid") {
+          const p = PRICE_BOOK[params["items[0][price]"]];
+          s.items.data[0].price = { ...p };
+          if (params.billing_cycle_anchor === "now") {
+            s.items.data[0].current_period_end = Math.floor(Date.now() / 1000) + (p?.recurring?.interval === "year" ? 365 : 30) * 86400;
+          }
+          s.pending_update = null;
+        } else s.pending_update = { subscription_items: [{ price: params["items[0][price]"] }] };
+        return ok({ ...s, latest_invoice: inv });
+      }
       if (method === "POST") Object.assign(s, Object.fromEntries(Object.entries(params).filter(([k]) => !k.includes("["))),
         params.cancel_at_period_end ? { cancel_at_period_end: params.cancel_at_period_end === "true" } : {});
       return ok(s);
@@ -79,6 +155,13 @@ export function installFetch() {
       const id = "cs_test_" + "a".repeat(20) + (++n);
       stripe.created.push(params);
       return ok({ id, url: "https://checkout.stripe.com/c/pay/" + id });
+    }
+    if (path === "checkout/sessions" && method === "GET") {
+      // List (customer / status / created[gte] filters), newest first, like Stripe.
+      const cus = q.get("customer"), st = q.get("status"), gte = Number(q.get("created[gte]") ?? 0);
+      const hit = [...stripe.sessions.values()].filter((x) =>
+        (!cus || x.customer === cus) && (!st || x.status === st) && Number(x.created ?? 0) >= gte);
+      return ok({ data: hit.sort((x, y) => Number(y.created ?? 0) - Number(x.created ?? 0)) });
     }
     if (path.startsWith("checkout/sessions/")) {
       const s = stripe.sessions.get(decodeURIComponent(path.split("/")[2]));

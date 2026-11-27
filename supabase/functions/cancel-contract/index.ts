@@ -6,7 +6,7 @@
 //   Widerruf:  {"action":"withdraw","name":"…","email":"…","contract":"pro"|…|"fish"|"topup"|"other",
 //               "note":"Bestellt am …","lang":"de"|"zh"|"en"}
 // Antwort: {"ok":true,"id","received_at","received_utc","received_berlin","summary":{…},"email_sent"}
-// Die Seite zeigt die Bestätigung an; die Mail (Resend) geht sofort an die angegebene Adresse.
+// Die Seite zeigt die Bestätigung an; die Mail (Resend) geht sofort an die angegebene Adresse (seit v0.2.64 nur Englisch, Vorlage ../_shared/mail.ts).
 // Bewusst KEINE Angabe auf der Seite, ob zu der E-Mail ein Konto oder Abo existiert (sonst könnte man Adressen abfragen);
 // Ende-Datum und Abo-Details stehen nur in der Mail an diese Adresse.
 //
@@ -21,6 +21,7 @@
 //          CANCEL_MAIL_FROM (optional, Standard "OrdCat <noreply@ordcat.de>"), CANCEL_MAIL_BCC (optional, Kopie an Lang)
 // SQL: cancel.sql (nach fish.sql / raids.sql).
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { dayEn, type MailSpec, render, type Row, SELLER_NAME, SUPPORT } from "../_shared/mail.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -242,7 +243,7 @@ Deno.serve(async (req) => {
   const key = Deno.env.get("RESEND_API_KEY");
   if (key) {
     try {
-      const m = mail(lang, { ...summary, id: row.id, received, hits: hitsOut, status });
+      const m = mail({ ...summary, id: row.id, received, hits: hitsOut, status });
       const bcc = Deno.env.get("CANCEL_MAIL_BCC");
       const r = await fetch("https://api.resend.com/emails", {
         method: "POST",
@@ -268,108 +269,67 @@ Deno.serve(async (req) => {
   });
 });
 
-// ---------- mail text (DE always, plus zh / en) ----------
+// ---------- mail (English only, shared OrdCat template ../_shared/mail.ts) ----------
 type MailIn = {
   action: string; kind: string; reason: string | null; email: string; name: string | null; contract: string;
   note: string | null; date: string | null; id: string; received: Date; hits: Hit[]; status: string;
 };
 
-function block(l: Lang, m: MailIn): string[] {
+function mail(m: MailIn) {
   const W = m.action === "withdraw";
-  const T = {
-    de: {
-      head: W ? "Eingangsbestätigung Ihres Widerrufs" : "Eingangsbestätigung Ihrer Kündigung",
-      intro: W
-        ? "wir haben Ihre Widerrufserklärung erhalten. Inhalt Ihrer Erklärung:"
-        : "wir haben Ihre Kündigung erhalten. Inhalt Ihrer Kündigung:",
-      type: "Art", ord: "ordentliche Kündigung", ext: "außerordentliche Kündigung", wd: "Widerruf",
-      reason: "Grund", name: "Name", mail: "E-Mail-Adresse", contract: "Vertrag", note: "Angaben zum Vertrag",
-      when: "Gewünschter Zeitpunkt", earliest: "zum nächstmöglichen Zeitpunkt", recv: "Eingang", ref: "Vorgangsnummer",
-      end: (n: string, d: string) => `${n}: endet zum ${d}. Bis dahin können Sie den Vertrag weiter nutzen; es erfolgt keine weitere Verlängerung.`,
-      endFish: (n: string, d: string) => `${n} (mit Trockenfisch bezahlt): automatische Verlängerung ist ausgeschaltet, läuft bis ${d}.`,
-      later: (n: string) => `${n}: Ihr Wunschtermin liegt nach dem Ende des laufenden Zeitraums; wir setzen die Kündigung zu diesem Termin manuell und bestätigen sie gesondert.`,
-      ext2: "Ihre außerordentliche Kündigung prüfen wir und melden uns zeitnah. Eine weitere Verlängerung ist bereits gestoppt.",
-      none: "Zu dieser E-Mail-Adresse haben wir automatisch keinen laufenden Vertrag gefunden. Wir prüfen Ihre Kündigung manuell und melden uns. Falls Sie mit einer anderen E-Mail-Adresse bezahlt haben, antworten Sie bitte auf diese E-Mail.",
-      err: "Bei der automatischen Verarbeitung ist ein Fehler aufgetreten. Ihre Kündigung ist trotzdem wirksam eingegangen; wir bearbeiten sie manuell und bestätigen das Vertragsende gesondert.",
-      wd2: "Wir bearbeiten Ihren Widerruf und erstatten Zahlungen gemäß unserer Widerrufsbelehrung (https://ordcat.de/widerruf.html) über dasselbe Zahlungsmittel. Bei bereits begonnenen Dienstleistungen ist ggf. ein anteiliger Betrag für die genutzte Zeit zu zahlen.",
-      undo: "Sie haben das nicht veranlasst? Dann antworten Sie bitte auf diese E-Mail.",
-    },
-    zh: {
-      head: W ? "撤回申请已收到" : "取消合同申请已收到",
-      intro: W ? "我们已经收到你的撤回声明，内容如下：" : "我们已经收到你的取消申请，内容如下：",
-      type: "类型", ord: "正常取消（ordentlich）", ext: "特别解约（außerordentlich）", wd: "撤回（Widerruf）",
-      reason: "理由", name: "姓名", mail: "邮箱", contract: "合同", note: "合同说明",
-      when: "希望生效时间", earliest: "最早可生效的时间", recv: "收到时间", ref: "编号",
-      end: (n: string, d: string) => `${n}：将于 ${d} 结束，在此之前照常使用，不会再自动续费。`,
-      endFish: (n: string, d: string) => `${n}（小鱼干开通）：已关闭自动续费，可用到 ${d}。`,
-      later: (n: string) => `${n}：你选的日期在当前周期结束之后，我们会手动按这个日期取消，并另行确认。`,
-      ext2: "特别解约我们会人工审核并尽快回复；自动续费已经停止。",
-      none: "这个邮箱下我们没有自动找到正在生效的合同。我们会人工核实并回复你。如果付款时用的是别的邮箱，请直接回复这封邮件。",
-      err: "自动处理时出了点问题，但你的取消申请已经有效送达；我们会人工处理，并另行确认合同结束日期。",
-      wd2: "我们会处理你的撤回，并按撤回说明（https://ordcat.de/widerruf.html）原路退款。已开始提供的服务，可能需要按已使用天数支付相应费用。",
-      undo: "如果不是你本人操作，请直接回复这封邮件。",
-    },
-    en: {
-      head: W ? "We received your withdrawal" : "We received your cancellation",
-      intro: W ? "we have received your notice of withdrawal. Its content:" : "we have received your cancellation. Its content:",
-      type: "Type", ord: "ordinary cancellation", ext: "extraordinary termination", wd: "withdrawal",
-      reason: "Reason", name: "Name", mail: "Email", contract: "Contract", note: "Contract details",
-      when: "Requested date", earliest: "earliest possible date", recv: "Received", ref: "Reference",
-      end: (n: string, d: string) => `${n}: ends on ${d}. You can keep using it until then; it will not renew.`,
-      endFish: (n: string, d: string) => `${n} (paid with Dried Fish): auto-renewal is off, runs until ${d}.`,
-      later: (n: string) => `${n}: your requested date is after the current period ends; we will set the cancellation for that date manually and confirm separately.`,
-      ext2: "We will review your extraordinary termination and get back to you shortly. Renewal has already been stopped.",
-      none: "We could not automatically find an active contract for this email address. We will check your cancellation manually and get back to you. If you paid with a different email address, please reply to this email.",
-      err: "Something went wrong while processing automatically. Your cancellation has still been received; we will handle it manually and confirm the end date separately.",
-      wd2: "We will process your withdrawal and refund payments to the original payment method as described in our withdrawal information (https://ordcat.de/widerruf.html). For services that had already started, a pro-rata amount for the time used may be due.",
-      undo: "Didn't request this? Please reply to this email.",
-    },
-  }[l];
-  const nm = (c: string) => NAMES[c]?.[l] ?? c;
-  const out: string[] = [T.head, "", T.intro];
-  out.push(`${T.type}: ${W ? T.wd : m.kind === "extraordinary" ? T.ext : T.ord}`);
-  if (m.reason) out.push(`${T.reason}: ${m.reason}`);
-  if (m.name) out.push(`${T.name}: ${m.name}`);
-  out.push(`${T.mail}: ${m.email}`);
-  out.push(`${T.contract}: ${nm(m.contract)}`);
-  if (m.note) out.push(`${T.note}: ${m.note}`);
-  if (!W) out.push(`${T.when}: ${m.date ? fmtDate(new Date(m.date + "T12:00:00Z"), l) : T.earliest}`);
-  out.push(`${T.recv}: ${fmt(m.received, "Europe/Berlin", l)} (Europe/Berlin) · ${fmt(m.received, "UTC", l)}`);
-  out.push(`${T.ref}: ${m.id}`, "");
-  if (W) out.push(T.wd2);
-  else if (m.status === "error") out.push(T.err);
-  else if (!m.hits.length) out.push(T.none);
-  else {
+  const site = Deno.env.get("SITE_URL") ?? "https://ordcat.de";
+  const nm = (c: string) => NAMES[c]?.en ?? c;
+  const rows: Row[] = [{ k: "Type", v: W ? "Withdrawal" : m.kind === "extraordinary" ? "Extraordinary termination" : "Ordinary cancellation" }];
+  if (m.reason) rows.push({ k: "Reason", v: m.reason });
+  if (m.name) rows.push({ k: "Name", v: m.name });
+  rows.push({ k: "Email", v: m.email });
+  rows.push({ k: "Contract", v: nm(m.contract) });
+  if (m.note) rows.push({ k: "Contract details", v: m.note });
+  if (!W) rows.push({ k: "Requested date", v: m.date ? dayEn(Date.parse(m.date + "T12:00:00Z") / 1000) : "Earliest possible date" });
+  rows.push({ k: "Received", v: `${fmt(m.received, "Europe/Berlin", "en")} (Europe/Berlin)`, sub: fmt(m.received, "UTC", "en") });
+  rows.push({ k: "Reference", v: m.id, mono: true });
+
+  const out: string[] = [];
+  if (W) {
+    out.push(`We will process your withdrawal and refund payments to the original payment method as described in our withdrawal information (${site}/widerruf.html). For services that had already started, a pro-rata amount for the time used may be due.`);
+  } else if (m.status === "error") {
+    out.push("Something went wrong while processing automatically. Your cancellation has still been received; we will handle it manually and confirm the end date separately.");
+  } else if (!m.hits.length) {
+    out.push("We could not automatically find an active contract for this email address. We will check your cancellation manually and get back to you. If you paid with a different email address, please reply to this email.");
+  } else {
     for (const h of m.hits) {
-      const d = h.ends_at ? fmtDate(new Date(h.ends_at), l) : "—";
-      if (h.action === "manual_later_date") out.push(T.later(nm(h.item)));
-      else if (h.provider === "fish") out.push(T.endFish(nm(h.item), d));
-      else out.push(T.end(nm(h.item), d));
+      const d = h.ends_at ? dayEn(Date.parse(h.ends_at) / 1000) : "—";
+      if (h.action === "manual_later_date") out.push(`${nm(h.item)}: your requested date is after the current period ends; we will set the cancellation for that date manually and confirm separately.`);
+      else if (h.provider === "fish") out.push(`${nm(h.item)} (paid with Dried Fish): auto-renewal is off, runs until ${d}.`);
+      else out.push(`${nm(h.item)}: ends on ${d}. You can keep using it until then; it will not renew.`);
     }
-    if (m.kind === "extraordinary") out.push(T.ext2);
+    if (m.kind === "extraordinary") out.push("We will review your extraordinary termination and get back to you shortly. Renewal has already been stopped.");
   }
-  out.push("", T.undo);
-  return out;
-}
+  out.push("Didn't request this? Please reply to this email.");
 
-const GREET: Record<Lang, string> = { de: "Guten Tag,", zh: "你好，", en: "Hello," };
-
-function mail(lang: Lang, m: MailIn) {
-  const de = block("de", m);
-  const other = lang === "de" ? [] : block(lang, m);
-  const foot = [
-    "OrdCat · Axun Conor · Hedemannstraße 74 · 78355 Hohenfels · Deutschland · support@ordcat.de",
-  ];
-  const textParts = lang === "de"
-    ? [["Guten Tag,", ...de.slice(2)].join("\n")]
-    : [[GREET[lang], ...other.slice(2)].join("\n"), "— Deutsche Fassung (maßgeblich) —\n" + ["Guten Tag,", ...de.slice(2)].join("\n")];
-  const text = textParts.join("\n\n") + "\n\n" + foot.join("\n");
-  const para = (lines: string[]) =>
-    `<p style="margin:0 0 14px">${lines.map(esc).join("<br>").replace(/(<br>){2,}/g, "</p><p style=\"margin:0 0 14px\">")}</p>`;
-  const html = `<!doctype html><html><body style="font:15px/1.6 -apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;color:#18181c;max-width:620px;margin:0 auto;padding:24px">
-<h2 style="margin:0 0 16px;color:#c98400">${esc(lang === "de" ? de[0] : other[0])}</h2>
-${lang === "de" ? para(["Guten Tag,", ...de.slice(2)]) : para([GREET[lang], ...other.slice(2)]) + `<hr style="border:0;border-top:1px solid #e6e3dc;margin:24px 0"><h3 style="margin:0 0 12px">${esc(de[0])} (Deutsche Fassung, maßgeblich)</h3>` + para(["Guten Tag,", ...de.slice(2)])}
-<p style="color:#5f6270;font-size:12px;margin-top:28px">${esc(foot[0])}</p></body></html>`;
-  const subject = lang === "de" ? `${de[0]} · OrdCat` : `${other[0]} · ${de[0]} · OrdCat`;
-  return { subject, html, text };
+  const head = W ? "We received your withdrawal" : "We received your cancellation";
+  const spec: MailSpec = {
+    subject: W ? "Withdrawal received · OrdCat" : "Cancellation received · OrdCat",
+    preheader: `${head} · ${nm(m.contract)} · reference ${m.id}`,
+    badge: "no", icon: "✓",
+    title: head,
+    subtitle: "This is your confirmation of receipt. Please keep it for your records.",
+    greeting: "Hello,",
+    intro: [W ? "We have received your notice of withdrawal. Its content:" : "We have received your cancellation. Its content:"],
+    rows,
+    body: [{ title: "What happens next", paras: out }],
+    buttons: W
+      ? [{ label: "Withdrawal information", href: `${site}/widerruf.html` }]
+      : [{ label: "Cancel another contract", href: `${site}/kuendigen.html` }],
+    legal: [{
+      paras: [`Seller: ${SELLER_NAME}, Hedemannstraße 74, 78355 Hohenfels, Germany · ${SUPPORT}. This confirmation of receipt is sent on a durable medium (§ 312k BGB / § 356a BGB).`],
+      links: [
+        { label: "Terms", href: `${site}/terms.html` },
+        { label: "Withdrawal information", href: `${site}/widerruf.html` },
+        { label: "Withdraw from the contract", href: `${site}/widerruf.html#widerrufen` },
+        { label: "Cancel contracts", href: `${site}/kuendigen.html` },
+      ],
+    }],
+  };
+  return render(spec, site);
 }
