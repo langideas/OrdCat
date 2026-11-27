@@ -5,7 +5,7 @@
 //   {"item":"topup"}                              加油包 €2.99 = 1500 条（一次性付款）
 //   {"item":"x"} / {"item":"agent"} / {"item":"miao"}   技能订阅 €3/月；Pro / Max 用 8 折价（x.month.member…）
 //   {"item":"fish","pack":"5"|"10"|"30"|"100"}   小鱼干充值（一次性付款）：€5 = 500，€10 = 1050，€30 = 3300，€100 = 11500
-//   {"item":"fish","amount_eur":N}               自定义金额：整欧元 €5 – €500，1 € = 100 条，≥ €10 +5%，≥ €30 +10%，≥ €100 +15%（向下取整）；
+//   {"item":"fish","amount_eur":N}               自定义金额：整欧元 €5 – €10,000，1 € = 100 条，≥ €10 +5%，≥ €30 +10%，≥ €100 +15%（向下取整）；
 //                                                price_data 临时价格（含税 tax_behavior=inclusive），条数由服务器算好放进 metadata[fish]
 // 所有 Checkout Session 都开 after_expiration[recovery]：过期没付的单，stripe-webhook 收到 checkout.session.expired 后
 // 发一封「Your OrdCat order isn't complete」提醒（只一次，带 Stripe 的恢复链接，约 30 天有效）。过期时间仍用 Stripe 默认。

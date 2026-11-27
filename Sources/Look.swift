@@ -1172,8 +1172,8 @@ enum L10n {
         // 小鱼干储值 + 邀请防刷（v0.2.62）
         "小鱼干": "Dried Fish",
         "充值": "Top up",
-        "流水": "History",
-        "小鱼干流水": "Dried Fish history",
+        "充值记录": "Top-up history",
+        "小鱼干充值记录": "Dried Fish top-up history",
         "充值鱼干": "Paid",
         "奖励鱼干": "Reward",
         "变动": "Change",
@@ -1198,9 +1198,9 @@ enum L10n {
         // 自定义金额 + 加油包暂停（v0.2.64+）
         "自定义金额": "Custom amount",
         "自定义金额（€）": "Custom amount (€)",
-        "请输入 €5 – €500 的整数金额": "Enter a whole amount from €5 to €500",
-        "自定义金额：€5 – €500 整数；满 €10 多送 5%，满 €30 多送 10%，满 €100 多送 15%": "Custom amount: whole euros €5 – €500; +5% bonus from €10, +10% from €30, +15% from €100",
-        "自定义金额要是 €5 – €500 之间的整数欧元": "The custom amount must be whole euros from €5 to €500",
+        "请输入 €5 – €10,000 的整数金额": "Enter a whole amount from €5 to €10,000",
+        "自定义金额：€5 – €10,000 整数；满 €10 多送 5%，满 €30 多送 10%，满 €100 多送 15%": "Custom amount: whole euros €5 – €10,000; +5% bonus from €10, +10% from €30, +15% from €100",
+        "自定义金额要是 €5 – €10,000 之间的整数欧元": "The custom amount must be whole euros from €5 to €10,000",
         "加油包暂停销售 / Top-ups are paused": "Top-ups are paused",
         "今天的额度用完了：可以在 设置 → 用户 → 会员 升级方案，或者填自己的模型 Key。": "You've used today's hosted messages. Upgrade your plan in Settings → User → Membership, or add your own model key.",
         "在浏览器里付完款回来，点「刷新」就能看到小鱼干。": "Finish paying in your browser, then click “Refresh” to see your Dried Fish.",

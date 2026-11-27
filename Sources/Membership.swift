@@ -364,14 +364,14 @@ final class MembershipSection: NSObject {
         p.add(SK.buttons([skillBuy, btn("用小鱼干开技能", #selector(fishSkill)), btn("技能设置", #selector(openSkills))]))
 
         // ---------- 小鱼干和加油包 ----------
-        p.header("小鱼干和加油包")
+        p.header("小鱼干")
         let gf = SK.Group()
         gf.add(SK.info(fishLine))
         p.add(gf)
         p.hint("1 € = 100 条小鱼干，买得多送得多，永久有效。充值鱼干什么都能买；奖励鱼干（新号、邀请、喵副本奖励）在喵副本里随便用，开会员和技能时最多抵 30%。")
         // 「买加油包」暂时不卖（Lang 2026-11-27；服务器 fish_topup_on() = false），buyTopup 留着方便以后打开。
         p.add(SK.buttons([btn("充值小鱼干", #selector(fishTopUp)),
-                          btn("用小鱼干开会员", #selector(fishPlan)), btn("流水", #selector(fishLedger)),
+                          btn("用小鱼干开会员", #selector(fishPlan)), btn("充值记录", #selector(fishLedger)),
                           btn("刷新", #selector(refreshAll))]))
         fishAuto.target = self; fishAuto.action = #selector(fishAutoChanged)
         fishAuto.state = Prefs.d.bool(forKey: "fish.autoRenew") ? .on : .off

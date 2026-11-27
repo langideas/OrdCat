@@ -12,7 +12,7 @@
 - 每次购买、续费、扣款失败、取消都会收到 OrdCat 的确认邮件（统一英文）
 - 确认邮件换成和结算单一样的深色卡片 + 琥珀色：大号金额、明细表格、年付优惠框、「查看结算单 / Stripe 收据 / 发票 PDF / 取消订阅」按钮，法律说明放在下面小字；kuendigen / 撤回确认邮件也用同一个样式
 - 已经有更高方案（小鱼干开通的或旧记录）时，不能再买同级或低一级的方案，按钮显示「到期后可换」，服务器也会拒绝，不会一人两份订阅
-- 充值小鱼干可以选「自定义金额」：€5 – €500 任意整数，马上显示能得到多少条（1 € = 100 条，满 €10 多送 5%，满 €30 多送 10%，满 €100 多送 15%）
+- 充值小鱼干可以选「自定义金额」：€5 – €10,000 任意整数，马上显示能得到多少条（1 € = 100 条，满 €10 多送 5%，满 €30 多送 10%，满 €100 多送 15%）
 - 加油包暂停销售；已经买的加油包余额照常能用
 - 结账没付完、付款页过期时，会收到一封提醒邮件（只发一次），点「Complete payment」可以接着付；之后已经买了就不会发
 
@@ -29,7 +29,7 @@
 - Going back from the payment page shows "Order not completed, you were not charged", and if a checkout isn't finished within 3 minutes OrdCat asks once whether you'd like to continue
 - Purchases, renewals, failed payments and cancellations each get a confirmation email from OrdCat (in English)
 - Confirmation emails now use the same dark card with amber accents as the receipt page: big amount, details table, yearly saving box, buttons for View receipt / Stripe receipt / Invoice PDF / Cancel subscription, and the legal text in small print below; cancellation and withdrawal receipts use the same design
-- Top up Dried Fish with a custom amount: any whole amount from €5 to €500, with a live preview of what you get (€1 = 100 Dried Fish, +5% from €10, +10% from €30, +15% from €100)
+- Top up Dried Fish with a custom amount: any whole amount from €5 to €10,000, with a live preview of what you get (€1 = 100 Dried Fish, +5% from €10, +10% from €30, +15% from €100)
 - Top-ups are paused for now; any top-up balance you already have keeps working
 - If a checkout expires before you pay, you get one reminder email with a Complete payment button; no reminder if you've bought it since
 

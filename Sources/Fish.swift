@@ -151,7 +151,7 @@ enum Fish {
     // MARK: 自定义金额 (same tiers as supabase/functions/_shared/fish.ts; the server recomputes, this is only the preview)
 
     static let customMin = 5
-    static let customMax = 500
+    static let customMax = 10000
 
     /// 1 € = 100 fish; ≥ €10 +5 %, ≥ €30 +10 %, ≥ €100 +15 % (floor): €5 = 500, €10 = 1050, €29 = 3045, €100 = 11500.
     static func fishFor(eur: Int) -> Int {
@@ -159,7 +159,7 @@ enum Fish {
         return eur * 100 * (100 + pct) / 100
     }
 
-    /// Whole euros €5 – €500, else nil ("7.5", "4", "501", "" are nil).
+    /// Whole euros €5 – €10,000, else nil ("7.5", "4", "10001", "" are nil).
     static func customEur(_ s: String) -> Int? {
         let t = s.trimmingCharacters(in: .whitespaces)
         guard !t.isEmpty, t.allSatisfy({ $0.isASCII && $0.isNumber }), t.count <= 4,
@@ -169,7 +169,7 @@ enum Fish {
 
     /// "€25 → 2625 条小鱼干（多送 125 条）"
     static func customPreview(_ s: String) -> String {
-        guard let e = customEur(s) else { return L10n.t("请输入 €5 – €500 的整数金额") }
+        guard let e = customEur(s) else { return L10n.t("请输入 €5 – €10,000 的整数金额") }
         let f = fishFor(eur: e), bonus = f - e * 100
         return L10n.t(bonus > 0 ? "€\(e) → \(f) 条小鱼干（多送 \(bonus) 条）" : "€\(e) → \(f) 条小鱼干")
     }
@@ -192,7 +192,7 @@ enum Fish {
         var body: [String: Any] = ["item": "fish", "locale": L10n.english ? "en" : "zh"]
         if box.isCustom {
             guard let eur = customEur(box.field.stringValue) else {
-                status("⚠️ " + L10n.t("自定义金额要是 €5 – €500 之间的整数欧元"))
+                status("⚠️ " + L10n.t("自定义金额要是 €5 – €10,000 之间的整数欧元"))
                 return
             }
             body["amount_eur"] = eur
@@ -312,12 +312,12 @@ enum Fish {
     }
 }
 
-/// 充值 window body: the four packs, then 「自定义金额」 (whole euros €5 – €500) with a live "€X → Y 条小鱼干" preview.
+/// 充值 window body: the four packs, then 「自定义金额」 (whole euros €5 – €10,000) with a live "€X → Y 条小鱼干" preview.
 /// Typing an amount selects 自定义金额 by itself.
 private final class FishTopUpBox: NSObject, NSTextFieldDelegate {
-    let view = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 92))
-    let pop = NSPopUpButton(frame: NSRect(x: 0, y: 64, width: 300, height: 26), pullsDown: false)
-    let field = NSTextField(frame: NSRect(x: 132, y: 34, width: 80, height: 22))
+    let view = NSView(frame: NSRect(x: 0, y: 0, width: 480, height: 112))
+    let pop = NSPopUpButton(frame: NSRect(x: 0, y: 84, width: 460, height: 26), pullsDown: false)
+    let field = NSTextField(frame: NSRect(x: 132, y: 52, width: 100, height: 22))
     private let preview = NSTextField(labelWithString: "")
     private let customIndex: Int
 
@@ -334,12 +334,14 @@ private final class FishTopUpBox: NSObject, NSTextFieldDelegate {
         pop.action = #selector(popChanged)
 
         let label = NSTextField(labelWithString: L10n.t("自定义金额（€）"))
-        label.frame = NSRect(x: 0, y: 36, width: 128, height: 18)
-        field.placeholderString = "5 – 500"
+        label.frame = NSRect(x: 0, y: 54, width: 128, height: 18)
+        field.placeholderString = "5 – 10000"
         field.delegate = self
-        preview.frame = NSRect(x: 0, y: 6, width: 320, height: 18)
+        preview.frame = NSRect(x: 0, y: 4, width: 480, height: 40)
         preview.font = .systemFont(ofSize: 12)
-        preview.lineBreakMode = .byTruncatingTail
+        preview.lineBreakMode = .byWordWrapping
+        preview.maximumNumberOfLines = 2
+        preview.preferredMaxLayoutWidth = 480
         for v in [pop, label, field, preview] as [NSView] { view.addSubview(v) }
         update()
     }
@@ -362,7 +364,7 @@ private final class FishTopUpBox: NSObject, NSTextFieldDelegate {
             preview.stringValue = Fish.customPreview(text)
             preview.textColor = !text.isEmpty && Fish.customEur(text) == nil ? .systemRed : .labelColor
         } else {
-            preview.stringValue = L10n.t("自定义金额：€5 – €500 整数；满 €10 多送 5%，满 €30 多送 10%，满 €100 多送 15%")
+            preview.stringValue = L10n.t("自定义金额：€5 – €10,000 整数；满 €10 多送 5%，满 €30 多送 10%，满 €100 多送 15%")
             preview.textColor = .secondaryLabelColor
         }
     }
@@ -387,7 +389,7 @@ final class FishLedgerWindow: NSObject, NSTableViewDataSource, NSTableViewDelega
     private func build() {
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 440), styleMask: [.titled, .closable, .resizable],
                          backing: .buffered, defer: false)
-        w.title = "小鱼干流水"
+        w.title = "小鱼干充值记录"
         w.minSize = NSSize(width: 420, height: 300)
         w.isReleasedWhenClosed = false
         for (id, title, width) in [("time", "时间", 140.0), ("delta", "变动", 80.0), ("kind", "类型", 90.0), ("reason", "说明", 220.0)] {

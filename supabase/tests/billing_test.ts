@@ -656,16 +656,16 @@ Deno.test("cancel-contract: Kündigung sets cancel_at_period_end and mails a con
 import { customEur, fishForEur } from "../functions/_shared/fish.ts";
 
 Deno.test("fish: tier math (1 € = 100, ≥ €10 +5 %, ≥ €30 +10 %, ≥ €100 +15 %, floor) and validation", () => {
-  const want: [number, number][] = [[5, 500], [9, 900], [10, 1050], [29, 3045], [30, 3300], [99, 10890], [100, 11500], [500, 57500]];
+  const want: [number, number][] = [[5, 500], [9, 900], [10, 1050], [29, 3045], [30, 3300], [99, 10890], [100, 11500], [500, 57500], [10000, 1150000]];
   for (const [eur, fish] of want) assertEquals(fishForEur(eur), fish, `€${eur}`);
-  for (const bad of [4, 501, 7.5, "7.5", "abc", "", null, -10, 0]) assertEquals(customEur(bad), null, String(bad));
+  for (const bad of [4, 10001, 7.5, "7.5", "abc", "", null, -10, 0]) assertEquals(customEur(bad), null, String(bad));
   assertEquals(customEur(5), 5);
   assertEquals(customEur("500"), 500);
 });
 
 Deno.test("checkout: custom fish amount → price_data (VAT inclusive), fish computed on the server; bad amounts → 400", async () => {
   fresh();
-  for (const bad of [4, 501, 7.5, "7.5", "x"]) {
+  for (const bad of [4, 10001, 7.5, "7.5", "x"]) {
     const r = await call({ item: "fish", amount_eur: bad, fish: 999999 });
     assertEquals(r.status, 400, String(bad));
     assertEquals((await r.json()).reason, "bad_amount");
@@ -740,7 +740,7 @@ Deno.test("webhook: custom fish whose paid amount doesn't match → nothing cred
   const s = customSession("cs_test_custom00000002", { amount_total: 500 });
   assertEquals((await hook("checkout.session.completed", s)).status, 500);
   assert(!db.rpcCalls.some((c) => c.name === "fish_topup"));
-  const s2 = customSession("cs_test_custom00000003", { amount_total: 75000 }, { amount_eur: "750", cents: "75000" });   // out of range
+  const s2 = customSession("cs_test_custom00000003", { amount_total: 1500000 }, { amount_eur: "15000", cents: "1500000" });   // out of range
   assertEquals((await hook("checkout.session.completed", s2)).status, 500);
   assert(!db.rpcCalls.some((c) => c.name === "fish_topup"));
 });
