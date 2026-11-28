@@ -135,7 +135,8 @@
 </fieldset>
 <div class="hp" aria-hidden="true"><label>Website <input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
 <p class="err hidden" id="we"></p>
-<button type="submit" class="btnx" id="wgo">Widerruf bestätigen</button>
+<div id="wts" class="ts" style="margin:4px 0 8px;min-height:65px"></div>
+<button type="submit" class="btnx" id="wgo" disabled>Widerruf bestätigen</button>
 </form>
 </div>
 <div id="wok" class="okbox hidden">
@@ -154,10 +155,37 @@
 <footer><a href="./"><span class="zh">首页</span><span class="en">Home</span></a><a href="privacy.html"><span class="zh">隐私政策</span><span class="en">Privacy</span> · Datenschutz</a><a href="terms.html"><span class="zh">用户协议</span><span class="en">Terms</span> · Nutzungsbedingungen</a><a href="widerruf.html"><span class="zh">撤回说明</span><span class="en">Withdrawal</span> · Widerrufsbelehrung</a><a href="impressum.html">Impressum</a><br><a class="kb" href="kuendigen.html">Verträge hier kündigen</a><a class="kb" href="widerruf.html#widerrufen">Vertrag widerrufen</a></footer>
 </div>
 <script>
+// Cloudflare Turnstile (managed, site key public). Token goes to cancel-contract as "turnstile_token"; one token = one submit.
+function ocTurnstile(boxId, btnId, errId, onToken){
+  var tok='', wid=null, btn=document.getElementById(btnId), err=document.getElementById(errId);
+  function z(){ return window.ocLang && ocLang()==='zh'; }
+  var M={missing:['请先完成人机验证。','Bitte zuerst die Verifizierung abschließen. / Please complete the verification.'],
+         invalid:['人机验证没有通过或已过期，请重新验证后再提交。','Die Verifizierung ist fehlgeschlagen oder abgelaufen – bitte erneut verifizieren. / The verification failed or expired, please verify again.'],
+         unavailable:['人机验证暂时不可用，请稍后再试。','Die Verifizierung ist gerade nicht erreichbar – bitte erneut versuchen. / Verification is temporarily unavailable, please try again.'],
+         load:['人机验证没能加载。请刷新页面，或发邮件到 support@ordcat.de。','Die Verifizierung konnte nicht geladen werden. Bitte Seite neu laden oder per E-Mail an support@ordcat.de. / The verification could not load. Please reload or email support@ordcat.de.']};
+  function msg(k){ return (M[k]||M.invalid)[z()?0:1]; }
+  function sync(){ btn.disabled=!tok; }
+  function show(k){ err.textContent=msg(k); err.classList.remove('hidden'); }
+  function theme(){ var d=document.documentElement, p=d.getAttribute('data-theme-pref'); return p==='light'||p==='dark' ? p : 'auto'; }
+  sync();
+  return {
+    render:function(){ if(!window.turnstile) return;
+      wid=turnstile.render('#'+boxId,{sitekey:'0x4AAAAAAGVfW4wLjDmmWUlK',theme:theme(),language:'auto',
+        callback:function(t){ tok=t; sync(); if(err.getAttribute('data-ts')){ err.classList.add('hidden'); err.removeAttribute('data-ts'); } if(onToken) onToken(); },
+        'expired-callback':function(){ tok=''; sync(); },
+        'error-callback':function(){ tok=''; sync(); }}); },
+    token:function(){ return tok; },
+    reset:function(){ tok=''; sync(); if(window.turnstile && wid!==null){ try{ turnstile.reset(wid); }catch(_){} } },
+    fail:function(k){ show(k); err.setAttribute('data-ts','1'); },
+    msg:msg
+  };
+}
 // Supabase URL from config/remote.json (account.supabaseURL) + /functions/v1/cancel-contract. No key needed (--no-verify-jwt).
 var FN = "https://edmfdczdadfaafwkhohj.supabase.co/functions/v1/cancel-contract";
 (function(){
 var w=document.getElementById('w'), $=function(id){return document.getElementById(id)};
+var TS=ocTurnstile('wts','wgo','we');
+window.ocTsReady=TS.render; window.ocTsLoadFail=function(){ TS.fail('load'); };
 function zh(){ return window.ocLang && ocLang()==='zh'; }
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function fmt(d,tz){return new Intl.DateTimeFormat('de-DE',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZoneName:'short'}).format(d)}
@@ -167,25 +195,27 @@ function rows(d,r){ var L=[["Erklärung","Widerruf des Vertrags"],["Name",d.name
   if(r){ var at=new Date(r.received_at); L.push(["Eingang (Datum und Uhrzeit)",fmt(at,'Europe/Berlin')+' (Europe/Berlin) · '+fmt(at,'UTC')],["Vorgangsnummer",r.id]); }
   return L; }
 w.addEventListener('submit',function(ev){ ev.preventDefault();
-  var d={action:'withdraw',name:$('wname').value.trim(),email:$('wemail').value.trim(),contract:$('wcontract').value,note:$('wnote').value.trim(),lang:(window.ocLang?ocLang():'zh'),website:w.website.value}, e=[];
+  var d={action:'withdraw',name:$('wname').value.trim(),email:$('wemail').value.trim(),contract:$('wcontract').value,note:$('wnote').value.trim(),lang:(window.ocLang?ocLang():'zh'),website:w.website.value,turnstile_token:TS.token()}, e=[];
   if(!d.name) e.push(zh()?'请填写姓名。':'Bitte Namen angeben. / Please enter your name.');
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(d.email)) e.push(zh()?'请填写正确的邮箱。':'Bitte eine gültige E-Mail-Adresse angeben. / Please enter a valid email.');
   if(!d.contract) e.push(zh()?'请选择合同。':'Bitte den Vertrag wählen. / Please choose the contract.');
   if(e.length){ $('we').textContent=e.join(' '); $('we').classList.remove('hidden'); return; }
-  $('we').classList.add('hidden'); $('wgo').disabled=true;
+  if(!d.turnstile_token){ TS.fail('missing'); return; }
+  $('we').classList.add('hidden'); $('we').removeAttribute('data-ts'); $('wgo').disabled=true;
   fetch(FN,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})
   .then(function(r){return r.json()})
-  .then(function(j){ $('wgo').disabled=false; if(!j||!j.ok) throw new Error('x');
+  .then(function(j){ TS.reset(); if(j && j.error==='turnstile'){ TS.fail(j.reason); return; } if(!j||!j.ok) throw new Error('x');
     $('wokt').innerHTML=rows(d,j).map(function(x){return '<tr><th>'+esc(x[0])+'</th><td>'+esc(x[1])+'</td></tr>'}).join('');
     $('wokmail').innerHTML = j.email_sent
       ? 'Eine Eingangsbestätigung haben wir an <b>'+esc(d.email)+'</b> gesendet.<br><span class="zh">收到确认已发到 '+esc(d.email)+'。</span><span class="en">We sent an acknowledgement to '+esc(d.email)+'.</span>'
       : 'Ihr Widerruf ist eingegangen. Bitte speichern oder drucken Sie diese Bestätigung.<br><span class="zh">撤回申请已收到，请保存或打印这页确认。</span><span class="en">Your withdrawal has been received. Please save or print this confirmation.</span>';
     $('wWrap').classList.add('hidden'); $('wok').classList.remove('hidden'); $('wok').scrollIntoView();
-  }).catch(function(){ $('wgo').disabled=false;
+  }).catch(function(){ TS.reset();
     var txt='Widerruf\n\n'+rows(d).map(function(x){return x[0]+': '+x[1]}).join('\n')+'\nDatum: '+fmt(new Date(),'Europe/Berlin')+'\n';
     $('wfailtext').textContent=txt; $('wmailto').href='mailto:support@ordcat.de?subject='+encodeURIComponent('Widerruf')+'&body='+encodeURIComponent(txt);
     $('wWrap').classList.add('hidden'); $('wfail').classList.remove('hidden'); $('wfail').scrollIntoView(); });
 });
 })();
 </script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=ocTsReady" async defer onerror="ocTsLoadFail()"></script>
 </body></html>

@@ -48,7 +48,8 @@
 
 <div class="hp" aria-hidden="true"><label>Website <input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
 <p class="err hidden" id="fe"></p>
-<button type="submit" class="btnx" id="go">jetzt kündigen</button>
+<div id="ts" class="ts" style="margin:4px 0 8px;min-height:65px"></div>
+<button type="submit" class="btnx" id="go" disabled>jetzt kündigen</button>
 <p style="font-size:13px;margin-top:0">Mit Klick auf „jetzt kündigen“ wird Ihre Kündigung verbindlich übermittelt.<br><span class="zh">点「jetzt kündigen」（立即取消）即正式提交。</span><span class="en">Clicking “jetzt kündigen” (cancel now) submits your cancellation.</span></p>
 </form>
 <p style="font-size:13px">Kein Widerruf: Wenn Sie innerhalb von 14 Tagen nach Vertragsschluss widerrufen möchten, nutzen Sie bitte <a href="widerruf.html#widerrufen">Vertrag widerrufen</a>.<br><span class="zh">这是取消，不是撤回。购买后 14 天内想撤回合同，请用「Vertrag widerrufen」（撤回合同）。</span><span class="en">This is cancellation, not withdrawal. To withdraw within 14 days of purchase, use “Vertrag widerrufen” (withdraw contract).</span></p>
@@ -71,16 +72,44 @@
 <footer><a href="./"><span class="zh">首页</span><span class="en">Home</span></a><a href="privacy.html"><span class="zh">隐私政策</span><span class="en">Privacy</span> · Datenschutz</a><a href="terms.html"><span class="zh">用户协议</span><span class="en">Terms</span> · Nutzungsbedingungen</a><a href="widerruf.html"><span class="zh">撤回说明</span><span class="en">Withdrawal</span> · Widerrufsbelehrung</a><a href="impressum.html">Impressum</a><br><a class="kb" href="kuendigen.html">Verträge hier kündigen</a><a class="kb" href="widerruf.html#widerrufen">Vertrag widerrufen</a></footer>
 </div>
 <script>
+// Cloudflare Turnstile (managed, site key public). Token goes to cancel-contract as "turnstile_token"; one token = one submit.
+function ocTurnstile(boxId, btnId, errId, onToken){
+  var tok='', wid=null, btn=document.getElementById(btnId), err=document.getElementById(errId);
+  function z(){ return window.ocLang && ocLang()==='zh'; }
+  var M={missing:['请先完成人机验证。','Bitte zuerst die Verifizierung abschließen. / Please complete the verification.'],
+         invalid:['人机验证没有通过或已过期，请重新验证后再提交。','Die Verifizierung ist fehlgeschlagen oder abgelaufen – bitte erneut verifizieren. / The verification failed or expired, please verify again.'],
+         unavailable:['人机验证暂时不可用，请稍后再试。','Die Verifizierung ist gerade nicht erreichbar – bitte erneut versuchen. / Verification is temporarily unavailable, please try again.'],
+         load:['人机验证没能加载。请刷新页面，或发邮件到 support@ordcat.de。','Die Verifizierung konnte nicht geladen werden. Bitte Seite neu laden oder per E-Mail an support@ordcat.de. / The verification could not load. Please reload or email support@ordcat.de.']};
+  function msg(k){ return (M[k]||M.invalid)[z()?0:1]; }
+  function sync(){ btn.disabled=!tok; }
+  function show(k){ err.textContent=msg(k); err.classList.remove('hidden'); }
+  function theme(){ var d=document.documentElement, p=d.getAttribute('data-theme-pref'); return p==='light'||p==='dark' ? p : 'auto'; }
+  sync();
+  return {
+    render:function(){ if(!window.turnstile) return;
+      wid=turnstile.render('#'+boxId,{sitekey:'0x4AAAAAAGVfW4wLjDmmWUlK',theme:theme(),language:'auto',
+        callback:function(t){ tok=t; sync(); if(err.getAttribute('data-ts')){ err.classList.add('hidden'); err.removeAttribute('data-ts'); } if(onToken) onToken(); },
+        'expired-callback':function(){ tok=''; sync(); },
+        'error-callback':function(){ tok=''; sync(); }}); },
+    token:function(){ return tok; },
+    reset:function(){ tok=''; sync(); if(window.turnstile && wid!==null){ try{ turnstile.reset(wid); }catch(_){} } },
+    fail:function(k){ show(k); err.setAttribute('data-ts','1'); },
+    msg:msg
+  };
+}
 // Supabase URL from config/remote.json (account.supabaseURL) + /functions/v1/cancel-contract. No key needed (--no-verify-jwt).
 var FN = "https://edmfdczdadfaafwkhohj.supabase.co/functions/v1/cancel-contract";
 var NAMES = {pro:"Pro (Mitgliedschaft)",max:"Max (Mitgliedschaft)",x:"X Companion (Skill)",agent:"Mac Agent (Skill)",miao:"Live Subtitles (Skill)",all:"Alle Verträge"};
 var f = document.getElementById('f'), $ = function(id){return document.getElementById(id)};
+var TS = ocTurnstile('ts','go','fe');
+window.ocTsReady = TS.render; window.ocTsLoadFail = function(){ TS.fail('load'); };
 function val(n){var e=f.querySelector('[name='+n+']:checked');return e?e.value:''}
 function sync(){ $('reasonBox').classList.toggle('hidden', val('kind')!=='extraordinary'); $('date').classList.toggle('hidden', val('when')!=='date'); }
 f.addEventListener('change', sync);
 var t=new Date(); $('date').min = t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');
 function data(){ return { action:'cancel', kind:val('kind'), reason:val('kind')==='extraordinary'?$('reason').value.trim():'', email:$('email').value.trim(),
-  contract:$('contract').value, date: val('when')==='date' ? $('date').value : null, lang:(window.ocLang?ocLang():'zh'), website:f.website.value }; }
+  contract:$('contract').value, date: val('when')==='date' ? $('date').value : null, lang:(window.ocLang?ocLang():'zh'), website:f.website.value,
+  turnstile_token:TS.token() }; }
 function zh(){ return window.ocLang && ocLang()==='zh'; }
 function rows(d, r){
   var L=[["Art der Kündigung", d.kind==='extraordinary'?'außerordentliche Kündigung':'ordentliche Kündigung']];
@@ -94,23 +123,25 @@ function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp
 function fmt(d,tz){return new Intl.DateTimeFormat('de-DE',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZoneName:'short'}).format(d)}
 var last=null;
 f.addEventListener('submit', function(ev){ ev.preventDefault(); send(); });
-function retry(){ $('fail').classList.add('hidden'); $('formWrap').classList.remove('hidden'); send(); }
+function retry(){ $('fail').classList.add('hidden'); $('formWrap').classList.remove('hidden'); if(TS.token()) send(); else TS.fail('missing'); }
 function send(){
   var d=data(), e=[];
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(d.email)) e.push(zh()?'请填写正确的邮箱。':'Bitte eine gültige E-Mail-Adresse angeben. / Please enter a valid email.');
   if(d.kind==='extraordinary' && !d.reason) e.push(zh()?'特别解约请写明理由。':'Bitte den Kündigungsgrund angeben. / Please state the reason.');
   if(val('when')==='date' && !d.date) e.push(zh()?'请选择日期。':'Bitte ein Datum wählen. / Please pick a date.');
   if(e.length){ $('fe').textContent=e.join(' '); $('fe').classList.remove('hidden'); return; }
-  $('fe').classList.add('hidden'); $('go').disabled=true;
+  if(!d.turnstile_token){ TS.fail('missing'); return; }
+  $('fe').classList.add('hidden'); $('fe').removeAttribute('data-ts'); $('go').disabled=true;
   fetch(FN,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})
   .then(function(r){ return r.json().then(function(j){ return {s:r.status,j:j}; }); })
   .then(function(x){
-    $('go').disabled=false;
+    TS.reset();
+    if(x.s===400 && x.j && x.j.error==='turnstile'){ TS.fail(x.j.reason); return; }
     if(x.s===400 && x.j && x.j.error==='invalid'){ $('fe').textContent=(zh()?'请检查：':'Bitte prüfen / please check: ')+(x.j.fields||[]).join(', '); $('fe').classList.remove('hidden'); return; }
     if(!x.j || !x.j.ok) throw new Error(x.j && x.j.error || 'error');
     var at=new Date(x.j.received_at); x.j.received_berlin_de=fmt(at,'Europe/Berlin'); x.j.received_utc_de=fmt(at,'UTC');
     done(d,x.j);
-  }).catch(function(){ $('go').disabled=false; failed(d); });
+  }).catch(function(){ TS.reset(); failed(d); });
 }
 function done(d,r){
   last={d:d,r:r};
@@ -130,4 +161,5 @@ $('dl').onclick=function(){ if(!last)return;
   var txt='OrdCat – Eingangsbestätigung Ihrer Kündigung\n\n'+rows(last.d,last.r).map(function(x){return x[0]+': '+x[1]}).join('\n')+'\n\nAxun Conor · Hedemannstraße 74 · 78355 Hohenfels · support@ordcat.de\n';
   var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([txt],{type:'text/plain;charset=utf-8'})); a.download='OrdCat-Kuendigung-'+last.r.id.slice(0,8)+'.txt'; a.click(); };
 </script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=ocTsReady" async defer onerror="ocTsLoadFail()"></script>
 </body></html>
